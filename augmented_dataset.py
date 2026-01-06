@@ -1,0 +1,238 @@
+"""
+Enhanced Dataset with Albumentations augmentation for CellSAM training.
+Significantly increases effective training samples through geometric and intensity transforms.
+"""
+
+import os
+import numpy as np
+import torch
+from torch.utils.data import Dataset
+from pathlib import Path
+from typing import Dict, List, Tuple
+from skimage import transform, measure
+
+try:
+    import albumentations as A
+    from albumentations.pytorch import ToTensorV2
+    HAS_ALBUMENTATIONS = True
+except ImportError:
+    HAS_ALBUMENTATIONS = False
+    print("Warning: albumentations not installed. Using basic transforms.")
+
+
+def get_train_transforms(target_size=(1024, 1024)):
+    """Get training augmentation transforms."""
+    if not HAS_ALBUMENTATIONS:
+        return None
+    
+    return A.Compose([
+        # Geometric transforms
+        A.RandomRotate90(p=0.5),
+        A.HorizontalFlip(p=0.5),
+        A.VerticalFlip(p=0.5),
+        A.ShiftScaleRotate(
+            shift_limit=0.1,
+            scale_limit=0.2,
+            rotate_limit=45,
+            border_mode=0,
+            p=0.5
+        ),
+        A.ElasticTransform(
+            alpha=120,
+            sigma=12,
+            p=0.3
+        ),
+        
+        # Intensity transforms
+        A.RandomBrightnessContrast(
+            brightness_limit=0.2,
+            contrast_limit=0.2,
+            p=0.5
+        ),
+        A.GaussNoise(var_limit=(10, 50), p=0.3),
+        A.GaussianBlur(blur_limit=(3, 5), p=0.2),
+        
+        # Resize to target size
+        A.Resize(height=target_size[0], width=target_size[1]),
+    ])
+
+
+def get_val_transforms(target_size=(1024, 1024)):
+    """Get validation transforms (no augmentation)."""
+    if not HAS_ALBUMENTATIONS:
+        return None
+    
+    return A.Compose([
+        A.Resize(height=target_size[0], width=target_size[1]),
+    ])
+
+
+class AugmentedAllenDataset(Dataset):
+    """
+    Augmented dataset for CellSAM training with Albumentations.
+    """
+    
+    def __init__(
+        self,
+        data_dir: str,
+        target_size: Tuple[int, int] = (1024, 1024),
+        is_training: bool = True,
+        max_boxes_per_image: int = 50
+    ):
+        self.data_dir = Path(data_dir)
+        self.target_size = target_size
+        self.max_boxes = max_boxes_per_image
+        
+        self.image_dir = self.data_dir / "images"
+        self.mask_dir = self.data_dir / "masks"
+        
+        # Setup transforms
+        if is_training:
+            self.transform = get_train_transforms(target_size)
+        else:
+            self.transform = get_val_transforms(target_size)
+        
+        # Find all samples
+        self.samples = []
+        for image_path in self.image_dir.glob("*.npy"):
+            sample_id = image_path.stem
+            mask_path = self.mask_dir / f"{sample_id}.npy"
+            
+            if mask_path.exists():
+                self.samples.append({
+                    "sample_id": sample_id,
+                    "image_path": str(image_path),
+                    "mask_path": str(mask_path)
+                })
+        
+        print(f"Loaded {len(self.samples)} samples (training={is_training})")
+    
+    def __len__(self) -> int:
+        return len(self.samples)
+    
+    def _normalize_image(self, img: np.ndarray) -> np.ndarray:
+        """Percentile normalization."""
+        img = img.astype(np.float32)
+        
+        if img.max() > 1:
+            img = img / 255.0
+        
+        p_low, p_high = np.percentile(img, [1, 99])
+        img = np.clip(img, p_low, p_high)
+        img = (img - p_low) / (p_high - p_low + 1e-8)
+        
+        return img.astype(np.float32)
+    
+    def _mask_to_boxes(self, mask: np.ndarray) -> List[List[float]]:
+        """Extract bounding boxes from instance mask."""
+        boxes = []
+        
+        for region in measure.regionprops(mask.astype(np.int32)):
+            y1, x1, y2, x2 = region.bbox
+            pad = 5
+            x1 = max(0, x1 - pad)
+            y1 = max(0, y1 - pad)
+            x2 = min(mask.shape[1], x2 + pad)
+            y2 = min(mask.shape[0], y2 + pad)
+            boxes.append([x1, y1, x2, y2])
+        
+        return boxes[:self.max_boxes]
+    
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        sample = self.samples[idx]
+        
+        # Load data
+        image = np.load(sample['image_path'])
+        mask = np.load(sample['mask_path'])
+        
+        # Apply augmentation
+        if self.transform is not None:
+            # Albumentations expects uint8 or float32
+            if image.max() > 1:
+                image = image.astype(np.uint8)
+            
+            augmented = self.transform(image=image, mask=mask)
+            image = augmented['image']
+            mask = augmented['mask']
+        else:
+            # Manual resize if no albumentations
+            if image.shape[:2] != self.target_size:
+                image = transform.resize(image, self.target_size, preserve_range=True)
+                mask = transform.resize(mask, self.target_size, order=0, preserve_range=True)
+        
+        # Normalize
+        image = self._normalize_image(image)
+        
+        # Convert to RGB
+        if image.ndim == 2:
+            image = np.stack([image, image, image], axis=0)
+        elif image.ndim == 3 and image.shape[-1] == 3:
+            image = image.transpose(2, 0, 1)
+        else:
+            image = np.stack([image, image, image], axis=0)
+        
+        # Generate boxes
+        boxes = self._mask_to_boxes(mask.astype(np.int32))
+        boxes_tensor = torch.tensor(boxes, dtype=torch.float32) if boxes else torch.zeros((0, 4))
+        
+        return {
+            'image': torch.from_numpy(image).float(),
+            'boxes': boxes_tensor,
+            'mask': torch.from_numpy(mask.astype(np.int64)).long(),
+            'sample_id': sample['sample_id'],
+            'num_boxes': len(boxes)
+        }
+
+
+def collate_fn(batch: List[Dict]) -> Dict[str, torch.Tensor]:
+    """Custom collate function."""
+    images = torch.stack([item['image'] for item in batch])
+    masks = torch.stack([item['mask'] for item in batch])
+    
+    max_boxes = max(item['num_boxes'] for item in batch) if batch else 0
+    max_boxes = max(max_boxes, 1)
+    
+    padded_boxes = []
+    box_counts = []
+    
+    for item in batch:
+        boxes = item['boxes']
+        num_boxes = boxes.shape[0]
+        box_counts.append(num_boxes)
+        
+        if num_boxes < max_boxes:
+            padding = torch.zeros((max_boxes - num_boxes, 4))
+            boxes = torch.cat([boxes, padding], dim=0)
+        
+        padded_boxes.append(boxes)
+    
+    return {
+        'image': images,
+        'boxes': torch.stack(padded_boxes),
+        'box_counts': torch.tensor(box_counts),
+        'mask': masks,
+        'sample_ids': [item['sample_id'] for item in batch]
+    }
+
+
+if __name__ == "__main__":
+    # Test
+    data_dir = "d:/AI/paper/CellSam/training_pairs_expanded"
+    
+    print("Testing augmented dataset...")
+    dataset = AugmentedAllenDataset(data_dir, is_training=True)
+    
+    if len(dataset) > 0:
+        sample = dataset[0]
+        print(f"\nSample: {sample['sample_id']}")
+        print(f"Image: {sample['image'].shape}")
+        print(f"Mask: {sample['mask'].shape}")
+        print(f"Boxes: {sample['boxes'].shape}")
+        print(f"Cells: {sample['num_boxes']}")
+        
+        # Test dataloader
+        from torch.utils.data import DataLoader
+        loader = DataLoader(dataset, batch_size=2, collate_fn=collate_fn)
+        batch = next(iter(loader))
+        print(f"\nBatch test: images={batch['image'].shape}, masks={batch['mask'].shape}")
+        print("✅ Augmented dataset working!")
