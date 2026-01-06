@@ -5,6 +5,13 @@ allen_data/
 allen_processed/
 allen_raw_fov/
 sample_data/
+data/
+
+# Model Checkpoints and Training Outputs
+checkpoints/
+*.pth
+*.ckpt
+*.safetensors
 
 # Python
 __pycache__/
@@ -23,3 +30,22 @@ venv/
 # IDE
 .vscode/
 .idea/
+
+# Temporary and Cache Files
+.agent/
+.claude/
+*.tmp
+*.log
+
+# Sensitive Files
+token.txt
+*.key
+credentials*.json
+
+# Large PDFs and Documentation (optional - uncomment if needed)
+# *.pdf
+
+# OS Files
+.DS_Store
+Thumbs.db
+desktop.ini
