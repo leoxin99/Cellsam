@@ -1,115 +1,74 @@
-# CellSAM 项目交接汇总 (Project Handoff Summary)
+# 项目交接与下一步工作指南 (Project Handoff & Next Steps)
 
-**最后更新时间**: 2026-01-07
-**项目目标**: 实现 Allen hiPSC-CM 心肌细胞的全自动、高精度分割。
-
----
-
-## 1. 项目核心架构
-
-### 1.1 模型架构 (CellSAM)
-我们采用 **解耦 (Decoupled)** 的训练与推理策略：
-
-*   **Image Encoder (ViT-H)**: ❄️ **冻结**。利用 SA-1B 预训练权重提取通用视觉特征。
-*   **Prompt Encoder**: ❄️ **冻结**。负责将边界框编码为位置提示。
-*   **Mask Decoder**: 🔥 **训练**。这是唯一微调的组件，学习心肌细胞的特殊纹理和边界特征。
-*   **CellFinder**: ❄️ **冻结**。预训练的细胞检测头，用于推理阶段自动生成提示框。
-
-### 1.2 训练策略 (Training Strategy)
-*   **输入**: 图像 + **GT 边界框** (从标注掩膜动态生成)。
-*   **逻辑**: "提示工程"训练。告诉模型"这里肯定有细胞"，强迫它学习分割边界。
-*   **为何不用 CellFinder 训练?**: 避免检测器的噪声干扰分割器的训练。
-*   **为何不用 DAPI 训练?**: 心肌细胞尺寸大且常双核，DAPI 只能定位核，无法代表细胞体。
-
-### 1.3 推理策略 (Inference Strategy)
-*   **全自动流程**: 输入未见过的明场图像 → **CellFinder** 自动检测所有细胞框 → **Mask Decoder** 精细分割每个框 → 合并输出。
-*   **兜底方案**: 若 CellFinder 效果不佳，可使用传统图像处理生成框，或人工少许点提示。
+> **致下一位 AI 助手**:
+> 本文档定义了 CellSAM 项目在进入"论文完善阶段"的关键任务。
+> **核心目标**: 确保实验的严谨性、可复现性，并与之前的开发思路（Opus 模型设定）保持对齐。
+> 当前状态: 基本管线已跑通 (Detection F1=0.75, Segmentation Dice=0.82, PQ@0.5=0.087)。
 
 ---
 
-## 2. 当前项目状态
+## 📅 核心任务清单 (Priority Tasks)
 
-### 2.1 目录结构 (`d:\AI\paper\CellSam`)
-```text
-CellSam/
-├── .agent/                     # 工作流配置
-├── .claude/                    # Claude Code 配置
-├── .git/
-├── .gitignore
-├── PROJECT_HANDOFF_SUMMARY.md  # 核心交接文档
-├── token.txt                   # API Token
-│
-├── src/                        # 核心代码模块
-│   └── augmented_dataset.py    # 增强数据集类
-│
-├── data/                       # 数据文件夹
-│   ├── raw/allen_segmented_fields_full/  # 478 张原始 TIFF
-│   ├── processed/              # (待生成) 训练用 NPY
-│   ├── scripts/
-│   │   ├── download_full_segmented.py
-│   │   └── extract_expanded_pairs.py
-│   └── manifest.csv
-│
-├── tools/                      # 工具脚本
-│   ├── view_annotation_tiff.py
-│   ├── view_test_results.py
-│   └── view_with_cellsam.py
-│
-├── docs/                       # 文档
-│   ├── CellSAM_run_tutorial.md
-│   └── foundation-SAM.pdf
-│
-├── checkpoints/                # 模型权重
-├── cellSAM_source/             # CellSAM 框架
-│
-├── train_expanded.py           # 主训练入口
-├── test_model.py               # 测试入口
-└── run_cellsam.py              # 推理入口
-```
+### 1. 数据集标准化 (Dataset Standardization)
+**现状**:之前实验可能采用了随机划分，导致不同实验间的可比性受限。
+**任务**: 
+- [ ] **固定划分**: 将所有 Annotated TIFF 样本显式划分为 `Train` (70%), `Val` (15%), `Test` (15%)。
+- [ ] **固化文件**: 创建 `data/splits/train_ids.txt`, `val_ids.txt`, `test_ids.txt`。
+- [ ] **强制执行**: 修改 `augmented_dataset.py` 和训练脚本，强制读取这些 ID 列表，而不是运行时随机划分。
+- **目的**: 确保 Model A 和 Model B 的对比是"苹果对苹果"的，消除数据划分带来的随机性。
 
-### 2.2 数据集
-*   **来源**: Allen Institute `2d_segmented_fields`
-*   **总量**: 478 张 (10通道 TIFF)
-*   **通道**: Ch0=明场 (Input), Ch9=实例分割掩膜 (GT)
-*   **预处理**: 百分位归一化 + Padding (保持长宽比) + Resize to 1024x1024
+### 2. 训练规模与数据探索 (Scale Exploration)
+**现状**: 当前使用 ~50 张图像，训练 20 Epochs。
+**任务**:
+- [ ] **数据量分析**: 绘制 `Training Loss` 和 `Val Dice` 曲线，判断是否过拟合或欠拟合。
+- [ ] **轮次增加**: 尝试增加 Epochs (如 50, 100) 观察性能边界。
+- [ ] **数据增强**: 评估当前增强策略是否足够，考虑增加 brightness/contrast 增强以适应不同批次数据。
 
----
+### 3. 损失函数深度优化 (Loss Function Optimization)
+**现状**: 刚引入 `Boundary Loss (0.3)`，PQ 提升显著。
+**任务**:
+- [ ] **理论分析**: 在 `methods_draft.md` 中详细阐述 Boundary Loss 对 CellSAM 的意义（解决 touching cells 分割难题）。
+- [ ] **权重消融**: 尝试不同的 boundary_weight (0.1, 0.3, 0.5, 0.7) 寻找最优解。
+- [ ] **新损失探索**: 考虑引入 `Hausdorff Loss` 或 `Lovasz-Softmax Loss` 进一步优化拓扑结构。
 
-## 3. 详细实施细节
+### 4. 生物学先验集成 (Biological Priors / SarcGraph)
+**现状**: 目前仅利用 DAPI (核) 和 Brightfield (形态)。
+**任务**:
+- [ ] **Actn2 引导**: Actn2 通道 (Channel 1) 的高亮区域对应肌节。
+- [ ] **边界假设**: 肌节的不连续处往往是细胞边界。
+- [ ] **实现方案**: 将 Actn2 信号作为额外的 Prompt 输入 SAM，或作为后处理的约束条件。
+- **参考**: SarcGraph 论文中的 z-disk 检测算法。
 
-### 3.1 训练配置
-*   **Loss Function**: Per-cell Dice + BCE (每个细胞单独计算损失)
-*   **Optimizer**: AdamW, LR=1e-4, Weight Decay=0.01
-*   **Augmentation**: Albumentations (RandomRotate90, Flip, ElasticTransform, BrightnessContrast)
-*   **Epochs**: 50 (计划)
-*   **关键改进**: 使用 `cell_ids` 将每个预测掩膜与其对应的 GT 细胞区域匹配，而非合并后比较
+### 5. 基准模型对比 (Benchmarking Guidelines)
+**现状**: 缺乏系统性的 SOTA 对比。
+**任务**: 建立以下 Benchmark 表格：
+| 模型 (Model) | 预训练 (Pretrain) | 微调 (Finetune) | 备注 |
+|-------------|-------------------|----------------|------|
+| **DeepLabV3+** | ImageNet | Allen Data | Allen 实验室原始方案 (Baseline) |
+| **CellFinder** | - | - | 传统方法 (已证明失败, F1=0.01) |
+| **CellSAM (Ours)** | SAM-B | Mask Decoder | 当前方案 |
+| **CF + SAM** | SAM-B | CellFinder detection + SAM | 验证检测器影响 |
+| **Fully Fine-tuned** | SAM-B | Image Encoder + Decoder | 验证全量微调是否更好 |
+| **Cellpose / StarDist** | General | Allen Data | 强力竞品对比 |
 
-### 3.2 评估指标体系
-1.  **像素级 (Pixel-level)**: Dice Score, IoU (衡量整体前景重叠)
-2.  **实例级 (Instance-level)**: 
-    *   **Precision/Recall/F1**: 衡量检测准确度 (IoU > 0.5 视为 TP)
-    *   **Instance Dice**: 衡量单个细胞的分割质量
+### 6. 代码库优化 (Code Simplification via Claude)
+**现状**: 经过多轮快速迭代，存在冗余代码 (如 `train_simple.py`, `train_expanded.py` 并存)。
+**任务**:
+- [ ] **Code Simplifier**: 调用 Claude 的代码优化能力，重构项目结构。
+- [ ] **目标**: 
+    - 统一为一个 `train.py` (支持 config 参数切换模式)。
+    - 将散落在 `anti_test` 中的实用函数移入 `src/utils`。
+    - 清理未使用的 import 和死代码。
+
+### 7. 对比与消融实验设计 (Ablation Study)
+**任务**: 设计严谨的消融实验矩阵：
+- **Ablation 1 (Prompt)**: Box (DAPI) vs Box (CellFinder) vs Points.
+- **Ablation 2 (Loss)**: CE vs Dice vs Boundary vs Combined.
+- **Ablation 3 (Components)**: 验证后处理 (Closing/FillHoles) 的贡献。
 
 ---
 
-## 4. 后续步骤 (Action Plan)
-
-接下来的工作流建议：
-
-1.  **数据提取**: 运行脚本处理 `data/raw` 下的 478 张图像，生成训练对到 `data/processed`。
-2.  **代码更新**: 修改 `train_expanded.py` 以适配新的数据路径和实例级评估代码。
-3.  **全面训练**: 在完整数据集上运行 50 Epochs。
-4.  **端到端测试**: 使用 `run_cellsam.py` 测试新图像的自动化分割效果。
-
----
-
-## 5. 常见问题 (FAQ)
-
-*   **Q: 如何处理 CellFinder 漏检?**
-    *   A: 可以在预处理阶段加入传统形态学检测作为辅助提示，或者微调检测头(Tier 2方案)。
-*   **Q: 为什么不用 LoRA?**
-    *   A: 当前阶段 Mask Decoder 微调已足够有效且高效。LoRA 可作为后期提升手段。
-*   **Q: GT 框是怎么来的?**
-    *   A: `skimage.measure.regionprops(mask).bbox`
-
-此文件旨在帮助 Claude Code 或其他协作者快速接手项目。
+## 🛠️ 下一步行动建议
+1.  优先执行 **Task 1 (数据集标准化)**，这是所有后续对比的基石。
+2.  执行 **Task 6 (代码清理)**，为大规模实验做准备。
+3.  按顺序执行 **Task 5 (基准对比)**，补充论文所需的表格数据。
