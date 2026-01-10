@@ -19,10 +19,10 @@
 ### 关键指标
 | 指标 | 当前值 | 目标值 | 状态 |
 |-----|-------|-------|------|
-| Val Dice Score | 0.52 | 0.85+ | 🟡 进行中 |
-| 单样本 Dice | 0.44 | 0.75+ | 🟡 进行中 |
-| 训练样本 | 50 | 478 | 🟡 待扩展 |
-| 训练 Epochs | 15 | 50 | 🟡 进行中 |
+| **Detection F1** | **0.750** | 0.85+ | ✅ 良好 |
+| **Segmentation Dice** | **0.822** | 0.85+ | ✅ 优秀 |
+| **PQ@0.5** | **0.087** | 0.5+ | 🔄 改进中 |
+| **下一步** | [handoff_20260111.md](handoff_20260111.md) | - | 📋 交接协议 |
 | Instance F1 | - | 0.80+ | ⏳ 待测试 |
 
 ### 最新检查点
@@ -200,7 +200,10 @@ for prop in props:
 ```
 
 **论文表述建议**:
-> "We adopt a decoupled training strategy where the mask decoder is trained using ground truth bounding boxes extracted from instance masks via connected component analysis. This approach allows the model to focus exclusively on learning accurate segmentation boundaries without being affected by detection noise. At inference time, we employ a pre-trained CellFinder detector for automatic cell localization. We deliberately avoid using DAPI-derived boxes during training, as cardiomyocytes are significantly larger than their nuclei (area ratio ~30:1) and often contain multiple nuclei per cell, making nuclear localization insufficient for defining cell boundaries."
+> "We adopt a decoupled training strategy where the mask decoder is trained using ground truth bounding boxes extracted from instance masks via connected component analysis. This approach allows the model to focus exclusively on- **Detection F1**: 0.750 (DAPI-based)
+- **Segmentation Dice**: 0.822 (Boundary-tuned)
+- **PQ@0.5**: 0.087 (Instance-level)
+- **Next Step**: See [handoff_20260111.md](handoff_20260111.md) for detailed Handoff Protocolmatic cell localization. We deliberately avoid using DAPI-derived boxes during training, as cardiomyocytes are significantly larger than their nuclei (area ratio ~30:1) and often contain multiple nuclei per cell, making nuclear localization insufficient for defining cell boundaries."
 
 ---
 
