@@ -16,8 +16,8 @@ from cellSAM import get_model
 
 
 # Configuration
-MODEL_PATH = "d:/AI/paper/CellSam/checkpoints/expanded_20260105_011745/best_model.pt"
-TEST_DIR = "d:/AI/paper/CellSam/training_pairs_expanded"
+MODEL_PATH = "d:/AI/paper/CellSam/checkpoints/expanded_20260107_233506/checkpoint_epoch10.pt"
+TEST_DIR = "d:/AI/paper/CellSam/data/processed"
 OUTPUT_DIR = "d:/AI/paper/CellSam/test_results"
 
 

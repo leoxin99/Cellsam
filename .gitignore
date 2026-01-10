@@ -1,4 +1,11 @@
-# Large Data Directories
+# ============================================
+# CellSAM Project .gitignore
+# For PUBLIC GitHub Repository
+# ============================================
+
+# ==========================================
+# LARGE DATA DIRECTORIES (Never upload)
+# ==========================================
 allen_brightfield/
 allen_brightfield_processed/
 allen_data/
@@ -6,46 +13,149 @@ allen_processed/
 allen_raw_fov/
 sample_data/
 data/
+training_pairs*/
 
-# Model Checkpoints and Training Outputs
+# ==========================================
+# EXPERIMENT OUTPUTS (Contains unpublished data)
+# ==========================================
+experiments/
+
+# ==========================================
+# MODEL CHECKPOINTS (Too large + licensing)
+# ==========================================
 checkpoints/
 *.pth
 *.ckpt
+*.pt
 *.safetensors
+*.bin
 
-# Python
+# ==========================================
+# INTERNAL DOCUMENTS (Not for public)
+# ==========================================
+# Progress reports (internal tracking)
+**/progress_report*.md
+**/PROGRESS_REPORT*.md
+**/implementation_plan.md
+**/task.md
+**/walkthrough.md
+
+# Personal notes and questions
+question/
+notes/
+*.docx
+*.doc
+
+# Auto-generated logs in test folders
+anti_test/*.txt
+anti_test/analysis_results/
+anti_test/*_results.txt
+
+# Draft documents before publication
+# Uncomment after paper is published:
+# anti_test/methods_draft.md
+# anti_test/results_summary.md
+
+# ==========================================
+# DEBUG AND TEMPORARY SCRIPTS
+# ==========================================
+debug_*.py
+test_*.py
+!test_full_pipeline.py
+!test_model.py
+
+# ==========================================
+# AGENT AND AI ARTIFACTS
+# ==========================================
+.claude/
+.agent/brain/
+# Note: .agent/workflows/ IS tracked (useful for collaboration)
+
+# ==========================================
+# PYTHON ARTIFACTS
+# ==========================================
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+
+# ==========================================
+# VIRTUAL ENVIRONMENTS
+# ==========================================
 env/
 venv/
 .env
 .venv
+ENV/
 
-# Jupyter Notebooks
-.ipynb_checkpoints
+# ==========================================
+# JUPYTER NOTEBOOKS
+# ==========================================
+.ipynb_checkpoints/
+*.ipynb
 
-# IDE
+# ==========================================
+# IDE AND EDITOR
+# ==========================================
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
-# Temporary and Cache Files
-.agent/
-.claude/
+# ==========================================
+# TEMPORARY AND CACHE FILES
+# ==========================================
 *.tmp
+*.temp
 *.log
+*.cache
+.cache/
 
-# Sensitive Files
+# ==========================================
+# SENSITIVE FILES (CRITICAL)
+# ==========================================
 token.txt
 *.key
+*.pem
 credentials*.json
+secrets*.json
+.env.local
+.env.*.local
 
-# Large PDFs and Documentation (optional - uncomment if needed)
-# *.pdf
-
-# OS Files
+# ==========================================
+# OS FILES
+# ==========================================
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 desktop.ini
+
+# ==========================================
+# LARGE BINARIES AND MEDIA
+# ==========================================
+*.tiff
+*.tif
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# PDF files (uncomment if needed)
+# *.pdf

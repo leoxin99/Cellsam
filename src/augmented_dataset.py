@@ -61,50 +61,84 @@ def get_val_transforms(target_size=(1024, 1024)):
     """Get validation transforms (no augmentation)."""
     if not HAS_ALBUMENTATIONS:
         return None
-    
+
     return A.Compose([
         A.Resize(height=target_size[0], width=target_size[1]),
     ])
 
 
+def get_all_sample_ids(data_dir: str) -> List[str]:
+    """Get all sample IDs from the processed data directory."""
+    data_path = Path(data_dir)
+    image_dir = data_path / "images"
+
+    sample_ids = []
+    for image_path in image_dir.glob("*.npy"):
+        sample_ids.append(image_path.stem)
+
+    return sorted(sample_ids)
+
+
 class AugmentedAllenDataset(Dataset):
     """
     Augmented dataset for CellSAM training with Albumentations.
+    Supports both directory-based loading and explicit file list.
     """
-    
+
     def __init__(
         self,
-        data_dir: str,
+        data_dir: str = None,
         target_size: Tuple[int, int] = (1024, 1024),
         is_training: bool = True,
-        max_boxes_per_image: int = 50
+        max_boxes_per_image: int = 50,
+        sample_ids: List[str] = None  # NEW: explicit sample ID list
     ):
-        self.data_dir = Path(data_dir)
         self.target_size = target_size
         self.max_boxes = max_boxes_per_image
-        
-        self.image_dir = self.data_dir / "images"
-        self.mask_dir = self.data_dir / "masks"
-        
+        self.is_training = is_training
+
         # Setup transforms
         if is_training:
             self.transform = get_train_transforms(target_size)
         else:
             self.transform = get_val_transforms(target_size)
-        
-        # Find all samples
+
+        # Build sample list
         self.samples = []
-        for image_path in self.image_dir.glob("*.npy"):
-            sample_id = image_path.stem
-            mask_path = self.mask_dir / f"{sample_id}.npy"
-            
-            if mask_path.exists():
-                self.samples.append({
-                    "sample_id": sample_id,
-                    "image_path": str(image_path),
-                    "mask_path": str(mask_path)
-                })
-        
+
+        if sample_ids is not None and data_dir is not None:
+            # Use explicit sample ID list (for train/val split)
+            data_path = Path(data_dir)
+            image_dir = data_path / "images"
+            mask_dir = data_path / "masks"
+
+            for sample_id in sample_ids:
+                image_path = image_dir / f"{sample_id}.npy"
+                mask_path = mask_dir / f"{sample_id}.npy"
+
+                if image_path.exists() and mask_path.exists():
+                    self.samples.append({
+                        "sample_id": sample_id,
+                        "image_path": str(image_path),
+                        "mask_path": str(mask_path)
+                    })
+        elif data_dir is not None:
+            # Scan directory for all samples
+            data_path = Path(data_dir)
+            image_dir = data_path / "images"
+            mask_dir = data_path / "masks"
+
+            for image_path in image_dir.glob("*.npy"):
+                sample_id = image_path.stem
+                mask_path = mask_dir / f"{sample_id}.npy"
+
+                if mask_path.exists():
+                    self.samples.append({
+                        "sample_id": sample_id,
+                        "image_path": str(image_path),
+                        "mask_path": str(mask_path)
+                    })
+
         print(f"Loaded {len(self.samples)} samples (training={is_training})")
     
     def __len__(self) -> int:
@@ -123,9 +157,10 @@ class AugmentedAllenDataset(Dataset):
         
         return img.astype(np.float32)
     
-    def _mask_to_boxes(self, mask: np.ndarray) -> List[List[float]]:
-        """Extract bounding boxes from instance mask."""
+    def _mask_to_boxes_with_ids(self, mask: np.ndarray) -> Tuple[List[List[float]], List[int]]:
+        """Extract bounding boxes and cell IDs from instance mask."""
         boxes = []
+        cell_ids = []
         
         for region in measure.regionprops(mask.astype(np.int32)):
             y1, x1, y2, x2 = region.bbox
@@ -135,8 +170,9 @@ class AugmentedAllenDataset(Dataset):
             x2 = min(mask.shape[1], x2 + pad)
             y2 = min(mask.shape[0], y2 + pad)
             boxes.append([x1, y1, x2, y2])
+            cell_ids.append(region.label)  # Store unique cell ID
         
-        return boxes[:self.max_boxes]
+        return boxes[:self.max_boxes], cell_ids[:self.max_boxes]
     
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         sample = self.samples[idx]
@@ -171,13 +207,15 @@ class AugmentedAllenDataset(Dataset):
         else:
             image = np.stack([image, image, image], axis=0)
         
-        # Generate boxes
-        boxes = self._mask_to_boxes(mask.astype(np.int32))
+        # Generate boxes with cell IDs
+        boxes, cell_ids = self._mask_to_boxes_with_ids(mask.astype(np.int32))
         boxes_tensor = torch.tensor(boxes, dtype=torch.float32) if boxes else torch.zeros((0, 4))
+        cell_ids_tensor = torch.tensor(cell_ids, dtype=torch.long) if cell_ids else torch.zeros((0,), dtype=torch.long)
         
         return {
             'image': torch.from_numpy(image).float(),
             'boxes': boxes_tensor,
+            'cell_ids': cell_ids_tensor,  # Added: unique ID for each cell
             'mask': torch.from_numpy(mask.astype(np.int64)).long(),
             'sample_id': sample['sample_id'],
             'num_boxes': len(boxes)
@@ -185,7 +223,7 @@ class AugmentedAllenDataset(Dataset):
 
 
 def collate_fn(batch: List[Dict]) -> Dict[str, torch.Tensor]:
-    """Custom collate function."""
+    """Custom collate function with cell_ids support."""
     images = torch.stack([item['image'] for item in batch])
     masks = torch.stack([item['mask'] for item in batch])
     
@@ -193,22 +231,28 @@ def collate_fn(batch: List[Dict]) -> Dict[str, torch.Tensor]:
     max_boxes = max(max_boxes, 1)
     
     padded_boxes = []
+    padded_cell_ids = []
     box_counts = []
     
     for item in batch:
         boxes = item['boxes']
+        cell_ids = item['cell_ids']
         num_boxes = boxes.shape[0]
         box_counts.append(num_boxes)
         
         if num_boxes < max_boxes:
-            padding = torch.zeros((max_boxes - num_boxes, 4))
-            boxes = torch.cat([boxes, padding], dim=0)
+            box_padding = torch.zeros((max_boxes - num_boxes, 4))
+            boxes = torch.cat([boxes, box_padding], dim=0)
+            id_padding = torch.zeros((max_boxes - num_boxes,), dtype=torch.long)
+            cell_ids = torch.cat([cell_ids, id_padding], dim=0)
         
         padded_boxes.append(boxes)
+        padded_cell_ids.append(cell_ids)
     
     return {
         'image': images,
         'boxes': torch.stack(padded_boxes),
+        'cell_ids': torch.stack(padded_cell_ids),  # Added
         'box_counts': torch.tensor(box_counts),
         'mask': masks,
         'sample_ids': [item['sample_id'] for item in batch]
