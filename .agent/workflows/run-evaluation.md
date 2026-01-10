@@ -28,7 +28,23 @@ conda activate cellsam
 python compare_models.py
 ```
 
-## 3. 记录评估结果
+## 3. 结果可视化 (Napari Visualization)
+
+指标虽然重要，但无法展示具体的分割错误（如边界抖动、合并错误）。使用 Napari 进行直观检查：
+
+// turbo
+```bash
+conda activate cellsam
+python anti_test/visualize_test_results.py
+```
+
+### 3.1 检查要点
+- **边界贴合度**: 预测轮廓是否紧贴细胞边缘？
+- **DAPI 对应**: 每个细胞核是否都有对应的细胞质？
+- **过分割/欠分割**: 一个细胞是否被切成两半？两个细胞是否连在一起？
+- **背景误检**: 空白区域是否有假阳性？
+
+## 4. 记录评估结果
 
 评估完成后，按照 `/log-experiment` 工作流记录结果。
 
@@ -42,7 +58,7 @@ python compare_models.py
 | RI | Rand Index | > 0.9 (Allen 标准) |
 | Max_IoU | 最佳实例匹配 | > 0.5 |
 
-## 4. 解读结果
+## 5. 解读结果
 
 根据 PQ 分解诊断问题：
 
@@ -53,7 +69,7 @@ SQ 高 + RQ 低 → 检测问题（检测不出/假阳）
 SQ 低 + RQ 高 → 分割问题（边界不准）
 ```
 
-## 5. 决定下一步
+## 6. 决定下一步
 
 | 结果 | 行动 |
 |------|------|
