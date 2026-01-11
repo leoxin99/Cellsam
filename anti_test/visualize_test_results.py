@@ -24,8 +24,10 @@ from cellSAM.model import get_model
 
 # Configuration
 RAW_TIFF_DIR = Path("d:/AI/paper/CellSam/data/raw/allen_segmented_fields_full")
-MODEL_PATH = "d:/AI/paper/CellSam/checkpoints/expanded_20260108_034352/best_model.pt"
+MODEL_PATH = "d:/AI/paper/CellSam/checkpoints/boundary_20260111_012636/best_model.pt"
 RESULTS_BASE_DIR = Path("d:/AI/paper/CellSam/experiments")
+
+
 
 # Test sample IDs
 TEST_SAMPLES = [
@@ -282,6 +284,11 @@ def save_comparison_image(bf, gt_mask, pred_mask, save_path, sample_id):
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--no-gui', action='store_true', help='Skip Napari visualization')
+    args = parser.parse_args()
+    
     # Create experiment folder
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     exp_dir = RESULTS_BASE_DIR / f"exp_{timestamp}"
@@ -395,18 +402,21 @@ def main():
     print(f'Log: {log_path}')
     
     # Launch napari
-    print(f'\nLaunching Napari...')
-    import napari
-    viewer = napari.Viewer()
-    
-    for i, sample_id in enumerate(TEST_SAMPLES[:len(all_results)]):
-        gt = np.load(images_dir / f"{i+1:02d}_gt_mask.npy")
-        pred = np.load(images_dir / f"{i+1:02d}_pred_mask.npy")
+    if not args.no_gui:
+        print(f'\nLaunching Napari...')
+        import napari
+        viewer = napari.Viewer()
         
-        viewer.add_labels(gt, name=f"GT_{i+1}", visible=(i==0), opacity=0.6)
-        viewer.add_labels(pred, name=f"Pred_{i+1}", visible=(i==0), opacity=0.6)
-    
-    napari.run()
+        for i, sample_id in enumerate(TEST_SAMPLES[:len(all_results)]):
+            gt = np.load(images_dir / f"{i+1:02d}_gt_mask.npy")
+            pred = np.load(images_dir / f"{i+1:02d}_pred_mask.npy")
+            
+            viewer.add_labels(gt, name=f"GT_{i+1}", visible=(i==0), opacity=0.6)
+            viewer.add_labels(pred, name=f"Pred_{i+1}", visible=(i==0), opacity=0.6)
+        
+        napari.run()
+    else:
+        print("\nSkipping Napari visualization (--no-gui specified)")
 
 
 if __name__ == "__main__":

@@ -79,6 +79,28 @@ def get_all_sample_ids(data_dir: str) -> List[str]:
     return sorted(sample_ids)
 
 
+def load_split_ids(split: str = "train", splits_dir: str = "d:/AI/paper/CellSam/data/splits") -> List[str]:
+    """
+    Load sample IDs from a fixed split file.
+    
+    Args:
+        split: One of 'train', 'val', 'test'
+        splits_dir: Directory containing the split ID files
+    
+    Returns:
+        List of sample IDs for the specified split
+    """
+    split_file = Path(splits_dir) / f"{split}_ids.txt"
+    if not split_file.exists():
+        raise FileNotFoundError(f"Split file not found: {split_file}")
+    
+    with open(split_file, "r") as f:
+        ids = [line.strip() for line in f if line.strip()]
+    
+    print(f"Loaded {len(ids)} samples from {split} split")
+    return ids
+
+
 class AugmentedAllenDataset(Dataset):
     """
     Augmented dataset for CellSAM training with Albumentations.
