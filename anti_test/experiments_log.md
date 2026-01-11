@@ -18,6 +18,7 @@
 | E06 | 2026-01-11 | 分水岭核分离 | F1=0.34 | ❌ 失败 |
 | E09 | 2026-01-11 | 验证指标实现 | PQ=0, AJI=0.10 | ⚠️ 发现问题 |
 | **E12** | **2026-01-11** | **边界损失微调** | **PQ↑265%, Dice↑8%** | **✅ 成功** |
+| E13 | 2026-01-11 | 数据集标准化 + 代码简化 | 固定划分 + 统一训练入口 | ✅ 成功 |
 
 ---
 
@@ -402,3 +403,38 @@ PQ 分解:
 | P1 | Rand Index | 0.5天 |
 | P1 | Boundary IoU | 0.5天 |
 | P2 | SarcGraph OOP | 1天 |
+
+---
+
+## E13: 数据集标准化 + 代码简化
+
+**日期**: 2026-01-11
+
+**背景/假设**: 
+之前实验使用随机划分，不同实验间的可比性受限。同时存在多个冗余的训练脚本。
+
+**方法**:
+1. 固定 Train/Val/Test 划分 (70/15/15)，使用 seed=42 确保可复现
+2. 创建统一的 `src/train.py` 支持 YAML 配置
+3. 提取损失函数到 `src/losses/` 模块
+
+**交付物**:
+| 文件 | 内容 |
+|------|------|
+| `data/splits/train_ids.txt` | 334 样本 |
+| `data/splits/val_ids.txt` | 71 样本 |
+| `data/splits/test_ids.txt` | 73 样本 |
+| `src/train.py` | 统一训练入口 |
+| `src/config/base.yaml` | 基础配置 |
+| `src/config/boundary.yaml` | 边界损失微调配置 |
+| `src/losses/combined.py` | DiceLoss, BoundaryLoss, CombinedLoss |
+
+**验证**:
+```
+Loaded 334 samples from train split
+Loaded 71 samples from val split
+Loaded 73 samples from test split
+CombinedLoss import OK
+```
+
+**结论**: ✅ 数据划分已固化，代码结构已简化，为后续消融实验奠定基础。
