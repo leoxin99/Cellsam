@@ -179,20 +179,99 @@ class AugmentedAllenDataset(Dataset):
         
         return img.astype(np.float32)
     
-    def _mask_to_boxes_with_ids(self, mask: np.ndarray) -> Tuple[List[List[float]], List[int]]:
-        """Extract bounding boxes and cell IDs from instance mask."""
+    def _augment_box(self, box: List[float], img_shape: Tuple[int, int], 
+                     noise_ratio: float = 0.3) -> List[float]:
+        """
+        Apply random perturbation to bounding box.
+        
+        This helps the model learn to handle imprecise boxes during inference,
+        where DAPI-detected boxes may be larger than the actual cell.
+        
+        Args:
+            box: [x1, y1, x2, y2] bounding box
+            img_shape: (height, width) of image
+            noise_ratio: max ratio of box dimension to perturb (0.3 = 30%)
+        
+        Returns:
+            Perturbed box [x1, y1, x2, y2]
+        """
+        import random
+        
+        x1, y1, x2, y2 = box
+        w, h = x2 - x1, y2 - y1
+        
+        # Random expansion (more common) or contraction (less common)
+        # Bias towards expansion since inference boxes are typically larger
+        expand_x1 = random.uniform(0, w * noise_ratio)
+        expand_y1 = random.uniform(0, h * noise_ratio)
+        expand_x2 = random.uniform(0, w * noise_ratio)
+        expand_y2 = random.uniform(0, h * noise_ratio)
+        
+        # 70% chance to expand, 30% chance to contract
+        if random.random() > 0.3:
+            x1_new = x1 - expand_x1
+            y1_new = y1 - expand_y1
+            x2_new = x2 + expand_x2
+            y2_new = y2 + expand_y2
+        else:
+            x1_new = x1 + expand_x1 * 0.5
+            y1_new = y1 + expand_y1 * 0.5
+            x2_new = x2 - expand_x2 * 0.5
+            y2_new = y2 - expand_y2 * 0.5
+        
+        # Clamp to image bounds
+        x1_new = max(0, x1_new)
+        y1_new = max(0, y1_new)
+        x2_new = min(img_shape[1], x2_new)
+        y2_new = min(img_shape[0], y2_new)
+        
+        # Ensure valid box
+        if x2_new <= x1_new or y2_new <= y1_new:
+            return box
+        
+        return [x1_new, y1_new, x2_new, y2_new]
+    
+    def _mask_to_boxes_with_ids(self, mask: np.ndarray, 
+                                 apply_augment: bool = False) -> Tuple[List[List[float]], List[int]]:
+        """
+        Extract bounding boxes and cell IDs from instance mask.
+        
+        Args:
+            mask: Instance segmentation mask
+            apply_augment: Whether to apply box perturbation (training only)
+        """
         boxes = []
         cell_ids = []
         
+        img_h, img_w = mask.shape
+        img_area = img_h * img_w
+        
+        # Relative size thresholds (for generalization across datasets)
+        min_area_ratio = 0.0005  # 0.05% of image
+        max_area_ratio = 0.15    # 15% of image
+        min_box_area = img_area * min_area_ratio
+        max_box_area = img_area * max_area_ratio
+        
         for region in measure.regionprops(mask.astype(np.int32)):
+            # Relative size filtering
+            if region.area < min_box_area or region.area > max_box_area:
+                continue
+            
             y1, x1, y2, x2 = region.bbox
             pad = 5
             x1 = max(0, x1 - pad)
             y1 = max(0, y1 - pad)
             x2 = min(mask.shape[1], x2 + pad)
             y2 = min(mask.shape[0], y2 + pad)
-            boxes.append([x1, y1, x2, y2])
-            cell_ids.append(region.label)  # Store unique cell ID
+            
+            box = [x1, y1, x2, y2]
+            
+            # Apply perturbation during training
+            if apply_augment and self.is_training:
+                box = self._augment_box(box, mask.shape, noise_ratio=0.3)
+            
+            boxes.append(box)
+            cell_ids.append(region.label)
         
         return boxes[:self.max_boxes], cell_ids[:self.max_boxes]
     
@@ -229,8 +308,11 @@ class AugmentedAllenDataset(Dataset):
         else:
             image = np.stack([image, image, image], axis=0)
         
-        # Generate boxes with cell IDs
-        boxes, cell_ids = self._mask_to_boxes_with_ids(mask.astype(np.int32))
+        # Generate boxes with cell IDs (apply augmentation during training)
+        boxes, cell_ids = self._mask_to_boxes_with_ids(
+            mask.astype(np.int32), 
+            apply_augment=self.is_training
+        )
         boxes_tensor = torch.tensor(boxes, dtype=torch.float32) if boxes else torch.zeros((0, 4))
         cell_ids_tensor = torch.tensor(cell_ids, dtype=torch.long) if cell_ids else torch.zeros((0,), dtype=torch.long)
         

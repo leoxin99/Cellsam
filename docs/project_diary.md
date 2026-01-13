@@ -1,0 +1,321 @@
+# 项目梳理日记 (Project Diary)
+
+> **项目**: CellSAM - hiPSC-CM 心肌细胞自动分割
+> **创建日期**: 2026-01-12
+> **最后更新**: 2026-01-12
+
+---
+
+## 📌 快速参考
+
+| 项目 | 当前值 | 目标 |
+|------|--------|------|
+| Detection F1 | 0.750 | >0.85 |
+| Segmentation Dice | 0.822 | >0.85 |
+| PQ@0.5 | 0.087 | >0.4 |
+| RI (Rand Index) | 0.829 | >0.92 |
+
+---
+
+## 1. 评估指标详解
+
+### 1.1 实例匹配指标
+
+| 指标 | 英文 | 计算方式 | 含义 |
+|------|------|---------|------|
+| **IoU** | Intersection over Union | `交集 / 并集` | 两个 Mask 的重叠程度 (0~1) |
+| **TP** | True Positive | IoU ≥ 阈值的匹配对数 | 正确检测+正确分割 |
+| **FP** | False Positive | 未匹配的预测 | 假阳性 (预测了不存在的细胞) |
+| **FN** | False Negative | 未匹配的真实 | 漏检 (真实存在但没预测到) |
+
+### 1.2 核心评估指标
+
+| 指标 | 公式 | 含义 | 目标值 |
+|------|------|------|--------|
+| **PQ** | SQ × RQ | 检测正确率 × 分割质量 (综合评价) | >0.4 |
+| **SQ** | mean(TP 的 IoU) | 正确匹配的边界有多准 | >0.7 |
+| **RQ** | TP / (TP + 0.5FP + 0.5FN) | F1 检测分数 | >0.6 |
+| **AJI** | Σ(交集) / Σ(并集+FP) | 聚合 Jaccard，惩罚过/欠分割 | >0.5 |
+| **RI** | (正确配对) / (总配对) | 像素级聚类一致性 (Allen 标准) | **>0.92** |
+| **Dice** | 2×交集 / (A+B) | 像素级重叠率 | >0.85 |
+
+### 1.3 指标诊断逻辑
+
+```
+如果 PQ 低:
+├─ SQ 高 + RQ 低 → 检测差 → 改进核检测/Box 提示
+└─ SQ 低 + RQ 高 → 边界差 → 增加 Boundary Loss 权重
+```
+
+---
+
+## 2. 实例匹配算法 (Hungarian)
+
+**目的**: 找到预测细胞与真实细胞的**最优一对一匹配**
+
+```
+步骤 1: 计算 IoU 矩阵
+        ┌───────────────────┐
+        │ Pred\GT  G1   G2  │
+        │   P1    0.8  0.1  │
+        │   P2    0.2  0.6  │
+        └───────────────────┘
+
+步骤 2: Hungarian 算法 (最小化 1-IoU)
+        P1 ↔ G1 (IoU=0.8) ✓ TP
+        P2 ↔ G2 (IoU=0.6) ✓ TP
+
+步骤 3: 阈值过滤 (IoU ≥ 0.5 才算 TP)
+```
+
+**代码实现**: `anti_test/eval_metrics.py` → `match_instances()`
+
+---
+
+## 3. 边界损失函数 (Boundary Loss)
+
+### 3.1 问题背景
+
+传统 Dice Loss 只关注整体像素分布，导致：
+- 像素级 Dice 高 (0.82)
+- 实例级 PQ@0.5 接近 0 (边界不准)
+
+### 3.2 解决方案
+
+```python
+def get_boundary_mask(mask):
+    eroded = binary_erosion(mask, disk(3))  # 形态学腐蚀
+    boundary = mask - eroded                 # 边界 = 原始 - 腐蚀
+    return boundary  # 只保留边缘 3 像素
+```
+
+**损失组合**:
+```
+Total = 0.7 × (Dice + BCE) + 0.3 × BoundaryLoss
+```
+
+### 3.3 效果 (E12 实验)
+
+| 指标 | 无边界损失 | 有边界损失 | 变化 |
+|------|-----------|-----------|------|
+| PQ@0.5 | 0.024 | 0.087 | **+265%** |
+| Max_IoU | 0.489 | 0.548 | **+12%** |
+
+---
+
+## 4. CellFinder 替代方案
+
+### 4.1 方案对比
+
+| 方案 | 检测 F1 | 状态 |
+|------|---------|------|
+| CellFinder | 0.012 | ❌ 失败 (针对神经元设计) |
+| **DAPI 核检测** | **0.750** | ✅ 采用 |
+
+### 4.2 DAPI 核检测流程
+
+```python
+def detect_nuclei_dapi(dapi_channel):
+    # 1. Otsu 阈值
+    threshold = threshold_otsu(dapi_channel)
+    binary = dapi_channel > threshold * 0.8
+    
+    # 2. 形态学清理
+    cleaned = remove_small_objects(binary, min_size=200)
+    
+    # 3. 合并同一细胞的多个核 (距离 < 100px)
+    merged = merge_close_nuclei(labeled, distance=100)
+    
+    # 4. 扩展为细胞 Box (6x)
+    boxes = create_bounding_boxes(merged, expansion=6)
+    return boxes
+```
+
+---
+
+## 5. 训练流程
+
+### 5.1 完整流程图
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. 准备阶段                                                     │
+│    python data/scripts/generate_splits.py                       │
+│    → train_ids.txt, val_ids.txt, test_ids.txt                  │
+└───────────────────────────────┬─────────────────────────────────┘
+                                ↓
+┌───────────────────────────────┴─────────────────────────────────┐
+│ 2. 基础训练                                                     │
+│    python src/train.py --config src/config/base.yaml           │
+│    → checkpoints/base_xxx/best_model.pt                        │
+└───────────────────────────────┬─────────────────────────────────┘
+                                ↓
+┌───────────────────────────────┴─────────────────────────────────┐
+│ 3. 边界微调 (可选)                                              │
+│    python src/train.py --config src/config/boundary.yaml       │
+│    → 加载 base 模型 + Boundary Loss 微调                        │
+└───────────────────────────────┬─────────────────────────────────┘
+                                ↓
+┌───────────────────────────────┴─────────────────────────────────┐
+│ 4. 评估                                                         │
+│    python anti_test/visualize_test_results.py                  │
+│    → PQ, AJI, RI 指标                                          │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 5.2 微调的 "Base 模型" 是什么
+
+```yaml
+# src/config/boundary.yaml
+model:
+  checkpoint: "checkpoints/expanded_xxx/best_model.pt"  # 这就是 base 模型
+```
+
+- **Base 模型**: 第一次训练产生的权重 (Dice + BCE)
+- **微调**: 加载 Base 权重，用 Boundary Loss **继续训练**
+
+---
+
+## 6. 数据集结构
+
+### 6.1 固定划分
+
+| Split | 样本数 | 比例 |
+|-------|--------|------|
+| Train | 334 | 70% |
+| Val | 71 | 15% |
+| Test | 73 | 15% |
+
+### 6.2 短 ID 映射
+
+```
+train_001 → 570acc96_5500000013_63X_20190807_S1_P14_B3_annotations_corrected
+train_002 → d3328698_5500000013_63X_20190807_S1_P7_B4_annotations_corrected
+...
+```
+
+映射文件: `data/splits/{split}_mapping.csv`
+
+---
+
+## 7. 代码结构
+
+```
+src/
+├── train.py              # 统一训练入口
+├── augmented_dataset.py  # 数据加载 + load_split_ids()
+├── config/
+│   ├── base.yaml         # 基础配置
+│   └── boundary.yaml     # 边界微调配置
+└── losses/
+    └── combined.py       # DiceLoss, BoundaryLoss, CombinedLoss
+```
+
+---
+
+## 附录: 实验记录索引
+
+| ID | 日期 | 实验 | 结果 |
+|----|------|------|------|
+| E01 | 01-08 | 类别不平衡修复 | Dice 0→0.52 ✅ |
+| E02 | 01-08 | CellFinder 测试 | F1=0.01 ❌ |
+| E03 | 01-08 | DAPI 核检测 | F1=0.75 ✅ |
+| E12 | 01-11 | 边界损失微调 | PQ↑265% ✅ |
+| E13 | 01-11 | 数据集标准化 | ✅ |
+
+详细记录见: `anti_test/experiments_log.md`
+
+---
+
+## 8. 问答记录 (Q&A Log)
+
+### 2026-01-13: 检测与训练策略分析
+
+#### Q1: 框尺寸阈值在不同数据集能泛化吗？
+
+**导师建议**: 根据 GT 框的最大/最小尺寸设定阈值
+
+**回答**: ⚠️ **绝对尺寸不泛化**
+
+- 不同数据集放大倍数不同 (20X vs 63X vs 100X)
+- 图像分辨率不同
+
+**解决方案**: 使用**相对面积比例**
+```python
+min_area_ratio = 0.001  # 占图像面积 0.1%
+max_area_ratio = 0.1    # 占图像面积 10%
+```
+
+---
+
+#### Q2: Actn2 通道在检测阶段有价值吗？
+
+**回答**: ✅ 有价值
+
+**用途**: 过滤非心肌细胞核 (如成纤维细胞)
+
+```python
+# Actn2 阳性区域 = 心肌细胞区域
+valid_nuclei = nuclei_mask & (actn2_channel > threshold)
+```
+
+---
+
+#### Q3: 训练时 GT Box 精确，推理时检测 Box 偏大，继续训练有意义吗？
+
+**回答**: ⭐ 核心问题
+
+| 阶段 | Box 来源 | 特点 |
+|------|---------|------|
+| 训练 | GT Mask 边界 | 紧贴细胞，+5px padding |
+| 推理 | DAPI×6 扩展 | 通常大于细胞 |
+
+**SAM 对 Box 尺寸有一定容忍度**，但需要：
+
+**建议**: 训练时加入 **Box 扰动增强**
+```python
+def augment_box(box, noise_ratio=0.2):
+    # 随机扩大 Box，让模型学习适应不精确的 Box
+```
+
+---
+
+#### Q4: GT Box 从哪来？是单独的 Box 通道吗？
+
+**回答**: **不是**。GT Box 是动态计算的。
+
+```python
+# 从 Mask (Ch9) 的连通区域计算
+for region in measure.regionprops(mask):
+    box = region.bbox  # 自动提取边界框
+```
+
+Allen 数据没有专门的 Box 通道。
+
+---
+
+#### Q5: 分割结果是边界+填充，还是只填充？
+
+**GT 格式**: 填充式 (整个细胞区域有 label)
+```
+GT Mask: 背景=0, 细胞1=1(所有像素), 细胞2=2(所有像素)
+```
+
+**SAM 输出**: 概率图 (0~1)
+- 边界处概率 ~0.5
+- 内部概率 ~0.9
+
+**这是正常的**，阈值化后变成填充结果。
+
+---
+
+#### 核心结论
+
+**当前瓶颈在检测 (RQ=0.16) 而非分割 (SQ=0.55)**
+
+| 优先级 | 行动 |
+|--------|------|
+| P0 | 训练时加入 Box 扰动增强 |
+| P0 | 使用相对尺寸阈值 |
+| P1 | 利用 Actn2 过滤非心肌核 |
+
