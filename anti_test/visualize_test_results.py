@@ -90,6 +90,64 @@ def detect_nuclei_dapi(dapi_channel, min_nucleus_area=500, max_nucleus_area=1500
     return valid_regions, labels
 
 
+def filter_by_actn2(regions, actn2_channel, actn2_threshold_ratio=0.1, 
+                     min_actn2_coverage=0.3):
+    """
+    Filter nuclei by Actn2 signal to keep only cardiomyocyte nuclei.
+    
+    Cardiomyocytes have strong Actn2 (sarcomere) signal around the nucleus.
+    Non-cardiomyocyte cells (fibroblasts, etc.) will be filtered out.
+    
+    Args:
+        regions: List of nuclei regions from detect_nuclei_dapi
+        actn2_channel: Actn2 channel image
+        actn2_threshold_ratio: Threshold as ratio of max Actn2 signal (0.1 = 10%)
+        min_actn2_coverage: Minimum fraction of expanded region with Actn2 signal
+    
+    Returns:
+        Filtered list of regions (only cardiomyocyte nuclei)
+    """
+    if len(regions) == 0:
+        return []
+    
+    # Normalize Actn2 channel
+    actn2_norm = normalize_channel(actn2_channel)
+    
+    # Create binary mask of Actn2-positive regions
+    actn2_threshold = actn2_threshold_ratio
+    actn2_mask = actn2_norm > actn2_threshold
+    
+    # Dilate to include area around nuclei
+    actn2_mask_dilated = morphology.binary_dilation(actn2_mask, morphology.disk(10))
+    
+    cardiomyocyte_regions = []
+    
+    for region in regions:
+        # Get bounding box and expand it (to check surrounding area)
+        y1, x1, y2, x2 = region.bbox
+        h, w = y2 - y1, x2 - x1
+        
+        # Expand by 50% to check surrounding tissue
+        expand = 0.5
+        y1_exp = max(0, int(y1 - h * expand))
+        x1_exp = max(0, int(x1 - w * expand))
+        y2_exp = min(actn2_channel.shape[0], int(y2 + h * expand))
+        x2_exp = min(actn2_channel.shape[1], int(x2 + w * expand))
+        
+        # Check Actn2 coverage in expanded region
+        region_actn2 = actn2_mask_dilated[y1_exp:y2_exp, x1_exp:x2_exp]
+        total_pixels = region_actn2.size
+        actn2_pixels = region_actn2.sum()
+        
+        if total_pixels > 0:
+            coverage = actn2_pixels / total_pixels
+            if coverage >= min_actn2_coverage:
+                cardiomyocyte_regions.append(region)
+    
+    print(f"Actn2 filter: {len(regions)} nuclei -> {len(cardiomyocyte_regions)} cardiomyocyte nuclei")
+    return cardiomyocyte_regions
+
+
 def merge_close_nuclei(regions, merge_distance=100):
     if len(regions) <= 1:
         return [[r] for r in regions]
