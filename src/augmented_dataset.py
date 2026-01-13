@@ -182,42 +182,40 @@ class AugmentedAllenDataset(Dataset):
     def _augment_box(self, box: List[float], img_shape: Tuple[int, int], 
                      noise_ratio: float = 0.3) -> List[float]:
         """
-        Apply random perturbation to bounding box.
+        Apply random EXPANSION to bounding box.
         
         This helps the model learn to handle imprecise boxes during inference,
-        where DAPI-detected boxes may be larger than the actual cell.
+        where DAPI-detected boxes are typically larger than the actual cell.
+        
+        NOTE: We ONLY expand, never shrink, because:
+        - GT box is already the minimum bounding box of the cell
+        - Shrinking would cause the cell mask to exceed the box
+        - SAM cannot segment outside the box
         
         Args:
             box: [x1, y1, x2, y2] bounding box
             img_shape: (height, width) of image
-            noise_ratio: max ratio of box dimension to perturb (0.3 = 30%)
+            noise_ratio: max ratio of box dimension to expand (0.3 = 30%)
         
         Returns:
-            Perturbed box [x1, y1, x2, y2]
+            Expanded box [x1, y1, x2, y2]
         """
         import random
         
         x1, y1, x2, y2 = box
         w, h = x2 - x1, y2 - y1
         
-        # Random expansion (more common) or contraction (less common)
-        # Bias towards expansion since inference boxes are typically larger
+        # Random expansion on each side (0 to 30% of dimension)
         expand_x1 = random.uniform(0, w * noise_ratio)
         expand_y1 = random.uniform(0, h * noise_ratio)
         expand_x2 = random.uniform(0, w * noise_ratio)
         expand_y2 = random.uniform(0, h * noise_ratio)
         
-        # 70% chance to expand, 30% chance to contract
-        if random.random() > 0.3:
-            x1_new = x1 - expand_x1
-            y1_new = y1 - expand_y1
-            x2_new = x2 + expand_x2
-            y2_new = y2 + expand_y2
-        else:
-            x1_new = x1 + expand_x1 * 0.5
-            y1_new = y1 + expand_y1 * 0.5
-            x2_new = x2 - expand_x2 * 0.5
-            y2_new = y2 - expand_y2 * 0.5
+        # Always expand, never shrink
+        x1_new = x1 - expand_x1
+        y1_new = y1 - expand_y1
+        x2_new = x2 + expand_x2
+        y2_new = y2 + expand_y2
         
         # Clamp to image bounds
         x1_new = max(0, x1_new)

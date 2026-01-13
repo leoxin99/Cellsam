@@ -187,8 +187,24 @@ def is_on_edge(region, image_shape, margin=30):
     return x1 < margin or y1 < margin or x2 > w - margin or y2 > h - margin
 
 
-def create_bounding_boxes(cell_region_groups, image_shape, expansion_factor=6.0, 
+def create_bounding_boxes(cell_region_groups, image_shape, 
+                           expansion_long=5.0, expansion_short=3.0,
                            exclude_edges=True, margin=30):
+    """
+    Create bounding boxes from nuclei with ANISOTROPIC expansion.
+    
+    Cardiomyocytes are elongated cells. We expand more along the major axis
+    (long direction) and less along the minor axis (short direction).
+    
+    Biological basis:
+    - Cardiomyocyte nuclei are often aligned with the cell's long axis
+    - The cell is typically 3-5x longer than wide
+    - Using the same expansion in all directions creates overly large boxes
+    
+    Args:
+        expansion_long: expansion factor along major axis (default 5.0)
+        expansion_short: expansion factor along minor axis (default 3.0)
+    """
     boxes = []
     h, w = image_shape
     
@@ -196,6 +212,7 @@ def create_bounding_boxes(cell_region_groups, image_shape, expansion_factor=6.0,
         if exclude_edges and any(is_on_edge(r, image_shape, margin) for r in regions):
             continue
         
+        # Get combined nucleus bounding box
         y_min = min(r.bbox[0] for r in regions)
         x_min = min(r.bbox[1] for r in regions)
         y_max = max(r.bbox[2] for r in regions)
@@ -203,7 +220,38 @@ def create_bounding_boxes(cell_region_groups, image_shape, expansion_factor=6.0,
         
         box_h, box_w = y_max - y_min, x_max - x_min
         center_y, center_x = (y_min + y_max) / 2, (x_min + x_max) / 2
-        new_h, new_w = box_h * expansion_factor, box_w * expansion_factor
+        
+        # Determine major/minor axis based on nucleus shape
+        # Use the first (or largest) region for orientation
+        main_region = max(regions, key=lambda r: r.area)
+        
+        # Major axis = longer dimension, minor axis = shorter dimension
+        if hasattr(main_region, 'major_axis_length') and main_region.major_axis_length > 0:
+            # Use actual axis lengths if available
+            major_len = main_region.major_axis_length
+            minor_len = main_region.minor_axis_length
+            orientation = main_region.orientation  # in radians
+            
+            # Determine if nucleus is more horizontal or vertical
+            # orientation: angle between major axis and horizontal
+            is_horizontal = abs(orientation) < np.pi / 4
+            
+            if is_horizontal:
+                # Major axis is horizontal -> expand width more
+                new_w = box_w * expansion_long
+                new_h = box_h * expansion_short
+            else:
+                # Major axis is vertical -> expand height more
+                new_h = box_h * expansion_long
+                new_w = box_w * expansion_short
+        else:
+            # Fallback: use box aspect ratio to guess orientation
+            if box_w > box_h:
+                new_w = box_w * expansion_long
+                new_h = box_h * expansion_short
+            else:
+                new_h = box_h * expansion_long
+                new_w = box_w * expansion_short
         
         x1 = int(max(0, center_x - new_w / 2))
         y1 = int(max(0, center_y - new_h / 2))
