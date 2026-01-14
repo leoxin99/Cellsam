@@ -586,3 +586,45 @@ data/processed/
 | **B** | **BF + DAPI + Actn2** | **P0** |
 | C | 加权 Actn2 融合 | P2 |
 
+---
+
+### 2026-01-15: 用户 Napari 观察反馈
+
+#### DAPI 检测参数最终值
+
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| min_nucleus_area | **500** | 过滤极小噪点 |
+| max_nucleus_area | **30000** | 包含大核 |
+| binary_opening | **disk(3)** | 去除 <28 px² 噪点 |
+
+#### 用户观察结论
+
+| 观察 | 处理方式 |
+|------|---------|
+| 边缘不完整核 | ✅ `exclude_edges=True` |
+| 非 Actn2 区域核 | ✅ `filter_by_actn2()` |
+| 靠近的核 → 一个细胞 | ✅ `merge_close_nuclei()` |
+| GT 边缘截断细胞未标注 | 评估时允许 Pred > GT |
+| GT 存在漏检 | 评估时允许 Pred > GT |
+
+#### 完整 DAPI 检测管线
+
+```python
+def dapi_detect_cells(dapi_channel, image_shape, actn2_channel=None):
+    # 1. 核检测
+    regions = detect_nuclei_dapi(dapi_channel)  # min=500, max=30000
+    
+    # 2. Actn2 过滤 (可选)
+    if actn2_channel:
+        regions = filter_by_actn2(regions, actn2_channel)
+    
+    # 3. 靠近核合并
+    cell_groups = merge_close_nuclei(regions)
+    
+    # 4. 创建框 (排除边缘)
+    boxes = create_bounding_boxes(cell_groups, image_shape)  # exclude_edges=True
+    
+    return boxes
+```
+

@@ -58,20 +58,19 @@ def normalize_channel(img):
     return img_norm.astype(np.float32)
 
 
-def detect_nuclei_dapi(dapi_channel, min_nucleus_area=240, max_nucleus_area=21000):
+def detect_nuclei_dapi(dapi_channel, min_nucleus_area=500, max_nucleus_area=30000):
     """
     Detect nuclei from DAPI channel.
     
-    Parameters based on P5-P95 statistics from 50 samples:
-    - min_nucleus_area: 240 px² (P5)
-    - max_nucleus_area: 21000 px² (P95)
+    Parameters (user-tuned based on visual inspection):
+    - min_nucleus_area: 500 px² (filter tiny noise)
+    - max_nucleus_area: 30000 px² (include large nuclei that were missed)
     
     Processing steps:
     1. Otsu thresholding
-    2. Fill holes (keep nucleus interior solid)
-    3. Size filtering (min/max)
-    
-    Note: binary_opening removed as DAPI nuclei are already clean.
+    2. binary_opening (remove tiny noise < ~28 px²)
+    3. Fill holes (keep nucleus interior solid)
+    4. Size filtering (min/max)
     """
     img_norm = normalize_channel(dapi_channel)
     try:
@@ -80,7 +79,8 @@ def detect_nuclei_dapi(dapi_channel, min_nucleus_area=240, max_nucleus_area=2100
         thresh = 0.3
     
     binary = img_norm > thresh
-    # Note: binary_opening removed - DAPI signal is clear
+    # binary_opening: removes tiny noise (< disk(3) ~28 px²)
+    binary = morphology.binary_opening(binary, morphology.disk(3))
     binary = ndimage.binary_fill_holes(binary)
     
     labels = measure.label(binary)
@@ -291,8 +291,27 @@ def create_bounding_boxes(cell_region_groups, image_shape,
     return boxes
 
 
-def dapi_detect_cells(dapi_channel, image_shape):
+def dapi_detect_cells(dapi_channel, image_shape, actn2_channel=None):
+    """
+    Detect cells from DAPI nuclei.
+    
+    Pipeline:
+    1. detect_nuclei_dapi: Find nuclei from DAPI
+    2. filter_by_actn2: Keep only nuclei in Actn2+ regions (cardiomyocytes)
+    3. merge_close_nuclei: Merge nearby nuclei (binucleated cells)
+    4. create_bounding_boxes: Create boxes (excludes edge nuclei)
+    
+    Args:
+        dapi_channel: DAPI image
+        image_shape: (height, width)
+        actn2_channel: Optional Actn2 image for filtering non-cardiomyocyte nuclei
+    """
     regions, _ = detect_nuclei_dapi(dapi_channel)
+    
+    # Filter by Actn2 if provided
+    if actn2_channel is not None:
+        regions = filter_by_actn2(regions, actn2_channel)
+    
     cell_groups = merge_close_nuclei(regions)
     boxes = create_bounding_boxes(cell_groups, image_shape)
     return boxes
