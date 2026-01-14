@@ -505,4 +505,48 @@ else:
 | `expansion_isotropic` | 4.0 | 圆核等比例扩展 |
 | `round_threshold` | 1.3 | 圆核判定阈值 |
 
+---
+
+### 2026-01-15: 统一多通道数据管道
+
+#### 问题分析
+
+之前的数据流存在不一致：
+- DAPI 检测：使用原始 TIFF (1736×1776)
+- SAM 训练：使用 processed NPY (仅 BF, 未 resize)
+
+#### 新数据管道设计
+
+**输出格式**:
+```
+data/processed/
+├── images/*.npy   → shape (3, 1024, 1024)  # [BF, DAPI, Actn2]
+└── masks/*.npy    → shape (1024, 1024)     # Instance mask
+```
+
+**通道分配**:
+| 通道 | 内容 | 用途 |
+|------|------|------|
+| Ch0 | Brightfield | SAM 主输入 |
+| Ch1 | DAPI | 核定位参考 |
+| Ch2 | Actn2 | 肌节辅助 |
+
+**Mask**: 单独作为训练 target，不占输入通道
+
+#### DAPI 检测更新
+
+移除 `binary_opening` 步骤，更新尺寸过滤参数：
+
+| 参数 | 旧值 | 新值 | 依据 |
+|------|------|------|------|
+| min_nucleus_area | 500 | **240** | P5 统计 |
+| max_nucleus_area | 15000 | **21000** | P95 统计 |
+| relative_threshold | 0.2 | **移除** | 固定尺寸数据集无需 |
+| binary_opening | Yes | **移除** | DAPI 信号清晰 |
+
+#### 变更文件
+
+- `data/scripts/extract_expanded_pairs.py` - 重写为多通道输出
+- `anti_test/visualize_test_results.py` - 更新 `detect_nuclei_dapi()`
+- 删除 `data/fixed_50/` 文件夹
 

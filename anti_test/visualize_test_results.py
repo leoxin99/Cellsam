@@ -58,8 +58,21 @@ def normalize_channel(img):
     return img_norm.astype(np.float32)
 
 
-def detect_nuclei_dapi(dapi_channel, min_nucleus_area=500, max_nucleus_area=15000,
-                        relative_size_threshold=0.2):
+def detect_nuclei_dapi(dapi_channel, min_nucleus_area=240, max_nucleus_area=21000):
+    """
+    Detect nuclei from DAPI channel.
+    
+    Parameters based on P5-P95 statistics from 50 samples:
+    - min_nucleus_area: 240 px² (P5)
+    - max_nucleus_area: 21000 px² (P95)
+    
+    Processing steps:
+    1. Otsu thresholding
+    2. Fill holes (keep nucleus interior solid)
+    3. Size filtering (min/max)
+    
+    Note: binary_opening removed as DAPI nuclei are already clean.
+    """
     img_norm = normalize_channel(dapi_channel)
     try:
         thresh = filters.threshold_otsu(img_norm)
@@ -67,26 +80,16 @@ def detect_nuclei_dapi(dapi_channel, min_nucleus_area=500, max_nucleus_area=1500
         thresh = 0.3
     
     binary = img_norm > thresh
-    binary = morphology.binary_opening(binary, morphology.disk(3))
-    binary = morphology.remove_small_objects(binary, min_size=min_nucleus_area)
+    # Note: binary_opening removed - DAPI signal is clear
     binary = ndimage.binary_fill_holes(binary)
     
     labels = measure.label(binary)
-    all_regions = []
-    all_areas = []
+    valid_regions = []
     
     for region in measure.regionprops(labels):
-        if region.area <= max_nucleus_area:
-            all_regions.append(region)
-            all_areas.append(region.area)
+        if min_nucleus_area <= region.area <= max_nucleus_area:
+            valid_regions.append(region)
     
-    if len(all_areas) > 0:
-        median_area = np.median(all_areas)
-        min_relative_area = median_area * relative_size_threshold
-    else:
-        return [], []
-    
-    valid_regions = [r for r in all_regions if r.area >= min_nucleus_area and r.area >= min_relative_area]
     return valid_regions, labels
 
 
@@ -340,6 +343,15 @@ def run_sam_segmentation(model, device, bf_image, boxes):
                 pred_binary = morphology.binary_closing(pred_binary, morphology.disk(5))
                 pred_binary = ndimage.binary_fill_holes(pred_binary)
                 pred_binary = morphology.remove_small_objects(pred_binary, min_size=500)
+                
+                # Boundary smoothing: Gaussian blur + threshold for smoother edges
+                # This creates curved boundaries similar to GT instead of jagged edges
+                from scipy.ndimage import gaussian_filter
+                smoothed = gaussian_filter(pred_binary.astype(float), sigma=3)
+                pred_binary = smoothed > 0.5
+                
+                # Final cleanup after smoothing
+                pred_binary = ndimage.binary_fill_holes(pred_binary)
                 
                 labeled = measure.label(pred_binary)
                 if labeled.max() > 0:
