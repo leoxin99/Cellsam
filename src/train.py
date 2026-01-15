@@ -39,12 +39,16 @@ def create_dataloaders(config: dict):
     train_ids = load_split_ids("train", config['data']['splits_dir'])
     val_ids = load_split_ids("val", config['data']['splits_dir'])
     
+    # Get use_bf_only from config (default False for multi-channel)
+    use_bf_only = config['data'].get('use_bf_only', False)
+    
     train_dataset = AugmentedAllenDataset(
         data_dir=config['data']['processed_data_dir'],
         target_size=tuple(config['data']['target_size']),
         is_training=True,
         max_boxes_per_image=config['data']['max_boxes_per_image'],
-        sample_ids=train_ids
+        sample_ids=train_ids,
+        use_bf_only=use_bf_only
     )
     
     val_dataset = AugmentedAllenDataset(
@@ -52,7 +56,8 @@ def create_dataloaders(config: dict):
         target_size=tuple(config['data']['target_size']),
         is_training=False,
         max_boxes_per_image=config['data']['max_boxes_per_image'],
-        sample_ids=val_ids
+        sample_ids=val_ids,
+        use_bf_only=use_bf_only
     )
     
     train_loader = DataLoader(

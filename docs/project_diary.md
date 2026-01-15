@@ -628,3 +628,95 @@ def dapi_detect_cells(dapi_channel, image_shape, actn2_channel=None):
     return boxes
 ```
 
+---
+
+### 2026-01-15: Q&A 记录与待办任务
+
+#### Q1: Mean Dice 是像素级还是实例级？
+
+**澄清**：当前 `visualize_test_results.py` 输出的 Mean Dice 是**像素级指标**。
+
+| 指标类型 | 说明 | 实现状态 |
+|----------|------|----------|
+| **像素级 Dice** | 整张图预测与 GT 的像素重叠 | ✅ 已实现 |
+| 实例级 Dice | 每个细胞实例单独计算 Dice，再平均 | ⚠️ 未集成到推理 |
+| 实例级 PQ/AJI | 考虑检测 + 分割质量 | ⚠️ 未集成到推理 |
+
+**结论**：需要更新 `visualize_test_results.py` 以输出真正的实例级指标。
+
+---
+
+#### Q2: regionprops 是什么？
+
+`regionprops` 是 scikit-image 的函数，用于从标签图提取区域属性：
+
+```python
+from skimage import measure
+
+# 输入: GT mask (每个值代表一个细胞实例)
+# 输出: 每个区域的属性列表
+for region in measure.regionprops(gt_mask):
+    y1, x1, y2, x2 = region.bbox  # 边界框
+    area = region.area            # 面积
+    centroid = region.centroid    # 中心点
+```
+
+**训练时**：从 GT Mask 用 regionprops 提取每个细胞的边界框作为 Prompt。
+**推理时**：从 DAPI 检测结果生成 Prompt（不依赖 GT）。
+
+---
+
+#### Q3: 推理使用的模型
+
+**当前 `visualize_test_results.py` 使用的默认模型**:
+
+```python
+MODEL_PATH = "checkpoints/boundary_20260111_012636/best_model.pt"  # E12 边界损失模型
+```
+
+**E12 边界模型**：
+- 来源：实验 E12 边界损失微调
+- 指标：PQ↑265%, Dice↑8%
+- 日期：2026-01-11
+
+**E15b 多通道模型**：
+- 位置：`checkpoints/base_20260115_021255/best_model.pt`
+- 指标：Val Dice 0.6588
+- **尚未集成到推理脚本**
+
+---
+
+#### 今日已完成任务 ✅
+
+| 任务 | 说明 |
+|------|------|
+| E15a 基线训练 | BF×3, Val Dice 0.6472 |
+| E15b 多通道训练 | BF+DAPI+Actn2, Val Dice 0.6588 |
+| DAPI 检测参数更新 | min=500, max=30000 |
+| RGB 顺序实验设计 | 记录到 implementation_plan |
+| 通道注意力方案设计 | 方案 B/C 详细代码 |
+
+---
+
+#### 待办任务 (Pending Tasks)
+
+| 优先级 | 任务 | 说明 |
+|--------|------|------|
+| **P0** | 添加早停到 train.py | 从 train_expanded.py 移植 |
+| **P0** | 集成 E15b 模型到推理 | 替换默认 MODEL_PATH |
+| **P0** | 集成实例级指标到推理 | 使用 eval_metrics.py |
+| P1 | 通道权重学习 (方案B) | 实现并验证 |
+| P1 | LR 调参实验 | 1e-5, 5e-5, 1e-4 |
+| P2 | 通道消融 A2, A3 | BF+DAPI, BF+Actn2 |
+| P2 | RGB 顺序验证 O1-O3 | [BF,DAPI,Actn2] vs 其他顺序 |
+| P3 | SE 通道注意力 (方案C) | 更复杂的通道注意力 |
+
+---
+
+#### 关键结论
+
+1. **Mean Dice 0.7468** 是像素级，不是实例级
+2. **推理使用 E12 模型**，未使用今天训练的 E15b
+3. **regionprops** 用于从 GT Mask 提取边界框
+4. 所有待办任务已记录
+

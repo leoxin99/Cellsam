@@ -105,6 +105,7 @@ class AugmentedAllenDataset(Dataset):
     """
     Augmented dataset for CellSAM training with Albumentations.
     Supports both directory-based loading and explicit file list.
+    Supports multi-channel (BF+DAPI+Actn2) or BF-only mode.
     """
 
     def __init__(
@@ -113,11 +114,13 @@ class AugmentedAllenDataset(Dataset):
         target_size: Tuple[int, int] = (1024, 1024),
         is_training: bool = True,
         max_boxes_per_image: int = 50,
-        sample_ids: List[str] = None  # NEW: explicit sample ID list
+        sample_ids: List[str] = None,  # NEW: explicit sample ID list
+        use_bf_only: bool = False       # NEW: use only BF channel (for E15a baseline)
     ):
         self.target_size = target_size
         self.max_boxes = max_boxes_per_image
         self.is_training = is_training
+        self.use_bf_only = use_bf_only  # Store BF-only flag
 
         # Setup transforms
         if is_training:
@@ -280,6 +283,10 @@ class AugmentedAllenDataset(Dataset):
         image = np.load(sample['image_path'])
         mask = np.load(sample['mask_path'])
         
+        # Handle multi-channel images: (3, H, W) -> (H, W, 3) for augmentations
+        if image.ndim == 3 and image.shape[0] == 3:
+            image = image.transpose(1, 2, 0)  # (3, H, W) -> (H, W, 3)
+        
         # Apply augmentation
         if self.transform is not None:
             # Albumentations expects uint8 or float32
@@ -295,15 +302,21 @@ class AugmentedAllenDataset(Dataset):
                 image = transform.resize(image, self.target_size, preserve_range=True)
                 mask = transform.resize(mask, self.target_size, order=0, preserve_range=True)
         
-        # Normalize
-        image = self._normalize_image(image)
-        
-        # Convert to RGB
-        if image.ndim == 2:
-            image = np.stack([image, image, image], axis=0)
-        elif image.ndim == 3 and image.shape[-1] == 3:
-            image = image.transpose(2, 0, 1)
+        # Normalize each channel
+        if image.ndim == 3 and image.shape[-1] == 3:
+            if self.use_bf_only:
+                # BF-only mode: use only first channel (BF), replicate 3x
+                bf = image[..., 0]
+                bf = self._normalize_image(bf)
+                image = np.stack([bf, bf, bf], axis=0)
+            else:
+                # Multi-channel: normalize each channel separately
+                for c in range(3):
+                    image[..., c] = self._normalize_image(image[..., c])
+                image = image.transpose(2, 0, 1)  # (H, W, 3) -> (3, H, W)
         else:
+            # Single channel: normalize and replicate to 3 channels
+            image = self._normalize_image(image)
             image = np.stack([image, image, image], axis=0)
         
         # Generate boxes with cell IDs (apply augmentation during training)
