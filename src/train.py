@@ -126,10 +126,11 @@ def create_optimizer(model, config: dict):
 
 
 def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None):
-    """Train one epoch."""
+    """Train one epoch with optional mixed precision (AMP)."""
     model.train()
     total_loss = 0
     num_batches = 0
+    use_amp = scaler is not None
     
     for batch in dataloader:
         images = batch['image'].to(device)
@@ -138,10 +139,15 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
         
         optimizer.zero_grad()
         
-        # Preprocess images
+        # Preprocess images (frozen encoder - no grad needed)
         with torch.no_grad():
-            img_preprocessed = model.sam_preprocess(images)
-            image_embedding = model.model.image_encoder(img_preprocessed)
+            if use_amp:
+                with autocast():
+                    img_preprocessed = model.sam_preprocess(images)
+                    image_embedding = model.model.image_encoder(img_preprocessed)
+            else:
+                img_preprocessed = model.sam_preprocess(images)
+                image_embedding = model.model.image_encoder(img_preprocessed)
         
         batch_loss = 0
         num_cells = 0
@@ -157,26 +163,50 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
                 box_tensor = torch.tensor([box.tolist()], dtype=torch.float32).unsqueeze(0).to(device)
                 
                 try:
-                    sparse_emb, dense_emb = model.model.prompt_encoder(
-                        points=None, boxes=box_tensor, masks=None
-                    )
-                    low_res_masks, _ = model.model.mask_decoder(
-                        image_embeddings=image_embedding[i:i+1],
-                        image_pe=model.model.prompt_encoder.get_dense_pe(),
-                        sparse_prompt_embeddings=sparse_emb,
-                        dense_prompt_embeddings=dense_emb,
-                        multimask_output=False,
-                    )
+                    if use_amp:
+                        with autocast():
+                            sparse_emb, dense_emb = model.model.prompt_encoder(
+                                points=None, boxes=box_tensor, masks=None
+                            )
+                            low_res_masks, _ = model.model.mask_decoder(
+                                image_embeddings=image_embedding[i:i+1],
+                                image_pe=model.model.prompt_encoder.get_dense_pe(),
+                                sparse_prompt_embeddings=sparse_emb,
+                                dense_prompt_embeddings=dense_emb,
+                                multimask_output=False,
+                            )
+                            
+                            pred_mask = F.interpolate(
+                                low_res_masks,
+                                size=(1024, 1024),
+                                mode="bilinear",
+                                align_corners=False
+                            )[0, 0]
+                            
+                            target = (sample_mask > 0).float()
+                            loss = criterion(pred_mask, target, box=box.tolist())
+                    else:
+                        sparse_emb, dense_emb = model.model.prompt_encoder(
+                            points=None, boxes=box_tensor, masks=None
+                        )
+                        low_res_masks, _ = model.model.mask_decoder(
+                            image_embeddings=image_embedding[i:i+1],
+                            image_pe=model.model.prompt_encoder.get_dense_pe(),
+                            sparse_prompt_embeddings=sparse_emb,
+                            dense_prompt_embeddings=dense_emb,
+                            multimask_output=False,
+                        )
+                        
+                        pred_mask = F.interpolate(
+                            low_res_masks,
+                            size=(1024, 1024),
+                            mode="bilinear",
+                            align_corners=False
+                        )[0, 0]
+                        
+                        target = (sample_mask > 0).float()
+                        loss = criterion(pred_mask, target, box=box.tolist())
                     
-                    pred_mask = F.interpolate(
-                        low_res_masks,
-                        size=(1024, 1024),
-                        mode="bilinear",
-                        align_corners=False
-                    )[0, 0]
-                    
-                    target = (sample_mask > 0).float()
-                    loss = criterion(pred_mask, target, box=box.tolist())
                     batch_loss += loss
                     num_cells += 1
                     
@@ -185,9 +215,18 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
         
         if num_cells > 0:
             avg_loss = batch_loss / num_cells
-            avg_loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
+            
+            if use_amp:
+                scaler.scale(avg_loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                avg_loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer.step()
+            
             total_loss += avg_loss.item()
             num_batches += 1
     
@@ -292,14 +331,24 @@ def main():
     criterion = CombinedLoss(
         pos_weight=config['loss']['pos_weight'],
         boundary_weight=config['loss']['boundary_weight'],
-        use_boundary=config['loss']['use_boundary']
+        aji_weight=config['loss'].get('aji_weight', 0.2),
+        use_boundary=config['loss']['use_boundary'],
+        use_aji=config['loss'].get('use_aji', True)
     )
+    
+    # Mixed precision scaler
+    use_amp = config['training'].get('use_amp', True) and device.type == 'cuda'
+    scaler = GradScaler() if use_amp else None
+    if use_amp:
+        print("Mixed precision (AMP) enabled")
     
     # Training loop
     best_dice = 0
+    patience_counter = 0
+    early_stop_patience = config['training'].get('early_stop_patience', 10)
     
     for epoch in range(config['training']['epochs']):
-        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device)
+        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device, scaler=scaler)
         val_dice = validate(model, val_loader, criterion, device)
         scheduler.step()
         
@@ -310,8 +359,14 @@ def main():
         # Save best model
         if val_dice > best_dice:
             best_dice = val_dice
+            patience_counter = 0
             torch.save(model.state_dict(), output_dir / "best_model.pt")
             print(f"  -> New best! Saved to {output_dir / 'best_model.pt'}")
+        else:
+            patience_counter += 1
+            if patience_counter >= early_stop_patience:
+                print(f"\nEarly stopping triggered at epoch {epoch+1} (patience={early_stop_patience})")
+                break
         
         # Periodic checkpoints
         if (epoch + 1) % config['output']['save_every'] == 0:

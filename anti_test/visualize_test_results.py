@@ -151,11 +151,26 @@ def filter_by_actn2(regions, actn2_channel, actn2_threshold_ratio=0.1,
     return cardiomyocyte_regions
 
 
-def merge_close_nuclei(regions, merge_distance=100):
+def merge_close_nuclei(regions, merge_distance=100, size_ratio_threshold=3.0, use_relative_distance=True):
+    """
+    Merge nearby nuclei that likely belong to the same binucleated cell.
+    
+    Improvements:
+    1. Relative distance: Use nucleus size to determine max merge distance
+    2. Size similarity: Only merge nuclei of similar sizes (prevents merging debris)
+    
+    Args:
+        regions: List of regionprops for detected nuclei
+        merge_distance: Fixed merge distance (used if use_relative_distance=False)
+        size_ratio_threshold: Max ratio between nucleus sizes to allow merging (default 3.0)
+        use_relative_distance: If True, use size-relative threshold (1.5 * avg diameter)
+    """
     if len(regions) <= 1:
         return [[r] for r in regions]
     
     centroids = np.array([r.centroid for r in regions])
+    # Estimate diameter from area (assuming roughly circular nuclei)
+    diameters = np.array([2 * np.sqrt(r.area / np.pi) for r in regions])
     n = len(centroids)
     distances = cdist(centroids, centroids)
     
@@ -171,7 +186,20 @@ def merge_close_nuclei(regions, merge_distance=100):
     
     for i in range(n):
         for j in range(i + 1, n):
-            if distances[i, j] < merge_distance:
+            # Size similarity check
+            size_ratio = max(diameters[i], diameters[j]) / (min(diameters[i], diameters[j]) + 1e-6)
+            if size_ratio > size_ratio_threshold:
+                continue  # Skip: nuclei too different in size
+            
+            # Distance threshold
+            if use_relative_distance:
+                # Merge if distance < 1.5 * average diameter of two nuclei
+                avg_diameter = (diameters[i] + diameters[j]) / 2
+                max_merge_dist = 1.5 * avg_diameter
+            else:
+                max_merge_dist = merge_distance
+            
+            if distances[i, j] < max_merge_dist:
                 union(i, j)
     
     groups = {}
@@ -358,25 +386,59 @@ def run_sam_segmentation(model, device, bf_image, boxes):
                 pred_mask = F.interpolate(low_res_masks, size=(1024, 1024), mode="bilinear", align_corners=False)
                 pred_binary = (torch.sigmoid(pred_mask) > 0.5).cpu().numpy()[0, 0].astype(bool)
                 
-                # Post-processing
+                # ============================================
+                # ENHANCED BOUNDARY SMOOTHING PIPELINE
+                # Goal: Match GT-quality smooth curved boundaries
+                # ============================================
+                
+                # Step 1: Initial morphological cleanup
                 pred_binary = morphology.binary_closing(pred_binary, morphology.disk(5))
                 pred_binary = ndimage.binary_fill_holes(pred_binary)
                 pred_binary = morphology.remove_small_objects(pred_binary, min_size=500)
                 
-                # Boundary smoothing: Gaussian blur + threshold for smoother edges
-                # This creates curved boundaries similar to GT instead of jagged edges
+                # Step 2: Strong Gaussian smoothing (sigma=7 for smoother curves)
                 from scipy.ndimage import gaussian_filter
-                smoothed = gaussian_filter(pred_binary.astype(float), sigma=3)
+                smoothed = gaussian_filter(pred_binary.astype(float), sigma=7)
                 pred_binary = smoothed > 0.5
                 
-                # Final cleanup after smoothing
+                # Step 3: Remove spike-like protrusions using morphological opening
+                # This addresses the "突触状" (spike-like) artifacts
+                pred_binary = morphology.binary_opening(pred_binary, morphology.disk(8))
+                
+                # Step 4: Restore smooth shape using morphological closing
+                pred_binary = morphology.binary_closing(pred_binary, morphology.disk(8))
+                
+                # Step 5: Final cleanup
+                pred_binary = ndimage.binary_fill_holes(pred_binary)
+                pred_binary = morphology.remove_small_objects(pred_binary, min_size=500)
+                
+                # Step 6: Second Gaussian pass for extra smoothness
+                smoothed = gaussian_filter(pred_binary.astype(float), sigma=5)
+                pred_binary = smoothed > 0.5
                 pred_binary = ndimage.binary_fill_holes(pred_binary)
                 
+                # Keep largest connected component only
                 labeled = measure.label(pred_binary)
                 if labeled.max() > 0:
                     regions = measure.regionprops(labeled)
                     largest = max(regions, key=lambda r: r.area)
                     pred_binary = (labeled == largest.label)
+                
+                # ============================================
+                # CELL SIZE VALIDATION
+                # Thresholds based on GT analysis of 593 cells:
+                # - P1: 40464, P5: 61640, P95: 316495, P99: 425464
+                # ============================================
+                cell_area = pred_binary.sum()
+                MIN_CELL_AREA = 40000    # ~P1 of GT distribution
+                MAX_CELL_AREA = 450000   # Slightly above P99 of GT
+                
+                if cell_area < MIN_CELL_AREA:
+                    print(f"    Skipped: Cell too small ({cell_area} < {MIN_CELL_AREA})")
+                    continue
+                if cell_area > MAX_CELL_AREA:
+                    print(f"    Skipped: Cell too large ({cell_area} > {MAX_CELL_AREA})")
+                    continue
                 
                 cell_id += 1
                 new_pixels = pred_binary & (instance_mask == 0)
@@ -391,27 +453,76 @@ def run_sam_segmentation(model, device, bf_image, boxes):
 
 
 def mask_to_rgb(mask, cmap=None):
-    """Convert instance mask to RGB for visualization."""
+    """
+    Convert instance mask to RGB with graph coloring for distinct adjacent colors.
+    
+    Uses 4-color theorem approach: adjacent regions are guaranteed different colors.
+    High-contrast palette ensures visual distinction.
+    """
+    from scipy import ndimage
+    from skimage import measure
+    
     if cmap is None:
+        # High-contrast color palette (distinct hues)
         cmap = np.array([
-            [0, 0, 0],        # Background
-            [255, 0, 0],      # Red
-            [0, 255, 0],      # Green
-            [0, 0, 255],      # Blue
-            [255, 255, 0],    # Yellow
-            [255, 0, 255],    # Magenta
-            [0, 255, 255],    # Cyan
-            [128, 0, 0],      # Dark Red
-            [0, 128, 0],      # Dark Green
-            [0, 0, 128],      # Dark Blue
-            [255, 128, 0],    # Orange
-            [128, 0, 255],    # Purple
+            [0, 0, 0],          # 0: Background (black)
+            [255, 50, 50],      # 1: Bright Red
+            [50, 255, 50],      # 2: Bright Green
+            [50, 50, 255],      # 3: Bright Blue
+            [255, 255, 50],     # 4: Yellow
+            [255, 50, 255],     # 5: Magenta
+            [50, 255, 255],     # 6: Cyan
+            [255, 150, 50],     # 7: Orange
+            [150, 50, 255],     # 8: Purple
+            [50, 200, 150],     # 9: Teal
+            [200, 100, 100],    # 10: Salmon
+            [100, 200, 100],    # 11: Light Green
+            [100, 100, 200],    # 12: Light Blue
         ], dtype=np.uint8)
     
+    unique_ids = [i for i in np.unique(mask) if i > 0]
+    if len(unique_ids) == 0:
+        return np.zeros((*mask.shape, 3), dtype=np.uint8)
+    
+    # Build adjacency graph
+    # Two cells are adjacent if they share boundary pixels
+    adjacency = {i: set() for i in unique_ids}
+    
+    # Find adjacent pairs by checking dilated regions
+    for cell_id in unique_ids:
+        cell_mask = (mask == cell_id)
+        # Dilate by 2 pixels to find neighbors
+        dilated = ndimage.binary_dilation(cell_mask, iterations=2)
+        neighbor_ids = np.unique(mask[dilated & ~cell_mask])
+        for neighbor in neighbor_ids:
+            if neighbor > 0 and neighbor != cell_id:
+                adjacency[cell_id].add(neighbor)
+                adjacency[neighbor].add(cell_id)
+    
+    # Graph coloring using greedy algorithm
+    # Assign smallest color index not used by neighbors
+    color_assignment = {}
+    num_colors = len(cmap) - 1  # Exclude background
+    
+    for cell_id in sorted(unique_ids):
+        # Colors used by adjacent cells
+        used_colors = {color_assignment.get(neighbor) for neighbor in adjacency[cell_id]}
+        used_colors.discard(None)
+        
+        # Find first available color
+        for color in range(1, num_colors + 1):
+            if color not in used_colors:
+                color_assignment[cell_id] = color
+                break
+        else:
+            # Fallback: use modulo if we run out of colors
+            color_assignment[cell_id] = (cell_id % num_colors) + 1
+    
+    # Apply colors to mask
     rgb = np.zeros((*mask.shape, 3), dtype=np.uint8)
-    for i in range(1, mask.max() + 1):
-        color_idx = i % (len(cmap) - 1) + 1
-        rgb[mask == i] = cmap[color_idx]
+    for cell_id, color_idx in color_assignment.items():
+        rgb[mask == cell_id] = cmap[color_idx]
+    
     return rgb
 
 

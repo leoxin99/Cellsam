@@ -4,7 +4,7 @@
 data:
   splits_dir: "data/splits"
   raw_data_dir: "data/raw/allen_segmented_fields_full"
-  processed_data_dir: "training_pairs_expanded"
+  processed_data_dir: "data/processed"
   target_size: [1024, 1024]
   max_boxes_per_image: 50
 
@@ -24,7 +24,9 @@ loss:
   type: "combined"  # Options: dice, combined
   pos_weight: 10.0
   boundary_weight: 0.3
+  aji_weight: 0.2
   use_boundary: true
+  use_aji: true
 
 optimizer:
   type: "adamw"

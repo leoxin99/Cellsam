@@ -92,16 +92,128 @@ class BoundaryLoss(nn.Module):
             return torch.tensor(0.0, device=pred.device)
 
 
-class CombinedLoss(nn.Module):
-    """Combined Dice + BCE + Boundary loss with class imbalance handling."""
+class AJILoss(nn.Module):
+    """
+    Aggregated Jaccard Index (AJI) inspired loss.
     
-    def __init__(self, pos_weight=10.0, boundary_weight=0.3, use_boundary=True):
+    AJI penalizes both over-segmentation and under-segmentation at the instance level.
+    For training, we approximate AJI by computing IoU between predicted and target
+    regions within the bounding box context.
+    
+    AJI = sum(|C_i ∩ S_σ(i)|) / sum(|C_i ∪ S_σ(i)| + |S_k - matched|)
+    
+    Where:
+    - C_i: ground truth cell i
+    - S_σ(i): best matching predicted cell
+    - S_k - matched: unmatched predicted cells (false positives)
+    """
+    
+    def __init__(self, smooth=1.0):
+        super().__init__()
+        self.smooth = smooth
+    
+    def forward(self, pred, target, pred_instances=None, gt_instances=None):
+        """
+        Compute AJI-inspired loss.
+        
+        For single-cell training (one box at a time), this approximates to an IoU-like loss
+        that penalizes predictions that don't match the target well.
+        
+        Args:
+            pred: (H, W) prediction probabilities (after sigmoid), values [0, 1]
+            target: (H, W) binary ground truth for the current cell
+            pred_instances: Optional instance mask for multi-cell AJI
+            gt_instances: Optional GT instance mask for multi-cell AJI
+        """
+        pred = pred.contiguous().view(-1)
+        target = target.contiguous().view(-1).float()
+        
+        # Compute soft IoU (Jaccard) loss
+        # IoU = intersection / union
+        intersection = (pred * target).sum()
+        pred_sum = pred.sum()
+        target_sum = target.sum()
+        union = pred_sum + target_sum - intersection
+        
+        iou = (intersection + self.smooth) / (union + self.smooth)
+        
+        # Additional penalty for false positives (over-segmentation)
+        # Pixels predicted as foreground but not in target
+        false_positive_penalty = pred * (1 - target)
+        fp_weight = false_positive_penalty.sum() / (pred_sum + self.smooth)
+        
+        # Additional penalty for false negatives (under-segmentation)
+        # Pixels in target but not predicted
+        false_negative_penalty = (1 - pred) * target
+        fn_weight = false_negative_penalty.sum() / (target_sum + self.smooth)
+        
+        # AJI loss = 1 - IoU + penalties for over/under segmentation
+        # The penalties make this more sensitive to instance-level errors
+        aji_loss = 1 - iou + 0.1 * (fp_weight + fn_weight)
+        
+        return aji_loss
+
+
+class SizeLoss(nn.Module):
+    """
+    Size constraint loss for cell segmentation.
+    
+    Penalizes predictions that deviate from target cell size,
+    encouraging the model to learn correct cell boundaries.
+    
+    Based on GT analysis (FULL dataset: 478 images, 5173 cells):
+    - P1: 40836, P99: 513928 (excludes annotation errors)
+    - Median: 142316 pixels
+    """
+    
+    def __init__(self, min_area: int = 40836, max_area: int = 513928, smooth: float = 1.0):
+        super().__init__()
+        self.min_area = min_area
+        self.max_area = max_area
+        self.smooth = smooth
+    
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """
+        Compute size loss.
+        
+        Args:
+            pred: Prediction probabilities (after sigmoid)
+            target: Binary ground truth
+        
+        Returns:
+            Size loss value
+        """
+        pred_area = pred.sum()
+        target_area = target.sum()
+        
+        # Relative size difference
+        size_diff = torch.abs(pred_area - target_area) / (target_area + self.smooth)
+        
+        # Additional penalty if prediction is outside expected range
+        boundary_penalty = torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
+        
+        if pred_area < self.min_area:
+            boundary_penalty = (self.min_area - pred_area) / self.min_area
+        elif pred_area > self.max_area:
+            boundary_penalty = (pred_area - self.max_area) / self.max_area
+        
+        return size_diff + 0.5 * boundary_penalty
+
+
+class CombinedLoss(nn.Module):
+    """Combined Dice + BCE + Boundary + AJI loss with class imbalance handling."""
+    
+    def __init__(self, pos_weight=10.0, boundary_weight=0.3, aji_weight=0.2, 
+                 use_boundary=True, use_aji=True):
         super().__init__()
         self.dice = DiceLoss()
         self.boundary = BoundaryLoss(boundary_width=3)
+        self.aji = AJILoss()
         self.pos_weight = pos_weight
         self.boundary_weight = boundary_weight
+        self.aji_weight = aji_weight
         self.use_boundary = use_boundary
+        self.use_aji = use_aji
 
     def forward(self, pred, target, box=None):
         """
@@ -147,13 +259,30 @@ class CombinedLoss(nn.Module):
 
         base_loss = 0.5 * dice + 0.5 * bce
         
+        # Calculate additional loss weights
+        remaining_weight = 1.0
+        total_loss = torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
+        
+        # Boundary loss
         if self.use_boundary and n_pos > 0:
             try:
                 boundary_loss = self.boundary(pred_sigmoid, target_box)
-                total_loss = (1 - self.boundary_weight) * base_loss + self.boundary_weight * boundary_loss
+                total_loss = total_loss + self.boundary_weight * boundary_loss
+                remaining_weight -= self.boundary_weight
             except Exception:
-                total_loss = base_loss
-        else:
-            total_loss = base_loss
+                pass
+        
+        # AJI loss
+        if self.use_aji and n_pos > 0:
+            try:
+                aji_loss = self.aji(pred_sigmoid, target_box)
+                total_loss = total_loss + self.aji_weight * aji_loss
+                remaining_weight -= self.aji_weight
+            except Exception:
+                pass
+        
+        # Base loss (Dice + BCE)
+        total_loss = total_loss + remaining_weight * base_loss
 
         return total_loss
+
