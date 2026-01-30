@@ -1,0 +1,47 @@
+# Semantic Channel Mapping + Adapter training configuration
+# Usage: python src/train.py --config src/config/semantic_adapter.yaml
+# 
+# 新特性:
+#   - use_semantic_mapping: 启用语义通道映射 (R=Actn2, G=BF, B=DAPI)
+#   - use_adapter: 启用 IndependentChannelAdapter (可学习)
+
+data:
+  splits_dir: "data/splits"
+  raw_data_dir: "data/raw/allen_segmented_fields_full"
+  processed_data_dir: "data/processed"
+  target_size: [1024, 1024]
+  max_boxes_per_image: 50
+  use_bf_only: false
+  use_semantic_mapping: true  # NEW: 启用语义通道映射
+
+model:
+  checkpoint: null  # 从预训练 SAM 开始
+  freeze_encoder: true
+  freeze_decoder: false
+  use_adapter: true  # NEW: 启用通道适配器
+  adapter:
+    type: "independent"  # "independent" or "lightweight"
+    kernel_size: 3
+    use_relu: true
+
+training:
+  epochs: 30
+  batch_size: 2
+  learning_rate: 0.00001  # Adapter 使用相同 LR
+  weight_decay: 0.0001
+  warmup_epochs: 3
+
+loss:
+  type: "combined"
+  pos_weight: 10.0
+  boundary_weight: 0.3
+  use_boundary: true
+
+optimizer:
+  type: "adamw"
+  scheduler: "cosine_warmup"
+
+output:
+  checkpoint_dir: "checkpoints"
+  save_every: 5
+  experiment_name: "semantic_adapter"

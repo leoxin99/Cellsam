@@ -6,10 +6,12 @@ Significantly increases effective training samples through geometric and intensi
 import os
 import numpy as np
 import torch
+import cv2
 from torch.utils.data import Dataset
 from pathlib import Path
 from typing import Dict, List, Tuple
 from skimage import transform, measure
+from scipy.ndimage import gaussian_filter
 
 try:
     import albumentations as A
@@ -18,6 +20,66 @@ try:
 except ImportError:
     HAS_ALBUMENTATIONS = False
     print("Warning: albumentations not installed. Using basic transforms.")
+
+
+class SemanticChannelMapper:
+    """
+    语义通道映射器: 将 (BF, DAPI, Actn2) 映射为 SAM 友好的伪 RGB
+    
+    通道映射:
+        R ← Actn2 (Ch2): 肌节纹理, P0.5-P99.5 百分位截断
+        G ← BF (Ch0): 细胞边界, CLAHE 增强
+        B ← DAPI (Ch1): 细胞核, 高斯平滑
+    """
+    
+    def __init__(self, 
+                 actn2_percentile: Tuple[float, float] = (1.0, 99.0),  # Data-driven: P1-P99
+                 clahe_clip: float = 2.0,
+                 clahe_grid: Tuple[int, int] = (8, 8),
+                 dapi_sigma: float = 1.5):  # Data-driven: mild smoothing
+        self.actn2_percentile = actn2_percentile
+        self.dapi_sigma = dapi_sigma
+        self.clahe = cv2.createCLAHE(clipLimit=clahe_clip, tileGridSize=clahe_grid)
+    
+    def __call__(self, image: np.ndarray) -> np.ndarray:
+        """
+        Args:
+            image: (H, W, 3) with channels [BF, DAPI, Actn2]
+        Returns:
+            mapped: (H, W, 3) with channels [R=Actn2, G=BF, B=DAPI], float32 [0, 1]
+        """
+        bf = image[..., 0]      # Ch0
+        dapi = image[..., 1]    # Ch1
+        actn2 = image[..., 2]   # Ch2
+        
+        r = self._process_actn2(actn2)
+        g = self._process_bf(bf)
+        b = self._process_dapi(dapi)
+        
+        return np.stack([r, g, b], axis=-1).astype(np.float32)
+    
+    def _process_actn2(self, img: np.ndarray) -> np.ndarray:
+        """百分位截断归一化 (突出纹理)"""
+        img = img.astype(np.float32)
+        p_low = np.percentile(img, self.actn2_percentile[0])
+        p_high = np.percentile(img, self.actn2_percentile[1])
+        img = np.clip(img, p_low, p_high)
+        return (img - p_low) / (p_high - p_low + 1e-8)
+    
+    def _process_bf(self, img: np.ndarray) -> np.ndarray:
+        """CLAHE 增强 (提升边界对比)"""
+        if img.dtype != np.uint8:
+            img_min, img_max = img.min(), img.max()
+            img = ((img - img_min) / (img_max - img_min + 1e-8) * 255).astype(np.uint8)
+        enhanced = self.clahe.apply(img)
+        return enhanced.astype(np.float32) / 255.0
+    
+    def _process_dapi(self, img: np.ndarray) -> np.ndarray:
+        """高斯平滑 + 归一化 (降噪)"""
+        img = img.astype(np.float32)
+        img = gaussian_filter(img, sigma=self.dapi_sigma)
+        img_min, img_max = img.min(), img.max()
+        return (img - img_min) / (img_max - img_min + 1e-8)
 
 
 def get_train_transforms(target_size=(1024, 1024)):
@@ -114,13 +176,20 @@ class AugmentedAllenDataset(Dataset):
         target_size: Tuple[int, int] = (1024, 1024),
         is_training: bool = True,
         max_boxes_per_image: int = 50,
-        sample_ids: List[str] = None,  # NEW: explicit sample ID list
-        use_bf_only: bool = False       # NEW: use only BF channel (for E15a baseline)
+        sample_ids: List[str] = None,
+        use_bf_only: bool = False,
+        use_semantic_mapping: bool = False  # NEW: Semantic channel mapping (R=Actn2, G=BF, B=DAPI)
     ):
         self.target_size = target_size
         self.max_boxes = max_boxes_per_image
         self.is_training = is_training
-        self.use_bf_only = use_bf_only  # Store BF-only flag
+        self.use_bf_only = use_bf_only
+        self.use_semantic_mapping = use_semantic_mapping
+        
+        # Initialize semantic mapper if enabled
+        if use_semantic_mapping:
+            self.mapper = SemanticChannelMapper()
+            print("✅ Semantic Channel Mapping enabled: R=Actn2, G=BF, B=DAPI")
 
         # Setup transforms
         if is_training:
@@ -302,9 +371,13 @@ class AugmentedAllenDataset(Dataset):
                 image = transform.resize(image, self.target_size, preserve_range=True)
                 mask = transform.resize(mask, self.target_size, order=0, preserve_range=True)
         
-        # Normalize each channel
+        # Normalize each channel (or apply semantic mapping)
         if image.ndim == 3 and image.shape[-1] == 3:
-            if self.use_bf_only:
+            if self.use_semantic_mapping:
+                # Semantic mapping: R=Actn2, G=BF, B=DAPI (already normalized by mapper)
+                image = self.mapper(image)  # Returns (H, W, 3) float32 [0, 1]
+                image = image.transpose(2, 0, 1)  # (H, W, 3) -> (3, H, W)
+            elif self.use_bf_only:
                 # BF-only mode: use only first channel (BF), replicate 3x
                 bf = image[..., 0]
                 bf = self._normalize_image(bf)

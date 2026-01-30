@@ -136,4 +136,102 @@ BCE Loss 推动模型预测"全背景"以最小化损失
 
 ---
 
+## 7. 边界处理技术分析 ⭐⭐⭐ (2026-01-23)
+
+**核心观点**: 图像分割的真正难点在于边界处理，边界不清晰会严重影响实际应用价值。
+
+### 7.1 技术对比
+
+| 技术 | 原理 | CellSAM 现状 | 改进空间 |
+|------|------|-------------|----------|
+| **双任务学习** | 分支预测边界 (30-40%) | ⚠️ 只有损失函数 `BoundaryLoss` | 可加边界预测分支 |
+| **注意力机制** | Skip connection 加 attention | ✅ SAM ViT 内置 | 可加 channel attention |
+| **边界数据增强** | 边界扰动、弹性形变 | ❌ **缺失** | **P0 优先** |
+| **Boundary-aware Loss** | 距离权重损失 | ✅ `BoundaryLoss` (30%) | 可加距离加权 |
+| **后处理** | morphology + CRF | ✅ 6步平滑管道 | 可选 CRF |
+| **标注质量** | 多专家一致性 | ⚠️ Allen GT 可能漏标 | 需验证 |
+
+### 7.2 现有实现
+
+**损失函数** (`src/losses/combined.py`):
+```python
+CombinedLoss(
+    boundary_weight=0.3,  # 边界损失占比
+    aji_weight=0.2,       # AJI 损失占比
+    use_boundary=True
+)
+```
+
+**后处理** (`src/inference/postprocess.py`):
+```python
+def smooth_boundary():
+    # 6步平滑管道:
+    # 1. 形态学闭运算 + 填洞
+    # 2. Gaussian 平滑 (σ=7)
+    # 3. 形态学开运算去突刺
+    # 4. 形态学闭运算恢复形状
+    # 5. 最终填洞
+    # 6. 二次 Gaussian 平滑 (σ=5)
+```
+
+### 7.3 改进建议
+
+| 优先级 | 改进项 | 实现复杂度 | 预期效果 |
+|--------|--------|-----------|----------|
+| **P0** | 边界数据增强 (弹性形变) | 低 | 明显 |
+| **P1** | 距离加权损失 | 低 | 中等 |
+| **P1** | 双任务边界分支 | 中等 | 明显 |
+| **P2** | Channel Attention | 中等 | 可选 |
+
+### 7.4 待实现代码
+
+**边界数据增强** (P0):
+```python
+def boundary_augmentation(image, mask):
+    # 1. 弹性形变 (医学图像最有效)
+    # 2. 边界扰动 (随机扩展/收缩)
+    # 3. 边界模糊 (训练鲁棒性)
+```
+
+**距离加权损失** (P1):
+```python
+def boundary_aware_weight(target):
+    dist = distance_transform(target)
+    weight = 1 / (dist + 1)  # 距离越近权重越大
+    return weight
+```
+
+---
+
+## 8. 框生成效果评估方法 (2026-01-23)
+
+**目的**: 验证 DAPI/Adaptive 框是否合适
+
+### 8.1 评估指标
+
+| 指标 | 公式 | 理想值 | 意义 |
+|------|------|--------|------|
+| **Box IoU** | 框∩GT框 / 框∪GT框 | >0.5 | 框位置准确性 |
+| **Cell Coverage** | (框∩细胞) / 细胞面积 | =1.0 | 框是否包含完整细胞 |
+| **Size Ratio** | 预测框 / GT框 | ≈1.0 | 大小偏差 |
+| **Box Efficiency** | 细胞面积 / 框面积 | >0.3 | 框是否过大 |
+
+### 8.2 GT Box 来源
+
+从 GT mask (Ch9) 提取每个实例的最小外接矩形:
+```python
+for region in regionprops(gt_mask):
+    gt_box = region.bbox  # (y1, x1, y2, x2)
+```
+
+### 8.3 评估脚本
+
+`tools/evaluate_box_generation.py`:
+- 使用 Hungarian 匹配将检测框与 GT 框配对
+- 计算上述 4 个指标
+- 对比 DAPI (固定扩展) vs Adaptive (Z-线引导)
+
+---
+
 *此文档详细内容用于论文撰写，请参考 CLAUDE.md 获取项目总览*
+

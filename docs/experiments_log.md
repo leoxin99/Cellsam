@@ -2,7 +2,7 @@
 
 > **项目**: hiPSC-CM 细胞自动分割
 > **维护者**: Research Documentation Architect
-> **最后更新**: 2026-01-16
+> **最后更新**: 2026-01-30
 
 ---
 
@@ -26,8 +26,88 @@
 | ~~E15d~~ | - | ~~多通道融合D: 不确定引导~~ | 已废弃 | ❌ 取消 |
 | **E16** | **2026-01-16** | **E12 vs E15b 对比** | **E12优2.6%** | **✅ E12确认最佳** |
 | **E17** | **2026-01-21** | **GT 细胞面积统计** | **阈值 40K-450K** | **✅ 数据驱动** |
+| **E18** | **2026-01-23** | **SarcGraph 检测对比** | **F1↑7.4%** | **✅ 优于DAPI** |
+| **E19** | **2026-01-26** | **边缘/双核参数微调** | **Edge=100px, Binuc=1.5x** | **✅ 精确化** |
+| **E20** | **2026-01-30** | **DAPI Only vs Adaptive 消融** | **DAPI Only F1=0.765 胜** | **✅ 完成** |
+| **E21** | **2026-01-30** | **E12 vs Semantic Adapter 对比** | **E12 Dice=0.598 胜** | **✅ 完成** |
 
 ---
+
+## E20: DAPI Only vs Adaptive 检测消融 ⭐⭐
+
+**日期**: 2026-01-30
+
+**背景/假设**: 
+Adaptive 方案使用 Z-线自适应框 (`detect_with_adaptive_box`)，理论上能更准确地定位心肌细胞边界。需要与 DAPI Only 方案 (`detect_and_create_boxes`) 进行对比。
+
+**方法**:
+1. 在 20 个测试样本上分别运行两种检测方法
+2. 使用 IoU@0.3 阈值匹配预测框与 GT 框
+3. 计算 Precision, Recall, F1
+
+**参数**:
+| 参数 | 值 |
+|------|-----|
+| min_nucleus_area | 3000 |
+| max_nucleus_area | 30000 |
+| min_zlines (Adaptive) | 15 |
+| zline_threshold | 0.03 |
+| IoU 阈值 | 0.3 |
+| 测试样本数 | 20 |
+
+**结果**:
+
+| 方法 | Precision | Recall | F1 |
+|------|-----------|--------|-----|
+| **DAPI Only** | **0.793** | **0.739** | **0.765** |
+| Adaptive | 0.311 | 0.290 | 0.300 |
+| **差异** | **+0.48** | **+0.45** | **+0.465** |
+
+**分析**:
+- **DAPI Only 明显优于 Adaptive**，F1 差距高达 **46.5%**
+- Adaptive 方案 Precision 极低 (0.31)，说明 Z-线自适应框生成了大量误检
+- Adaptive 的框尺寸可能偏大，导致与 GT 的 IoU 过低
+
+**原因分析**:
+1. `create_adaptive_box` 的 `fallback_expansion` 参数 (4.0) 过大
+2. Z-线聚类可能将多个细胞的 Z-线合并
+3. 当前 IoU@0.3 阈值对大框不友好
+
+**结论**: ❌ Adaptive 方案在当前参数下严重劣于 DAPI Only，建议：
+1. 使用 **DAPI Only** 作为默认检测方法
+2. 如需使用 Adaptive，需大幅调低 `fallback_expansion` 和 `padding_ratio`
+
+**代码位置**: `tools/ablation_detection.py`
+**结果存档**: `experiments/ablation_detection/results.json`
+
+**日期**: 2026-01-26
+
+**背景**:
+E18 发现 Adaptive 方法 Precision 较低 (0.672)，怀疑边缘过滤过松。同时 DAPI 方法 FN 较高，怀疑双核合并阈值不准。
+
+**方法**:
+1. **GT 极小核分析**: GT Mask 中存在大量 <1000px 的碎片。确认有效心肌细胞核应 >3000px (可视验证最小约 5000px)。
+2. **边缘过滤重算**: 仅统计 >=5000px 的有效 GT 核在不同边缘阈值下的排除率。
+3. **双核间距重算**: 仅统计 >=5000px 且 size_ratio < 3.0 的有效配对。
+
+**结果 (min_area=5000)**:
+1. **边缘排除率 (Valid GT >5000px)**:
+   - 30px: 0.0%
+   - 50px: 0.8%
+   - **100px: 5.6%** (推荐)
+   - 150px: 15.8%
+
+2. **双核间距 (Valid Pairs)**:
+   - Median: 137 px
+   - **Mean: 161 px**
+   - **P75: 160 px**
+   - P95: 322 px (过大，离群)
+
+**结论**:
+- **边缘阈值**: 定为 **100px** (排除 ~5.6% 有效核，换取高 Precision)。
+- **合并阈值**: 定为 **1.5×直径 (~170px)**，完美覆盖 Mean/P75，避免 P95 的过度合并。
+
+**代码位置**: `dapi.py`, `evaluate_box_generation.py`
 
 ## E01: 类别不平衡修复
 
@@ -496,4 +576,57 @@ CombinedLoss import OK
 - `src/losses/combined.py`: SizeLoss 类
 
 **结论**: ✅ 使用 P1/P99 [40836, 513928] 覆盖 98% 正常细胞，排除标注异常。
+
+---
+
+## E18: SarcGraph 检测对比实验
+
+**日期**: 2026-01-23
+
+**背景/假设**: 
+当前 DAPI 核检测方案存在局限性（检测非心肌细胞核）。SarcGraph 方案利用 α-actinin 通道的 Z-线检测，理论上具有 100% 心肌细胞特异性。
+
+**方法**:
+基于 Claude Pipeline 的 SarcGraph 检测实现：
+1. **Z-线检测**: 使用 `blob_log` (LoG 算法) 检测肌节 Z-线
+2. **空间聚类**: 使用 DBSCAN 将 Z-线点聚类为细胞簇
+3. **边界框生成**: 从簇的凸包生成 Padding 后的边界框
+
+**参数** (经调优后):
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| pixel_size_um | 0.108 | 63X 物镜估算 |
+| sarcomere_length_um | 2.0 | 标准肌节长度 |
+| threshold (blob_log) | **0.05** | 优于默认 0.1 |
+| eps_factor | **2.0** | DBSCAN eps 系数 |
+| min_samples | **30** | 最小 Z-线数 (优于默认 15) |
+| padding_pixels | 20 | 边界框外扩 |
+
+**数据**:
+- Allen 数据源通道: **Ch1 = Actn2** (用户 Napari 确认)
+- 测试样本: 5 张
+
+**结果**:
+
+| 方法 | Mean F1 | Precision | Recall |
+|------|---------|-----------|--------|
+| **SarcGraph** | **0.351** | 0.229 | 0.843 |
+| DAPI | 0.277 | 0.180 | 0.971 |
+| **差异** | **+7.4%** | +4.9% | -12.8% |
+
+**分析**:
+- SarcGraph **精确率更高** (0.229 vs 0.180): 检测到的更可能是心肌细胞
+- DAPI **召回率更高** (0.971 vs 0.843): 能检测到更多细胞（包括非心肌）
+- SarcGraph 检测到 ~2000+ Z-lines/样本，聚类后生成 1-5 个框
+
+**代码位置**:
+- SarcGraph Pipeline: `src/comparison/sarcgraph_pipeline/`
+- 测试脚本: `tools/test_sarcgraph_detection.py`
+- 结果可视化: `experiments/e18_sarcgraph/sample_*_comparison.png`
+
+**结论**: ✅ SarcGraph 检测 F1 优于 DAPI +7.4%。
+后续可考虑：
+1. 将 SarcGraph 与 DAPI 检测**融合**（提高召回率）
+2. 使用 SarcGraph 边界框进行 SAM 分割训练
+3. 调整 min_samples 参数优化召回率
 

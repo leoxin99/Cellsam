@@ -1,8 +1,8 @@
 # CellSAM 项目方案 (Project Blueprint)
 
 > **文档类型**: 项目总览 (AI 必读)
-> **最后更新**: 2026-01-21
-> **当前阶段**: 阶段2 - 边界优化
+> **最后更新**: 2026-01-28
+> **当前阶段**: 阶段2.5 - 三通道模型适配 (进行中)
 
 ---
 
@@ -10,23 +10,45 @@
 
 ### 整体进度
 ```
-阶段1 数据准备   [████████████████████] 100%  ✅ 完成
-阶段2 模型训练   [████████████████░░░░]  80%  🔄 边界平滑优化中
-阶段3 评估验证   [████████░░░░░░░░░░░░]  40%  🔄 实例+像素评估完善
-阶段4 论文结果   [░░░░░░░░░░░░░░░░░░░░]   0%  ⏳ 待开始
+阶段1 数据准备       [████████████████████] 100%  ✅ 完成
+阶段2 检测优化       [████████████████████] 100%  ✅ 完成 (Hybrid DAPI+Actn2)
+阶段2.5 三通道适配   [████████░░░░░░░░░░░░]  40%  🔄 Semantic Mapper + Adapter 已完成
+阶段3 评估验证       [████░░░░░░░░░░░░░░░░]  20%  ⏳ 待全量评估
+阶段4 论文结果       [░░░░░░░░░░░░░░░░░░░░]   0%  ⏳ 待开始
 ```
 
 ### 关键指标
 | 指标 | 当前值 | 目标值 | 状态 |
 |-----|-------|-------|------|
-| **Detection F1** | **0.750** | 0.85+ | ✅ 良好 |
-| **Pixel Dice (E12)** | **0.7718** | 0.85+ | ✅ 当前最佳 |
-| **Instance Dice** | 待优化 | 0.7+ | 🔄 进行中 |
+| **Detection (Hybrid)** | ✅ 已验证 | - | ✅ 100% Adaptive Rate |
+| **Pixel Dice (Baseline)** | **0.7718** | 0.85+ | ✅ E12 基线 |
+| **Instance Dice** | 待评估 | 0.7+ | ⏳ 三通道后评估 |
 
 ### 当前最佳模型
-- **路径**: `checkpoints/boundary_20260111_012636/best_model.pt` (E12)
-- **输入**: BF × 3
-- **性能**: Pixel Dice 0.7718
+- **Baseline**: `checkpoints/boundary_20260111_012636/best_model.pt` (E12, BF×3)
+- **Next**: 三通道 (Actn2+Phase+DAPI) 模型
+
+---
+
+## ⚠️ 环境配置 (CRITICAL)
+
+**必须激活 conda 环境才能使用 GPU：**
+
+```bash
+conda activate cellsam
+```
+
+| 项目 | 值 |
+|------|-----|
+| **Conda 环境** | `cellsam` |
+| **CUDA** | 12.4 |
+| **PyTorch** | GPU 版本 |
+| **训练位置** | 本地 (非 ALICE) |
+
+> ⚠️ **重要**: 如果不激活环境，可能会使用系统 Python 导致 `CUDA not available` 错误。
+
+### AI 工作规范
+> **先方案后执行**: AI 在执行任何重大操作前，必须先提出方案供审批。
 
 ---
 
@@ -34,21 +56,33 @@
 
 ```
 src/
-├── inference/           # 统一推理模块 (NEW)
-│   ├── postprocess.py  # 6步边界平滑 + 大小验证
-│   ├── visualize.py    # 图着色
-│   └── pipeline.py     # run_sam_inference()
-├── detection/          # DAPI 检测模块 (NEW)
-│   └── dapi.py         # 核检测 + 智能双核合并
+├── detection/           # ✅ 已完成
+│   └── dapi.py          # Hybrid DAPI+Actn2 检测 (v3)
+│                        # - detect_nuclei (min_area=3000)
+│                        # - merge_close_nuclei (1.2x diameter)
+│                        # - detect_with_adaptive_box (Z-线引导)
+├── inference/           # ✅ 已完成
+│   ├── postprocess.py   # 6步边界平滑
+│   ├── visualize.py     # 图着色
+│   └── pipeline.py      # run_sam_inference()
+├── comparison/          # 参考实现
+│   └── sarcgraph_pipeline/
 ├── losses/
-│   └── combined.py     # Dice+BCE+Boundary+AJI+SizeLoss
-└── train.py            # 主训练入口
+│   └── combined.py      # Dice+BCE+Boundary+AJI
+└── train.py             # 主训练入口
 
 tools/
-└── run_inference.py    # 统一推理脚本 (NEW)
-```
+├── visualize_detection_comparison.py  # Napari 检测对比
+├── analyze_stats_final.py             # 参数统计脚本
+└── run_inference.py                   # 推理脚本
 
-详细架构: [docs/technical_details.md](docs/technical_details.md)
+docs/
+├── claude_pipeline_analysis.md  # 三通道设计方案 ⭐
+├── dataset_parameters.md        # 数据集参数
+├── design_decisions.md          # 设计决策
+├── troubleshooting.md           # 常见问题
+└── archive/                     # 过时文档归档
+```
 
 ---
 
@@ -56,78 +90,81 @@ tools/
 
 ### 阶段1: 数据准备 ✅
 - [x] 下载 Allen 数据集 (478 张 TIFF)
-- [x] 验证通道映射 (Ch0=BF, Ch4=DAPI, Ch9=GT)
-- [x] GT 统计分析 (E17: 5173 细胞, P1=40836, P99=513928)
+- [x] 验证通道映射 (Ch0=BF, Ch1=Actn2, Ch4=DAPI, Ch9=GT)
+- [x] GT 统计分析 (5173 细胞, P1=40836, P99=513928)
+- [x] 数据划分 (Dev=50, Train=400, Test=78)
 
-### 阶段2: 模型训练 🔄
-- [x] E12 边界损失微调 (当前最佳)
-- [x] 统一推理管道
-- [ ] 完整 478 样本训练
+### 阶段2: 检测优化 ✅
+- [x] DAPI 核检测 (Otsu + 形态学)
+- [x] 智能双核合并 (1.2x 直径, ratio<3.0)
+- [x] 边缘过滤 (50px, 误删率 1.3%)
+- [x] Z-线自适应框 (detect_with_adaptive_box)
+- [x] Napari 可视化验证
+
+### 阶段2.5: 三通道模型适配 🔄
+- [x] **[P0]** 语义通道映射 `SemanticChannelMapper` (R=Actn2, G=BF, B=DAPI)
+- [x] **[P0]** Channel Adapter 实现 `IndependentChannelAdapter` (3×3, ReLU)
+- [ ] **[P1]** 训练 Mask Decoder (冻结 ViT) ← 下一步
+- [ ] **[P1]** 验证三通道 vs 单通道效果
 
 ### 阶段3: 评估验证 ⏳
-- [ ] 完整测试集评估
+- [ ] 完整测试集评估 (78 张)
 - [ ] 消融实验
 
 ---
 
 ## 关键决策速查
 
-| 决策 | 选择 | 理由 | 详情 |
+| 决策 | 选择 | 理由 | 来源 |
 |------|------|------|------|
-| 训练框 | GT 框 | 解耦训练 | [详情](docs/design_decisions.md#2) |
-| 推理框 | DAPI 核检测 | CellFinder 失效 | [详情](docs/design_decisions.md#2) |
-| 归一化 | P2-P98 | 鲁棒于异常值 | [详情](docs/design_decisions.md#3) |
-| 冻结策略 | 仅训练 Decoder | 效率高，防过拟合 | [详情](docs/design_decisions.md#6) |
-| 大小阈值 | P1/P99 | 排除标注错误 | [E17](anti_test/experiments_log.md) |
-
-详细设计决策: [docs/design_decisions.md](docs/design_decisions.md)
+| **检测方案** | Hybrid DAPI+Actn2 | 定位+形状 | `dapi.py` |
+| **边缘过滤** | 50px | 误删 1.3% | `analyze_stats_final.py` |
+| **双核合并** | 1.2x 直径 | 防止误合并邻居 | `dapi.py` |
+| **核面积阈值** | ≥3000px | 过滤碎屑 | Dev Set 统计 |
+| **三通道输入** | 语义映射+Adapter | 适配预训练 ViT | `claude_pipeline_analysis.md` |
+| 训练框 | GT 框 | 解耦训练 | `design_decisions.md` |
+| 冻结策略 | 仅训练 Decoder | 防过拟合 | `design_decisions.md` |
 
 ---
 
-## 文档架构
+## 📚 新 AI 必读清单 (Required Reading)
 
+**只需阅读本文档即可开始工作。** 如需深入了解，按需查阅：
+
+| 优先级 | 文档 | 用途 |
+|--------|------|------|
+| **P0** | `CLAUDE.md` (本文件) | 项目总览、任务清单、关键决策 |
+| P1 | `docs/claude_pipeline_analysis.md` | 三通道设计详细方案 |
+| P1 | `docs/dataset_parameters.md` | 数据集统计和参数 |
+| P2 | `docs/design_decisions.md` | 设计决策的"为什么" |
+| P2 | `anti_test/experiments_log.md` | 完整实验历史 |
+
+---
+
+## 📊 关键实验历史 (Experiment Summary)
+
+| 实验 | 日期 | 内容 | 结果 |
+|------|------|------|------|
+| **E01** | 01-08 | 类别不平衡修复 | Dice 0→0.52 ✅ |
+| **E03** | 01-08 | DAPI 核检测方案 | F1=0.750 ✅ |
+| **E12** | 01-11 | 边界损失微调 | **PQ↑265%, 当前最佳** ⭐ |
+| E15b | 01-15 | 多通道 BF+DAPI+Actn2 | 劣于 E12 ❌ |
+| **E18** | 01-23 | SarcGraph 检测对比 | F1↑7.4% ✅ |
+
+> 完整记录: [anti_test/experiments_log.md](anti_test/experiments_log.md)
+
+---
+
+## 🚀 下一步训练命令
+
+```bash
+conda activate cellsam
+python src/train.py --config src/config/semantic_adapter.yaml
 ```
-d:/AI/paper/CellSam/
-├── CLAUDE.md                     # 📘 项目蓝图 (本文件) - AI 必读
-├── docs/
-│   ├── design_decisions.md       # 📐 设计决策详细理论
-│   ├── technical_details.md      # 🔧 技术规格
-│   └── troubleshooting.md        # � 常见问题解答
-├── anti_test/
-│   ├── experiments_log.md        # 📊 实验记录 (E01-E17)
-│   └── methods_draft.md          # 📝 论文 Methods 草稿
-└── src/                          # 源代码
-```
-
-| 文档 | 用途 | AI 操作 |
-|------|------|--------|
-| `CLAUDE.md` | 项目总览 | **必读** |
-| `experiments_log.md` | 实验追溯 | 必须记录 |
-| `design_decisions.md` | 论文参考 | 按需查阅 |
-| `troubleshooting.md` | 问题解决 | 按需查阅 |
 
 ---
 
-## AI 助手工作流程
-
-1. **首先阅读** `CLAUDE.md` 了解项目状态
-2. **查阅** `experiments_log.md` 了解已做实验
-3. **执行实验** 并记录到 `experiments_log.md`
-4. **更新** `CLAUDE.md` 状态仪表板 (有里程碑时)
-
----
-
-## 更新日志 (最近5条)
-
-| 日期 | 更新内容 |
-|-----|---------|
-| **2026-01-21** | **统一推理管道**, GT 统计 E17, 阈值 P1/P99, CLAUDE.md 优化 |
-| 2026-01-16 | 废弃 E15b 多通道, AMP 混合精度 |
-| 2026-01-14 | E14 智能扩展策略 +3.3% Dice |
-| 2026-01-11 | E12 边界损失微调 PQ↑265% |
-| 2026-01-09 | DAPI 检测替换 CellFinder |
-
-完整日志: [anti_test/experiments_log.md](anti_test/experiments_log.md)
+## 更新日志
 
 ---
 
@@ -144,4 +181,3 @@ d:/AI/paper/CellSam/
 ---
 
 *此文档由 AI 助手自动维护，每次重要进展后更新*
-*详细内容请查阅链接文档*

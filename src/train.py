@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from cellSAM import get_model
 from augmented_dataset import AugmentedAllenDataset, collate_fn, load_split_ids
 from losses.combined import CombinedLoss
+from adapters import IndependentChannelAdapter, LightweightChannelAdapter
 
 
 def load_config(config_path: str) -> dict:
@@ -39,8 +40,9 @@ def create_dataloaders(config: dict):
     train_ids = load_split_ids("train", config['data']['splits_dir'])
     val_ids = load_split_ids("val", config['data']['splits_dir'])
     
-    # Get use_bf_only from config (default False for multi-channel)
+    # Get flags from config
     use_bf_only = config['data'].get('use_bf_only', False)
+    use_semantic_mapping = config['data'].get('use_semantic_mapping', False)
     
     train_dataset = AugmentedAllenDataset(
         data_dir=config['data']['processed_data_dir'],
@@ -48,7 +50,8 @@ def create_dataloaders(config: dict):
         is_training=True,
         max_boxes_per_image=config['data']['max_boxes_per_image'],
         sample_ids=train_ids,
-        use_bf_only=use_bf_only
+        use_bf_only=use_bf_only,
+        use_semantic_mapping=use_semantic_mapping
     )
     
     val_dataset = AugmentedAllenDataset(
@@ -57,7 +60,8 @@ def create_dataloaders(config: dict):
         is_training=False,
         max_boxes_per_image=config['data']['max_boxes_per_image'],
         sample_ids=val_ids,
-        use_bf_only=use_bf_only
+        use_bf_only=use_bf_only,
+        use_semantic_mapping=use_semantic_mapping
     )
     
     train_loader = DataLoader(
@@ -80,14 +84,19 @@ def create_dataloaders(config: dict):
 
 
 def create_model(config: dict, device):
-    """Create or load CellSAM model."""
+    """Create or load CellSAM model and optional channel adapter."""
     model = get_model()
     
     # Load checkpoint if specified
     if config['model']['checkpoint']:
         checkpoint_path = config['model']['checkpoint']
         print(f"Loading checkpoint: {checkpoint_path}")
-        model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+        # Handle both dict format and direct state_dict
+        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+        else:
+            model.load_state_dict(checkpoint, strict=False)
     
     # Freeze layers as specified
     if config['model']['freeze_encoder']:
@@ -100,14 +109,38 @@ def create_model(config: dict, device):
             param.requires_grad = False
         print("Froze mask decoder")
     
-    return model.to(device)
+    # Create channel adapter if enabled
+    adapter = None
+    if config['model'].get('use_adapter', False):
+        adapter_config = config['model'].get('adapter', {})
+        adapter_type = adapter_config.get('type', 'independent')
+        
+        if adapter_type == 'independent':
+            adapter = IndependentChannelAdapter(
+                kernel_size=adapter_config.get('kernel_size', 3),
+                use_relu=adapter_config.get('use_relu', True)
+            )
+        else:
+            adapter = LightweightChannelAdapter()
+        
+        adapter = adapter.to(device)
+        print(f"Created {adapter_type} channel adapter ({adapter.get_param_count()} params)")
+    
+    return model.to(device), adapter
 
 
-def create_optimizer(model, config: dict):
+def create_optimizer(model, config: dict, adapter=None):
     """Create optimizer and scheduler."""
-    # Only train unfrozen parameters
+    # Collect trainable parameters from model
     trainable_params = [p for p in model.parameters() if p.requires_grad]
-    print(f"Trainable parameters: {sum(p.numel() for p in trainable_params):,}")
+    
+    # Add adapter parameters if present
+    if adapter is not None:
+        adapter_params = list(adapter.parameters())
+        trainable_params.extend(adapter_params)
+        print(f"Adapter parameters: {sum(p.numel() for p in adapter_params):,}")
+    
+    print(f"Total trainable parameters: {sum(p.numel() for p in trainable_params):,}")
     
     optimizer = torch.optim.AdamW(
         trainable_params,
@@ -125,9 +158,12 @@ def create_optimizer(model, config: dict):
     return optimizer, scheduler
 
 
-def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None):
+def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None, adapter=None):
     """Train one epoch with optional mixed precision (AMP)."""
     model.train()
+    if adapter is not None:
+        adapter.train()
+    
     total_loss = 0
     num_batches = 0
     use_amp = scaler is not None
@@ -139,7 +175,11 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
         
         optimizer.zero_grad()
         
-        # Preprocess images (frozen encoder - no grad needed)
+        # Apply channel adapter if present (TRAINABLE - keep gradients)
+        if adapter is not None:
+            images = adapter(images)
+        
+        # Preprocess images and get embeddings (frozen encoder - no grad needed)
         with torch.no_grad():
             if use_amp:
                 with autocast():
@@ -219,12 +259,20 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
             if use_amp:
                 scaler.scale(avg_loss).backward()
                 scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                # Clip gradients for both model and adapter
+                all_params = list(model.parameters())
+                if adapter is not None:
+                    all_params.extend(list(adapter.parameters()))
+                torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 avg_loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                # Clip gradients for both model and adapter
+                all_params = list(model.parameters())
+                if adapter is not None:
+                    all_params.extend(list(adapter.parameters()))
+                torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
                 optimizer.step()
             
             total_loss += avg_loss.item()
@@ -233,9 +281,12 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
     return total_loss / max(num_batches, 1)
 
 
-def validate(model, dataloader, criterion, device):
+def validate(model, dataloader, criterion, device, adapter=None):
     """Validation with Dice score computation."""
     model.eval()
+    if adapter is not None:
+        adapter.eval()
+    
     total_dice = 0
     total_loss = 0
     num_samples = 0
@@ -245,6 +296,10 @@ def validate(model, dataloader, criterion, device):
             images = batch['image'].to(device)
             masks = batch['mask'].to(device)
             boxes = batch['boxes']
+            
+            # Apply channel adapter if present
+            if adapter is not None:
+                images = adapter(images)
             
             img_preprocessed = model.sam_preprocess(images)
             image_embedding = model.model.image_encoder(img_preprocessed)
@@ -325,8 +380,8 @@ def main():
     train_loader, val_loader = create_dataloaders(config)
     print(f"Train samples: {len(train_loader.dataset)}, Val samples: {len(val_loader.dataset)}")
     
-    model = create_model(config, device)
-    optimizer, scheduler = create_optimizer(model, config)
+    model, adapter = create_model(config, device)
+    optimizer, scheduler = create_optimizer(model, config, adapter=adapter)
     
     criterion = CombinedLoss(
         pos_weight=config['loss']['pos_weight'],
@@ -348,19 +403,26 @@ def main():
     early_stop_patience = config['training'].get('early_stop_patience', 10)
     
     for epoch in range(config['training']['epochs']):
-        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device, scaler=scaler)
-        val_dice = validate(model, val_loader, criterion, device)
+        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device, scaler=scaler, adapter=adapter)
+        val_dice = validate(model, val_loader, criterion, device, adapter=adapter)
         scheduler.step()
         
         print(f"Epoch [{epoch+1}/{config['training']['epochs']}] "
               f"Train Loss: {train_loss:.4f}, Val Dice: {val_dice:.4f}, "
               f"LR: {scheduler.get_last_lr()[0]:.6f}")
         
-        # Save best model
+        # Save best model (including adapter if present)
         if val_dice > best_dice:
             best_dice = val_dice
             patience_counter = 0
-            torch.save(model.state_dict(), output_dir / "best_model.pt")
+            checkpoint = {
+                'model_state_dict': model.state_dict(),
+                'adapter_state_dict': adapter.state_dict() if adapter else None,
+                'epoch': epoch + 1,
+                'best_dice': best_dice,
+                'config': config,
+            }
+            torch.save(checkpoint, output_dir / "best_model.pt")
             print(f"  -> New best! Saved to {output_dir / 'best_model.pt'}")
         else:
             patience_counter += 1
@@ -368,9 +430,15 @@ def main():
                 print(f"\nEarly stopping triggered at epoch {epoch+1} (patience={early_stop_patience})")
                 break
         
-        # Periodic checkpoints
+        # Periodic checkpoints (including adapter)
         if (epoch + 1) % config['output']['save_every'] == 0:
-            torch.save(model.state_dict(), output_dir / f"epoch_{epoch+1}.pt")
+            checkpoint = {
+                'model_state_dict': model.state_dict(),
+                'adapter_state_dict': adapter.state_dict() if adapter else None,
+                'epoch': epoch + 1,
+                'val_dice': val_dice,
+            }
+            torch.save(checkpoint, output_dir / f"epoch_{epoch+1}.pt")
     
     print(f"\nTraining complete! Best Val Dice: {best_dice:.4f}")
     print(f"Model saved to: {output_dir}")
