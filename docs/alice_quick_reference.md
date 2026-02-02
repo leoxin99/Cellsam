@@ -1,6 +1,6 @@
 # ALICE 训练快速参考 (永久文档)
 
-> **最后更新**: 2026-02-02
+> **最后更新**: 2026-02-03
 
 ---
 
@@ -9,7 +9,8 @@
 | 项目 | 值 |
 |------|-----|
 | **集群地址** | `login.alice.universiteitleiden.nl` |
-| **SSH 命令** | `ssh <ULCN用户名>@login.alice.universiteitleiden.nl` |
+| **ULCN 用户名** | `s3890074` |
+| **SSH 命令** | `ssh s3890074@login.alice.universiteitleiden.nl` |
 | **VPN** | EduVPN → Leiden University → ULCN 登录 |
 | **项目目录** | `~/CellSam` |
 | **Conda 环境** | `cellsam` |
