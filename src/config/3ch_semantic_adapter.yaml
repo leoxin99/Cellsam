@@ -1,0 +1,38 @@
+# 3-Channel + Semantic Adapter - 完整多通道方案
+# 使用 Semantic Mapping + Independent Adapter
+
+experiment_name: "3ch_semantic_adapter"
+
+model:
+  type: "cellsam"
+  use_bf_only: false          # 使用全部 3 通道
+  use_semantic_mapping: true  # 使用语义映射 (R=Actn2, G=BF, B=DAPI)
+  use_adapter: true           # 使用 Adapter
+  adapter_type: "independent" # 独立通道 Adapter
+  pretrained_path: "cellSAM_source/sam_vit_b_01ec64.pth"
+
+data:
+  data_dir: "data/processed"
+  train_split: "data/splits/train_ids.txt"
+  val_split: "data/splits/val_ids.txt"
+  batch_size: 4
+  num_workers: 4
+
+loss:
+  dice_weight: 1.0
+  boundary_weight: 0.3
+  box_expand: 0.1
+
+training:
+  epochs: 100
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  early_stopping_patience: 15
+  scheduler: "cosine"
+  warmup_epochs: 5
+
+output:
+  checkpoint_dir: "checkpoints"
+  save_best: "3ch_semantic_adapter_best.pt"
+  save_last: "3ch_semantic_adapter_last.pt"
+  log_interval: 10

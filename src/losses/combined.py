@@ -228,7 +228,7 @@ class CombinedLoss(nn.Module):
             x1, y1, x2, y2 = box
             h, w = pred.shape[-2:]
             bw, bh = x2 - x1, y2 - y1
-            expand = 0.2
+            expand = 0.1  # Reduced from 0.2 to fix over-segmentation
             x1 = max(0, int(x1 - bw * expand))
             y1 = max(0, int(y1 - bh * expand))
             x2 = min(w, int(x2 + bw * expand))

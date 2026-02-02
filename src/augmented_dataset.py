@@ -384,6 +384,9 @@ class AugmentedAllenDataset(Dataset):
                 image = np.stack([bf, bf, bf], axis=0)
             else:
                 # Multi-channel: normalize each channel separately
+                # CRITICAL: Must convert to float32 BEFORE loop to avoid truncation!
+                # If image is uint8, assigning float32 (0-1) back truncates to 0/1
+                image = image.astype(np.float32)
                 for c in range(3):
                     image[..., c] = self._normalize_image(image[..., c])
                 image = image.transpose(2, 0, 1)  # (H, W, 3) -> (3, H, W)
