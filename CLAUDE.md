@@ -1,8 +1,8 @@
 # CellSAM 项目方案 (Project Blueprint)
 
 > **文档类型**: 项目总览 (AI 必读)
-> **最后更新**: 2026-01-28
-> **当前阶段**: 阶段2.5 - 三通道模型适配 (进行中)
+> **最后更新**: 2026-02-03
+> **当前阶段**: 阶段2.5 - 三通道消融训练 (准备提交 ALICE)
 
 ---
 
@@ -81,6 +81,9 @@ docs/
 ├── dataset_parameters.md        # 数据集参数
 ├── design_decisions.md          # 设计决策
 ├── troubleshooting.md           # 常见问题
+├── error_log_and_checklist.md   # ⭐ 错误归纳 + 训练前检查清单
+├── alice_quick_reference.md     # ALICE HPC 快速参考
+├── code_inventory.md            # 代码清单和归档状态
 └── archive/                     # 过时文档归档
 ```
 
@@ -134,10 +137,12 @@ docs/
 | 优先级 | 文档 | 用途 |
 |--------|------|------|
 | **P0** | `CLAUDE.md` (本文件) | 项目总览、任务清单、关键决策 |
-| P1 | `docs/claude_pipeline_analysis.md` | 三通道设计详细方案 |
-| P1 | `docs/dataset_parameters.md` | 数据集统计和参数 |
-| P2 | `docs/design_decisions.md` | 设计决策的"为什么" |
-| P2 | `anti_test/experiments_log.md` | 完整实验历史 |
+| **P0** | [error_log_and_checklist.md](docs/error_log_and_checklist.md) | ⚠️ **训练前必读** - 错误归纳 + 检查清单 |
+| P1 | [claude_pipeline_analysis.md](docs/claude_pipeline_analysis.md) | 三通道设计详细方案 |
+| P1 | [dataset_parameters.md](docs/dataset_parameters.md) | 数据集统计和参数 |
+| P2 | [design_decisions.md](docs/design_decisions.md) | 设计决策的"为什么" |
+| P2 | [experiments_log.md](docs/experiments_log.md) | 完整实验历史 |
+| P2 | [alice_quick_reference.md](docs/alice_quick_reference.md) | ALICE 登录/训练快速参考 |
 
 ---
 
@@ -155,11 +160,29 @@ docs/
 
 ---
 
-## 🚀 下一步训练命令
+## 🚀 训练前必须执行 (CRITICAL)
+
+**每次训练前必须运行验证脚本：**
 
 ```bash
 conda activate cellsam
-python src/train.py --config src/config/semantic_adapter.yaml
+python tools/verify_training_config.py
+```
+
+验证通过后才能开始训练！详见 [错误归纳与检查清单](docs/error_log_and_checklist.md)
+
+### 当前训练任务 (4 个消融实验)
+
+| 实验 | 配置文件 | 目的 |
+|------|----------|------|
+| E1 | `bf_baseline_v2.yaml` | 修复后基线 |
+| E2 | `boundary_enhanced.yaml` | 边界 Loss=0.5 |
+| E3 | `3ch_no_adapter.yaml` | 3通道无Adapter |
+| E4 | `3ch_semantic_adapter.yaml` | 3通道+Adapter |
+
+```bash
+# ALICE 上执行
+sbatch scripts/train_ablation_v2.sh
 ```
 
 ---
