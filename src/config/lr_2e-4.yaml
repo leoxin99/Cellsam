@@ -1,0 +1,42 @@
+# Learning Rate Ablation - LR = 2e-4 (高学习率)
+# 基于 bf_baseline_v2，只修改 learning_rate
+# Usage: python src/train.py --config src/config/lr_2e-4.yaml
+
+data:
+  splits_dir: "data/splits"
+  raw_data_dir: "data/raw/allen_segmented_fields_full"
+  processed_data_dir: "data/processed"
+  target_size: [1024, 1024]
+  max_boxes_per_image: 50
+  use_bf_only: true
+  use_semantic_mapping: false
+
+model:
+  checkpoint: null
+  freeze_encoder: true
+  freeze_decoder: false
+  use_adapter: false
+
+training:
+  epochs: 100
+  batch_size: 4
+  learning_rate: 0.0002  # 2e-4 (当前默认 1e-4 的两倍)
+  weight_decay: 0.0001
+  warmup_epochs: 5
+  early_stop_patience: 15
+
+loss:
+  type: "combined"
+  pos_weight: 10.0
+  boundary_weight: 0.3
+  use_boundary: true
+  box_expand: 0.1
+
+optimizer:
+  type: "adamw"
+  scheduler: "cosine_warmup"
+
+output:
+  checkpoint_dir: "checkpoints"
+  save_every: 5
+  experiment_name: "lr_2e-4"
