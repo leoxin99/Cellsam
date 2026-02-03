@@ -62,6 +62,20 @@
 | **修复** | 将 `experiment_name` 移到 `output:` 下 |
 | **教训** | **新配置文件必须参考现有工作配置的结构** |
 
+### 错误 6: 配置字段名称完全不匹配 ⭐⭐⭐
+
+| 项目 | 内容 |
+|------|------|
+| **发现日期** | 2026-02-03 |
+| **实验** | 897502 |
+| **问题文件** | `src/config/*.yaml` |
+| **错误代码** | `data.data_dir`, `data.train_split` 等自定义字段 |
+| **原因** | 未参照 `semantic_adapter.yaml` 的实际结构 |
+| **正确字段** | `data.splits_dir`, `data.processed_data_dir`, `data.target_size`, `data.max_boxes_per_image` |
+| **影响** | 训练立即失败 KeyError: 'splits_dir' |
+| **修复** | 完全重写配置，参照工作的 `semantic_adapter.yaml` |
+| **教训** | **创建新配置必须完全复制现有工作配置，只改关键参数！** |
+
 ---
 
 ## 二、训练前强制检查清单 ✅
