@@ -1,8 +1,6 @@
 # BF Baseline v2 - 修复后的基线模型
 # 主要修改: box_expand 0.2 → 0.1, uint8 bug 已修复
 
-experiment_name: "bf_baseline_v2"
-
 model:
   type: "cellsam"
   use_bf_only: true
@@ -31,6 +29,7 @@ training:
   warmup_epochs: 5
 
 output:
+  experiment_name: "bf_baseline_v2"
   checkpoint_dir: "checkpoints"
   save_best: "bf_baseline_v2_best.pt"
   save_last: "bf_baseline_v2_last.pt"

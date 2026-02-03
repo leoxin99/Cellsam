@@ -1,8 +1,6 @@
 # 3-Channel No Adapter - 多通道消融基线
 # 直接使用 3 通道输入，不使用 Semantic Mapping 或 Adapter
 
-experiment_name: "3ch_no_adapter"
-
 model:
   type: "cellsam"
   use_bf_only: false         # 使用全部 3 通道
@@ -31,6 +29,7 @@ training:
   warmup_epochs: 5
 
 output:
+  experiment_name: "3ch_no_adapter"
   checkpoint_dir: "checkpoints"
   save_best: "3ch_no_adapter_best.pt"
   save_last: "3ch_no_adapter_last.pt"

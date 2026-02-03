@@ -1,8 +1,6 @@
 # Boundary Enhanced - 增强边界 Loss 权重
 # 主要修改: boundary_weight 0.3 → 0.5
 
-experiment_name: "boundary_enhanced"
-
 model:
   type: "cellsam"
   use_bf_only: true
@@ -31,6 +29,7 @@ training:
   warmup_epochs: 5
 
 output:
+  experiment_name: "boundary_enhanced"
   checkpoint_dir: "checkpoints"
   save_best: "boundary_enhanced_best.pt"
   save_last: "boundary_enhanced_last.pt"

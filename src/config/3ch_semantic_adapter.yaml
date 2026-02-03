@@ -1,8 +1,6 @@
 # 3-Channel + Semantic Adapter - 完整多通道方案
 # 使用 Semantic Mapping + Independent Adapter
 
-experiment_name: "3ch_semantic_adapter"
-
 model:
   type: "cellsam"
   use_bf_only: false          # 使用全部 3 通道
@@ -32,6 +30,7 @@ training:
   warmup_epochs: 5
 
 output:
+  experiment_name: "3ch_semantic_adapter"
   checkpoint_dir: "checkpoints"
   save_best: "3ch_semantic_adapter_best.pt"
   save_last: "3ch_semantic_adapter_last.pt"

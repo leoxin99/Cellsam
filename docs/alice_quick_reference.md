@@ -83,3 +83,47 @@ mkdir -p logs checkpoints
 
 python src/train.py --config src/config/CONFIG_FILE.yaml
 ```
+
+---
+
+## 六、Git 管理设置 (推荐)
+
+> **之前使用 scp 上传，现改为 git 管理更可靠**
+
+### 首次设置 (在 ALICE 上一次性执行)
+
+```bash
+# SSH 登录后
+cd ~/CellSam
+
+# 如果已有非 git 文件，先备份 checkpoints
+mv checkpoints ~/checkpoints_backup
+
+# 初始化 git
+rm -rf .git  # 清理可能存在的不完整 .git
+git init
+git remote add origin https://github.com/leoxin99/CellSam.git
+git fetch origin
+git reset --hard origin/main
+
+# 恢复 checkpoints
+mv ~/checkpoints_backup checkpoints
+```
+
+### 日常更新流程
+
+```bash
+# 本地修改后
+git add -A && git commit -m "Update" && git push
+
+# ALICE 上同步
+ssh s3890074@login.alice.universiteitleiden.nl "cd ~/CellSam && git pull origin main"
+```
+
+### SCP vs Git 对比
+
+| 方面 | SCP | Git |
+|------|-----|-----|
+| **可靠性** | ⚠️ 易遗漏 | ✅ 自动同步 |
+| **版本追踪** | ❌ 无 | ✅ 有 |
+| **推荐场景** | 紧急修复 | 日常开发 |
