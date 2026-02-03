@@ -17,6 +17,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.cuda.amp import GradScaler, autocast
 import yaml
+from scipy import ndimage
 
 # Add paths
 sys.path.insert(0, str(Path(__file__).parent.parent / "cellSAM_source"))
@@ -26,6 +27,67 @@ from cellSAM import get_model
 from augmented_dataset import AugmentedAllenDataset, collate_fn, load_split_ids
 from losses.combined import CombinedLoss
 from adapters import IndependentChannelAdapter, LightweightChannelAdapter
+
+
+def compute_pq(pred_mask, gt_mask, iou_threshold=0.5):
+    """
+    Compute Panoptic Quality (PQ) for instance segmentation.
+    
+    PQ = SQ × RQ
+    - SQ (Segmentation Quality): average IoU of matched instances  
+    - RQ (Recognition Quality): TP / (TP + 0.5*FP + 0.5*FN)
+    
+    Returns: pq, sq, rq
+    """
+    # Label connected components in prediction
+    pred_binary = (pred_mask > 0.5).astype(np.int32)
+    pred_labeled, n_pred = ndimage.label(pred_binary)
+    
+    # Get unique GT labels
+    gt_labels = np.unique(gt_mask)
+    gt_labels = gt_labels[gt_labels > 0]
+    n_gt = len(gt_labels)
+    
+    if n_pred == 0 and n_gt == 0:
+        return 1.0, 1.0, 1.0
+    if n_pred == 0 or n_gt == 0:
+        return 0.0, 0.0, 0.0
+    
+    # Match predictions to GT using IoU
+    matched_gt = set()
+    matched_ious = []
+    
+    for pred_id in range(1, n_pred + 1):
+        pred_region = (pred_labeled == pred_id)
+        best_iou = 0
+        best_gt_id = -1
+        
+        for gt_id in gt_labels:
+            if gt_id in matched_gt:
+                continue
+            gt_region = (gt_mask == gt_id)
+            
+            intersection = np.logical_and(pred_region, gt_region).sum()
+            union = np.logical_or(pred_region, gt_region).sum()
+            iou = intersection / (union + 1e-8)
+            
+            if iou > best_iou:
+                best_iou = iou
+                best_gt_id = gt_id
+        
+        if best_iou >= iou_threshold:
+            matched_gt.add(best_gt_id)
+            matched_ious.append(best_iou)
+    
+    tp = len(matched_ious)
+    fp = n_pred - tp
+    fn = n_gt - tp
+    
+    sq = np.mean(matched_ious) if matched_ious else 0.0
+    rq = tp / (tp + 0.5 * fp + 0.5 * fn) if (tp + fp + fn) > 0 else 0.0
+    pq = sq * rq
+    
+    return pq, sq, rq
 
 
 def load_config(config_path: str) -> dict:
@@ -281,14 +343,14 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
     return total_loss / max(num_batches, 1)
 
 
-def validate(model, dataloader, criterion, device, adapter=None):
-    """Validation with Dice score computation."""
+def validate(model, dataloader, criterion, device, adapter=None, use_pq=False):
+    """Validation with Dice and optionally PQ score computation."""
     model.eval()
     if adapter is not None:
         adapter.eval()
     
     total_dice = 0
-    total_loss = 0
+    total_pq = 0
     num_samples = 0
     
     with torch.no_grad():
@@ -345,11 +407,21 @@ def validate(model, dataloader, criterion, device, adapter=None):
                 
                 intersection = (pred_binary * target_binary).sum()
                 dice = (2 * intersection) / (pred_binary.sum() + target_binary.sum() + 1e-8)
-                
                 total_dice += dice.item()
+                
+                # Compute PQ if enabled
+                if use_pq:
+                    pred_np = combined_pred.cpu().numpy()
+                    gt_np = sample_mask.cpu().numpy()
+                    pq, _, _ = compute_pq(pred_np, gt_np, iou_threshold=0.5)
+                    total_pq += pq
+                
                 num_samples += 1
     
-    return total_dice / max(num_samples, 1)
+    avg_dice = total_dice / max(num_samples, 1)
+    avg_pq = total_pq / max(num_samples, 1) if use_pq else 0.0
+    
+    return avg_dice, avg_pq
 
 
 def main():
@@ -399,31 +471,52 @@ def main():
     
     # Training loop
     best_dice = 0
+    best_pq = 0
     patience_counter = 0
     early_stop_patience = config['training'].get('early_stop_patience', 10)
+    use_pq_early_stop = config['training'].get('use_pq_early_stop', False)
+    
+    if use_pq_early_stop:
+        print("Using PQ (Panoptic Quality) for early stopping")
+    else:
+        print("Using Dice for early stopping")
     
     for epoch in range(config['training']['epochs']):
         train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device, scaler=scaler, adapter=adapter)
-        val_dice = validate(model, val_loader, criterion, device, adapter=adapter)
+        val_dice, val_pq = validate(model, val_loader, criterion, device, adapter=adapter, use_pq=use_pq_early_stop)
         scheduler.step()
+        
+        # Select metric for early stopping
+        if use_pq_early_stop:
+            current_metric = val_pq
+            best_metric = best_pq
+            metric_name = "PQ"
+        else:
+            current_metric = val_dice
+            best_metric = best_dice
+            metric_name = "Dice"
         
         print(f"Epoch [{epoch+1}/{config['training']['epochs']}] "
               f"Train Loss: {train_loss:.4f}, Val Dice: {val_dice:.4f}, "
-              f"LR: {scheduler.get_last_lr()[0]:.6f}")
+              f"Val PQ: {val_pq:.4f}, LR: {scheduler.get_last_lr()[0]:.6f}")
         
         # Save best model (including adapter if present)
-        if val_dice > best_dice:
-            best_dice = val_dice
+        if current_metric > best_metric:
+            if use_pq_early_stop:
+                best_pq = val_pq
+            else:
+                best_dice = val_dice
             patience_counter = 0
             checkpoint = {
                 'model_state_dict': model.state_dict(),
                 'adapter_state_dict': adapter.state_dict() if adapter else None,
                 'epoch': epoch + 1,
-                'best_dice': best_dice,
+                'best_dice': val_dice,
+                'best_pq': val_pq,
                 'config': config,
             }
             torch.save(checkpoint, output_dir / "best_model.pt")
-            print(f"  -> New best! Saved to {output_dir / 'best_model.pt'}")
+            print(f"  -> New best {metric_name}! Saved to {output_dir / 'best_model.pt'}")
         else:
             patience_counter += 1
             if patience_counter >= early_stop_patience:
@@ -437,10 +530,11 @@ def main():
                 'adapter_state_dict': adapter.state_dict() if adapter else None,
                 'epoch': epoch + 1,
                 'val_dice': val_dice,
+                'val_pq': val_pq,
             }
             torch.save(checkpoint, output_dir / f"epoch_{epoch+1}.pt")
     
-    print(f"\nTraining complete! Best Val Dice: {best_dice:.4f}")
+    print(f"\nTraining complete! Best Val Dice: {best_dice:.4f}, Best Val PQ: {best_pq:.4f}")
     print(f"Model saved to: {output_dir}")
 
 
