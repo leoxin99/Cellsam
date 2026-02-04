@@ -154,6 +154,71 @@ class AJILoss(nn.Module):
         return aji_loss
 
 
+class TopologyLoss(nn.Module):
+    """
+    Topology constraint loss for cell segmentation.
+    
+    Penalizes:
+    1. Small fragments (connected components smaller than min_size)
+    2. Multiple disconnected regions per prediction
+    
+    Based on E17 analysis: min_size=40836 (P1)
+    """
+    
+    def __init__(self, min_size: int = 40836, max_components: int = 1):
+        """
+        Args:
+            min_size: Minimum valid component size (from E17 P1)
+            max_components: Expected number of components per cell (usually 1)
+        """
+        super().__init__()
+        self.min_size = min_size
+        self.max_components = max_components
+    
+    def forward(self, pred: torch.Tensor, target: torch.Tensor = None) -> torch.Tensor:
+        """
+        Compute topology loss.
+        
+        Args:
+            pred: Prediction probabilities (after sigmoid), shape (H, W)
+            target: Not used, for API consistency
+        
+        Returns:
+            Topology loss value
+        """
+        from scipy import ndimage
+        
+        # Binarize prediction
+        pred_binary = (pred > 0.5).float().cpu().numpy()
+        
+        # Label connected components
+        labeled, n_components = ndimage.label(pred_binary)
+        
+        if n_components == 0:
+            return torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
+        
+        # Fragment penalty: count small components
+        fragment_count = 0
+        total_fragment_area = 0
+        
+        for i in range(1, n_components + 1):
+            component_size = (labeled == i).sum()
+            if component_size < self.min_size:
+                fragment_count += 1
+                total_fragment_area += component_size
+        
+        # Penalty based on fragment ratio
+        fragment_penalty = fragment_count / max(n_components, 1)
+        
+        # Component count penalty: penalize multiple disconnected regions
+        component_penalty = max(0, n_components - self.max_components) / max(n_components, 1)
+        
+        # Combined penalty
+        loss = 0.5 * fragment_penalty + 0.5 * component_penalty
+        
+        return torch.tensor(loss, device=pred.device, dtype=pred.dtype)
+
+
 class SizeLoss(nn.Module):
     """
     Size constraint loss for cell segmentation.
@@ -166,36 +231,55 @@ class SizeLoss(nn.Module):
     - Median: 142316 pixels
     """
     
-    def __init__(self, min_area: int = 40836, max_area: int = 513928, smooth: float = 1.0):
+    def __init__(self, min_area: int = 40836, max_area: int = 513928, 
+                 smooth: float = 1.0, margin: float = 0.2):
+        """
+        Args:
+            min_area: Minimum expected cell area (P1 from E17)
+            max_area: Maximum expected cell area (P99 from E17)
+            smooth: Smoothing factor for area ratio
+            margin: Soft margin percentage (0.2 = 20% transition zone)
+        """
         super().__init__()
         self.min_area = min_area
         self.max_area = max_area
         self.smooth = smooth
+        self.margin = margin
+        
+        # Soft boundaries
+        self.soft_min = int(min_area * (1 - margin))  # 20% below P1
+        self.soft_max = int(max_area * (1 + margin))  # 20% above P99
     
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """
-        Compute size loss.
+        Compute size loss with soft thresholds.
         
-        Args:
-            pred: Prediction probabilities (after sigmoid)
-            target: Binary ground truth
-        
-        Returns:
-            Size loss value
+        Penalty is:
+        - 0 if area within [min_area, max_area]
+        - Linear 0->1 in transition zones [soft_min, min_area] and [max_area, soft_max]
+        - 1 if outside soft boundaries
         """
         pred_area = pred.sum()
         target_area = target.sum()
         
-        # Relative size difference
+        # Relative size difference (always apply)
         size_diff = torch.abs(pred_area - target_area) / (target_area + self.smooth)
         
-        # Additional penalty if prediction is outside expected range
+        # Soft boundary penalty
         boundary_penalty = torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
         
-        if pred_area < self.min_area:
-            boundary_penalty = (self.min_area - pred_area) / self.min_area
+        if pred_area < self.soft_min:
+            # Fully outside lower bound
+            boundary_penalty = torch.tensor(1.0, device=pred.device, dtype=pred.dtype)
+        elif pred_area < self.min_area:
+            # In lower transition zone: linear interpolation
+            boundary_penalty = (self.min_area - pred_area) / (self.min_area - self.soft_min)
+        elif pred_area > self.soft_max:
+            # Fully outside upper bound
+            boundary_penalty = torch.tensor(1.0, device=pred.device, dtype=pred.dtype)
         elif pred_area > self.max_area:
-            boundary_penalty = (pred_area - self.max_area) / self.max_area
+            # In upper transition zone: linear interpolation
+            boundary_penalty = (pred_area - self.max_area) / (self.soft_max - self.max_area)
         
         return size_diff + 0.5 * boundary_penalty
 
