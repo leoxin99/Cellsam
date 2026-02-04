@@ -20,13 +20,13 @@
 ### 关键指标
 | 指标 | 当前值 | 目标值 | 状态 |
 |-----|-------|-------|------|
-| **Detection (Hybrid)** | ✅ 已验证 | - | ✅ 100% Adaptive Rate |
-| **Pixel Dice (Baseline)** | **0.7718** | 0.85+ | ✅ E12 基线 |
-| **Instance Dice** | 待评估 | 0.7+ | ⏳ 三通道后评估 |
+| **Detection (Hybrid)** | F1=78% | - | ✅ E23 修复后 |
+| **Pixel Dice (最佳)** | **0.7595** | 0.85+ | ✅ E25 Boundary Enhanced |
+| **Instance PQ** | 待评估 | 0.5+ | ⏳ 需 PQ 评估 |
 
 ### 当前最佳模型
-- **Baseline**: `checkpoints/boundary_20260111_012636/best_model.pt` (E12, BF×3)
-- **Next**: 三通道 (Actn2+Phase+DAPI) 模型
+- **最佳 Dice**: `checkpoints/boundary_enhanced_best.pt` (E25, Dice=0.7595)
+- **三通道**: `checkpoints/3ch_semantic_adapter_best.pt` (E27, Dice=0.7520)
 
 ---
 

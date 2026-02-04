@@ -35,8 +35,8 @@
 | E24 | 2026-02-03 | BF Baseline v2 (A100) | Val Dice=0.7520 | ✅ 完成 |
 | E25 | 2026-02-03 | Boundary Enhanced (L4) | Val Dice=0.7595 | ✅ 完成 |
 | E26 | 2026-02-03 | 3ch No Adapter (L4) | Val Dice=0.7549 | ✅ 完成 |
-| E27 | 2026-02-04 | 3ch Semantic Adapter (A100) | Job 899581_0 | 🔄 运行中 |
-| E28 | 2026-02-04 | BF Adapter (A100) | Job 899581_1 | ⏳ 队列中 |
+| E27 | 2026-02-04 | 3ch Semantic Adapter (A100) | Val Dice=0.7520 | ✅ 完成 |
+| E28 | 2026-02-04 | BF Adapter (A100) | Val Dice=0.7337 | ✅ 完成 |
 
 ---
 
