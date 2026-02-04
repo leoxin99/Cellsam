@@ -115,9 +115,16 @@ docs/
 - [ ] 消融实验
 
 ### 待实现任务 (Future Tasks)
-- [ ] **学习率消融实验**: 测试 lr=5e-5, 1e-4, 2e-4 对比 (配置已创建)
-- [ ] **Actn2 区域掩码**: 用 Actn2 信号限制分割区域，减少误分割
+- [ ] **学习率消融实验**: 测试 lr=5e-5, 1e-4, 2e-4 对比 (配置已创建: `lr_5e-5.yaml`, `lr_2e-4.yaml`)
+- [x] **Actn2 区域掩码 (方案B)**: ✅ 已实现 `use_actn2_mask` 参数
+- [ ] **Actn2 训练时约束 (方案C)**: 在 loss 中添加 Actn2 边界惩罚
 - [ ] **部分解冻 Encoder**: 只训练 ViT 最后 2-4 层
+- [ ] **边界增强数据增强**: GridDistortion, 边界扰动 (当前已有 ElasticTransform)
+
+### 最近更新
+- **PQ 早停**: `train.py` 支持 `use_pq_early_stop: true` 配置
+- **Actn2 掩码**: `comprehensive_eval.py` 支持 `use_actn2_mask=True`
+- **A100 训练**: Job 899581 正在运行 (3ch_semantic_adapter, bf_adapter)
 
 ---
 

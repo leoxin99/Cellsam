@@ -71,8 +71,20 @@ def load_model_with_config(config, device):
     return model, adapter
 
 
-def segment_image(model, image, boxes, device, adapter=None, semantic=False):
-    """Segment image using model."""
+def segment_image(model, image, boxes, device, adapter=None, semantic=False, use_actn2_mask=False, actn2_threshold=0.1):
+    """Segment image using model.
+    
+    Args:
+        use_actn2_mask: If True, clip predictions to Actn2 signal region
+        actn2_threshold: Threshold for Actn2 binarization (0-1)
+    """
+    # Prepare Actn2 mask if enabled
+    actn2_region_mask = None
+    if use_actn2_mask:
+        actn2_channel = image[2].astype(np.float32)
+        actn2_normalized = (actn2_channel - actn2_channel.min()) / (actn2_channel.max() - actn2_channel.min() + 1e-8)
+        actn2_region_mask = actn2_normalized > actn2_threshold
+    
     # Prepare input
     if semantic and adapter is not None:
         # Use semantic channel mapping: [Actn2, BF, DAPI]
@@ -137,6 +149,10 @@ def segment_image(model, image, boxes, device, adapter=None, semantic=False):
             # Create clipped mask
             mask_clipped = np.zeros_like(mask)
             mask_clipped[y1_clip:y2_clip, x1_clip:x2_clip] = mask[y1_clip:y2_clip, x1_clip:x2_clip]
+            
+            # === NEW: Apply Actn2 region mask ===
+            if use_actn2_mask and actn2_region_mask is not None:
+                mask_clipped = mask_clipped & actn2_region_mask
             
             pred_mask[mask_clipped] = i + 1
             
