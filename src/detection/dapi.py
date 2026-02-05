@@ -138,7 +138,7 @@ def merge_close_nuclei(regions: list,
     return [[regions[i] for i in indices] for indices in groups.values()]
 
 
-def is_on_edge(region, image_shape: tuple, margin: int = 30) -> bool:
+def is_on_edge(region, image_shape: tuple, margin: int = 20) -> bool:  # Updated 2026-02-05: based on P5 edge dist=6
     """Check if a region touches the image edge."""
     y1, x1, y2, x2 = region.bbox
     h, w = image_shape
@@ -152,7 +152,7 @@ def create_bounding_boxes(cell_groups: list,
                           expansion_isotropic: float = 4.0,
                           round_threshold: float = 1.3,
                           exclude_edges: bool = True,
-                          margin: int = 50) -> list:
+                          margin: int = 32) -> list:  # Updated 2026-02-05: scaled from 50 @ 1608->32 @ 1024
     """
     Create bounding boxes from nucleus groups with smart anisotropic expansion.
     
@@ -167,7 +167,7 @@ def create_bounding_boxes(cell_groups: list,
         expansion_isotropic: Expansion for round nuclei
         round_threshold: Aspect ratio threshold for "round" classification
         exclude_edges: Whether to exclude edge-touching nuclei
-        margin: Edge margin in pixels (default 100px based on Dev Set analysis)
+        margin: Edge margin in pixels (32px @ 1024, verified 2026-02-05)
     
     Returns:
         List of boxes [[x1, y1, x2, y2], ...]
@@ -522,13 +522,13 @@ def create_adaptive_box(nucleus_group: list,
 
 def detect_with_adaptive_box(dapi_channel: np.ndarray,
                              actn2_channel: np.ndarray,
-                             min_nucleus_area: int = 500,
-                             max_nucleus_area: int = 30000,
-                             search_radius: int = 400,
+                             min_nucleus_area: int = 200,   # Updated 2026-02-05: for 1024px
+                             max_nucleus_area: int = 10000, # Updated 2026-02-05: P99 @ 1024
+                             search_radius: int = 256,      # Updated 2026-02-05: ~half GT box P99
                              min_zlines: int = 15,
                              zline_threshold: float = 0.03,
                              exclude_edges: bool = True,
-                             margin: int = 50) -> tuple:
+                             margin: int = 32) -> tuple:    # Updated 2026-02-05: scaled
     """
     DAPI + Actn2 hybrid detection with adaptive box sizing.
     
