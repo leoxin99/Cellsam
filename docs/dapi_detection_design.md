@@ -120,12 +120,12 @@ else:  # 椭圆核
 - `detect_zlines_in_region()`: blob_log Z-线检测
 - `create_adaptive_box()`: 自适应框生成
 
-**参数**:
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| search_radius | 400 | Z-线搜索半径 |
-| min_zlines | 15 | 最小 Z-线数 |
-| zline_threshold | 0.03 | blob_log 阈值 |
+**参数** (更新 2026-02-05):
+| 参数 | 旧值 | 新值 (1024px) | 说明 |
+|------|------|---------------|------|
+| search_radius | 400 | **256** | Z-线搜索半径 |
+| min_zlines | 15 | **15** | 最小 Z-线数 |
+| zline_threshold | 0.03 | **0.03** | blob_log 阈值 |
 
 ---
 
@@ -161,19 +161,48 @@ else:  # 椭圆核
 
 ---
 
-## 三、当前最优参数
+### v5.0 (2026-02-05) - 分辨率修正 ⭐
 
-| 参数 | 值 | 来源 |
-|------|-----|------|
-| min_nucleus_area | **2000** | E22 消融 |
-| max_nucleus_area | 20000 | E22 (insensitive) |
-| use_relative_distance | **True** | E19/E22 |
-| merge_coeff | 1.2 | E19 数据驱动 |
-| size_ratio_threshold | 3.0 | 经验值 |
-| edge_margin | **100** | E19 数据驱动 |
-| expansion_long | 5.0 | E14 分析 |
-| expansion_short | 3.0 | E14 分析 |
-| round_threshold | 1.3 | 经验值 |
+**背景**: 发现原始图像分辨率记录错误 (Error 7)
+
+**问题**:
+- 文档记录图像尺寸: 1608×1608 (错误)
+- 实际图像尺寸: **1736×1776** (正确)
+- 训练分辨率: 1024×1024
+- 缩放系数: (1024/1756)² = **0.340** (非 0.4055)
+
+**参数重新统计** (Dev Set 50张, 1024px):
+| 统计量 | 值 | 说明 |
+|--------|-----|------|
+| 核 P1 | 57 | 最小阈值参考 |
+| 核 Median | 3268 | 典型核大小 |
+| 核 P99 | 10026 | 最大阈值参考 |
+| 边距 P5 | 6 | margin 参考 |
+
+**参数更新** (全部函数):
+| 参数 | 旧值 | 新值 | 函数 |
+|------|------|------|------|
+| min_area | 500 | **200** | detect_nuclei |
+| max_area | 30000 | **10000** | detect_nuclei |
+| margin | 30/50 | **20/32** | is_on_edge, create_bounding_boxes |
+| search_radius | 400 | **256** | detect_zlines_in_region |
+
+---
+
+## 三、当前最优参数 (更新 2026-02-05)
+
+| 参数 | 值 | 分辨率 | 来源 |
+|------|-----|--------|------|
+| min_nucleus_area | **200** | 1024px | 2026-02-05 重新统计 |
+| max_nucleus_area | **10000** | 1024px | P99 @ 1024 |
+| use_relative_distance | **True** | - | E19/E22 |
+| merge_coeff | 1.2 | - | E19 数据驱动 |
+| size_ratio_threshold | 3.0 | - | 经验值 |
+| edge_margin | **32** | 1024px | scaled from 50 |
+| expansion_long | 5.0 | - | E14 分析 |
+| expansion_short | 3.0 | - | E14 分析 |
+| search_radius | **256** | 1024px | ~P99 box/2 |
+| round_threshold | 1.3 | - | 经验值 |
 
 ---
 
@@ -181,8 +210,7 @@ else:  # 椭圆核
 
 ### 4.1 detect_nuclei()
 
-```python
-def detect_nuclei(dapi_channel, min_area=500, max_area=30000):
+```python\ndef detect_nuclei(dapi_channel, min_area=200, max_area=10000):  # Updated 2026-02-05
     # 1. 对比度归一化 (P2-P98 拉伸)
     p2, p98 = np.percentile(dapi_channel, [2, 98])
     img_norm = (dapi_channel - p2) / (p98 - p2)
@@ -234,7 +262,7 @@ def merge_close_nuclei(regions, size_ratio_threshold=3.0, use_relative_distance=
 def create_bounding_boxes(cell_groups, image_shape, ...):
     for group in cell_groups:
         # 1. 边缘排除
-        if any(is_on_edge(r, margin=100) for r in group):
+        if any(is_on_edge(r, margin=32) for r in group):  # Updated 2026-02-05
             continue
         
         # 2. 计算核长宽比
