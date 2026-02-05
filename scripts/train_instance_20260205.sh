@@ -11,7 +11,7 @@
 #SBATCH --output=logs/inst_train_%A_%a.out
 #SBATCH --error=logs/inst_train_%A_%a.err
 #SBATCH --time=12:00:00
-#SBATCH --partition=gpu-a100
+#SBATCH --partition=gpu-a100-80g
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
