@@ -11,10 +11,11 @@ from skimage import morphology, measure
 
 
 # Cell size thresholds based on GT analysis of FULL dataset (478 images, 5173 cells)
-# Min: 6240 (may include annotation errors), P1: 40836, Median: 142316, P99: 513928, Max: 1026328
+# Original (1608px): Min=6240, P1=40836, Median=142316, P99=513928, Max=1026328
+# Scaled to 1024px (×0.4055): P1=16559, Median=57699, P99=208378
 # Using P1/P99 to exclude potential annotation errors (holes, debris)
-MIN_CELL_AREA = 40836    # P1 of GT distribution
-MAX_CELL_AREA = 513928   # P99 of GT distribution
+MIN_CELL_AREA = 16559    # P1 of GT distribution (scaled to 1024)
+MAX_CELL_AREA = 208378   # P99 of GT distribution (scaled to 1024)
 
 
 def smooth_boundary(pred_binary: np.ndarray, sigma_first: int = 7, 
@@ -38,7 +39,7 @@ def smooth_boundary(pred_binary: np.ndarray, sigma_first: int = 7,
     # Step 1: Initial morphological cleanup
     pred = morphology.binary_closing(pred, morphology.disk(5))
     pred = ndimage.binary_fill_holes(pred)
-    pred = morphology.remove_small_objects(pred, min_size=500)
+    pred = morphology.remove_small_objects(pred, min_size=200)  # Scaled from 500
     
     # Step 2: Strong Gaussian smoothing
     smoothed = gaussian_filter(pred.astype(float), sigma=sigma_first)
@@ -52,7 +53,7 @@ def smooth_boundary(pred_binary: np.ndarray, sigma_first: int = 7,
     
     # Step 5: Final cleanup
     pred = ndimage.binary_fill_holes(pred)
-    pred = morphology.remove_small_objects(pred, min_size=500)
+    pred = morphology.remove_small_objects(pred, min_size=200)  # Scaled from 500
     
     # Step 6: Second Gaussian pass for extra smoothness
     smoothed = gaussian_filter(pred.astype(float), sigma=sigma_second)

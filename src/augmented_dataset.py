@@ -100,14 +100,14 @@ def get_train_transforms(target_size=(1024, 1024)):
             p=0.5
         ),
         A.ElasticTransform(
-            alpha=120,
+            alpha=60,  # Reduced from 120 (2026-02-05)
             sigma=12,
             p=0.3
         ),
         # GridDistortion for boundary robustness (Added 2026-02-05)
         A.GridDistortion(
             num_steps=5,
-            distort_limit=0.3,
+            distort_limit=0.15,  # Reduced from 0.3 (2026-02-05)
             p=0.3
         ),
         

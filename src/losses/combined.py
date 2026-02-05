@@ -172,13 +172,14 @@ class TopologyLoss(nn.Module):
     1. Small fragments (connected components smaller than min_size)
     2. Multiple disconnected regions per prediction
     
-    Based on E17 analysis: min_size=40836 (P1)
+    Based on E17 analysis (1608px → 1024px scaled):
+    - Original P1: 40836 → Scaled: 16559 (×0.4055)
     """
     
-    def __init__(self, min_size: int = 40836, max_components: int = 1):
+    def __init__(self, min_size: int = 16559, max_components: int = 1):
         """
         Args:
-            min_size: Minimum valid component size (from E17 P1)
+            min_size: Minimum valid component size (E17 P1 scaled to 1024)
             max_components: Expected number of components per cell (usually 1)
         """
         super().__init__()
@@ -237,16 +238,16 @@ class SizeLoss(nn.Module):
     encouraging the model to learn correct cell boundaries.
     
     Based on GT analysis (FULL dataset: 478 images, 5173 cells):
-    - P1: 40836, P99: 513928 (excludes annotation errors)
-    - Median: 142316 pixels
+    Original (1608px): P1=40836, P99=513928, Median=142316
+    Scaled (1024px): P1=16559, P99=208378, Median=57699 (×0.4055)
     """
     
-    def __init__(self, min_area: int = 40836, max_area: int = 513928, 
+    def __init__(self, min_area: int = 16559, max_area: int = 208378, 
                  smooth: float = 1.0, margin: float = 0.2):
         """
         Args:
-            min_area: Minimum expected cell area (P1 from E17)
-            max_area: Maximum expected cell area (P99 from E17)
+            min_area: Minimum expected cell area (E17 P1 scaled to 1024)
+            max_area: Maximum expected cell area (E17 P99 scaled to 1024)
             smooth: Smoothing factor for area ratio
             margin: Soft margin percentage (0.2 = 20% transition zone)
         """
