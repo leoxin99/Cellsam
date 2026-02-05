@@ -48,8 +48,13 @@ echo "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader)"
 echo "============================================"
 
 # Setup environment
-module load cuda/11.8
-source ~/miniconda3/etc/profile.d/conda.sh
+# Note: conda is already initialized in .bashrc on ALICE
+module load cuda/12.1 2>/dev/null || module load cuda/11.8 2>/dev/null || echo "CUDA module not loaded"
+
+# Activate conda environment
+if [ -f "$HOME/.bashrc" ]; then
+    source "$HOME/.bashrc"
+fi
 conda activate cellsam
 
 # Navigate to project directory
