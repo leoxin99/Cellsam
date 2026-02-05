@@ -11,11 +11,11 @@ from skimage import morphology, measure
 
 
 # Cell size thresholds based on GT analysis of FULL dataset (478 images, 5173 cells)
-# Original (1608px): Min=6240, P1=40836, Median=142316, P99=513928, Max=1026328
-# Scaled to 1024px (×0.4055): P1=16559, Median=57699, P99=208378
+# Original (1736×1776): Min=6240, P1=40836, Median=142316, P99=513928, Max=1026328
+# Scaled to 1024px (×0.340): P1=13884, Median=48387, P99=174735
 # Using P1/P99 to exclude potential annotation errors (holes, debris)
-MIN_CELL_AREA = 16559    # P1 of GT distribution (scaled to 1024)
-MAX_CELL_AREA = 208378   # P99 of GT distribution (scaled to 1024)
+MIN_CELL_AREA = 13884    # P1 of GT distribution (scaled to 1024)
+MAX_CELL_AREA = 174735   # P99 of GT distribution (scaled to 1024)
 
 
 def smooth_boundary(pred_binary: np.ndarray, sigma_first: int = 7, 

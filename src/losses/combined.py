@@ -172,11 +172,11 @@ class TopologyLoss(nn.Module):
     1. Small fragments (connected components smaller than min_size)
     2. Multiple disconnected regions per prediction
     
-    Based on E17 analysis (1608px → 1024px scaled):
-    - Original P1: 40836 → Scaled: 16559 (×0.4055)
+    Based on E17 analysis (1736×1776 → 1024px scaled):
+    - Original P1: 40836 → Scaled: 13884 (×0.340)
     """
     
-    def __init__(self, min_size: int = 16559, max_components: int = 1):
+    def __init__(self, min_size: int = 13884, max_components: int = 1):
         """
         Args:
             min_size: Minimum valid component size (E17 P1 scaled to 1024)
@@ -238,11 +238,11 @@ class SizeLoss(nn.Module):
     encouraging the model to learn correct cell boundaries.
     
     Based on GT analysis (FULL dataset: 478 images, 5173 cells):
-    Original (1608px): P1=40836, P99=513928, Median=142316
-    Scaled (1024px): P1=16559, P99=208378, Median=57699 (×0.4055)
+    Original (1736×1776): P1=40836, P99=513928, Median=142316
+    Scaled (1024px): P1=13884, P99=174735, Median=48387 (×0.340)
     """
     
-    def __init__(self, min_area: int = 16559, max_area: int = 208378, 
+    def __init__(self, min_area: int = 13884, max_area: int = 174735, 
                  smooth: float = 1.0, margin: float = 0.2):
         """
         Args:
