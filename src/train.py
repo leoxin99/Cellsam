@@ -220,8 +220,13 @@ def create_optimizer(model, config: dict, adapter=None):
     return optimizer, scheduler
 
 
-def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None, adapter=None):
-    """Train one epoch with optional mixed precision (AMP)."""
+def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None, adapter=None, box_expand=0.1):
+    """Train one epoch with optional mixed precision (AMP) and instance-level training.
+    
+    Key improvements:
+    - box_expand: Constrain pred/target to expanded box region
+    - Uses cell_id from batch to get specific cell mask (not entire semantic mask)
+    """
     model.train()
     if adapter is not None:
         adapter.train()
@@ -234,6 +239,7 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
         images = batch['image'].to(device)
         masks = batch['mask'].to(device)
         boxes = batch['boxes']
+        cell_ids = batch.get('cell_ids', None)  # List of cell IDs per sample
         
         optimizer.zero_grad()
         
@@ -257,10 +263,17 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
         for i in range(images.shape[0]):
             sample_boxes = boxes[i]
             sample_mask = masks[i]
+            sample_cell_ids = cell_ids[i] if cell_ids is not None else None
             
-            for box in sample_boxes:
+            for j, box in enumerate(sample_boxes):
                 if box.sum() == 0:
                     continue
+                
+                # Get specific cell ID for this box (instance-level training)
+                if sample_cell_ids is not None and j < len(sample_cell_ids):
+                    cell_id = sample_cell_ids[j].item() if hasattr(sample_cell_ids[j], 'item') else sample_cell_ids[j]
+                else:
+                    cell_id = None
                 
                 box_tensor = torch.tensor([box.tolist()], dtype=torch.float32).unsqueeze(0).to(device)
                 
@@ -285,8 +298,29 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
                                 align_corners=False
                             )[0, 0]
                             
-                            target = (sample_mask > 0).float()
-                            loss = criterion(pred_mask, target, box=box.tolist())
+                            # Instance-level target: only this cell, not entire mask
+                            if cell_id is not None:
+                                target = (sample_mask == cell_id).float()
+                            else:
+                                target = (sample_mask > 0).float()
+                            
+                            # Box clipping for both pred and target
+                            x1, y1, x2, y2 = [int(b) for b in box.tolist()]
+                            h, w = pred_mask.shape
+                            bw, bh = x2 - x1, y2 - y1
+                            x1_clip = max(0, int(x1 - bw * box_expand))
+                            y1_clip = max(0, int(y1 - bh * box_expand))
+                            x2_clip = min(w, int(x2 + bw * box_expand))
+                            y2_clip = min(h, int(y2 + bh * box_expand))
+                            
+                            # Zero out predictions outside box region
+                            pred_clipped = torch.zeros_like(pred_mask)
+                            pred_clipped[y1_clip:y2_clip, x1_clip:x2_clip] = pred_mask[y1_clip:y2_clip, x1_clip:x2_clip]
+                            
+                            target_clipped = torch.zeros_like(target)
+                            target_clipped[y1_clip:y2_clip, x1_clip:x2_clip] = target[y1_clip:y2_clip, x1_clip:x2_clip]
+                            
+                            loss = criterion(pred_clipped, target_clipped, box=box.tolist())
                     else:
                         sparse_emb, dense_emb = model.model.prompt_encoder(
                             points=None, boxes=box_tensor, masks=None
@@ -306,8 +340,29 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
                             align_corners=False
                         )[0, 0]
                         
-                        target = (sample_mask > 0).float()
-                        loss = criterion(pred_mask, target, box=box.tolist())
+                        # Instance-level target: only this cell, not entire mask
+                        if cell_id is not None:
+                            target = (sample_mask == cell_id).float()
+                        else:
+                            target = (sample_mask > 0).float()
+                        
+                        # Box clipping for both pred and target
+                        x1, y1, x2, y2 = [int(b) for b in box.tolist()]
+                        h, w = pred_mask.shape
+                        bw, bh = x2 - x1, y2 - y1
+                        x1_clip = max(0, int(x1 - bw * box_expand))
+                        y1_clip = max(0, int(y1 - bh * box_expand))
+                        x2_clip = min(w, int(x2 + bw * box_expand))
+                        y2_clip = min(h, int(y2 + bh * box_expand))
+                        
+                        # Zero out predictions outside box region
+                        pred_clipped = torch.zeros_like(pred_mask)
+                        pred_clipped[y1_clip:y2_clip, x1_clip:x2_clip] = pred_mask[y1_clip:y2_clip, x1_clip:x2_clip]
+                        
+                        target_clipped = torch.zeros_like(target)
+                        target_clipped[y1_clip:y2_clip, x1_clip:x2_clip] = target[y1_clip:y2_clip, x1_clip:x2_clip]
+                        
+                        loss = criterion(pred_clipped, target_clipped, box=box.tolist())
                     
                     batch_loss += loss
                     num_cells += 1
@@ -343,14 +398,21 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
     return total_loss / max(num_batches, 1)
 
 
-def validate(model, dataloader, criterion, device, adapter=None, use_pq=False):
-    """Validation with Dice and optionally PQ score computation."""
+def validate(model, dataloader, criterion, device, adapter=None, use_pq=False, box_expand=0.1):
+    """Validation with instance-level Dice and optionally PQ score computation.
+    
+    Key improvements:
+    - Instance-level Dice: compute Dice per cell, not semantic
+    - box_expand: constrain predictions to box region
+    """
     model.eval()
     if adapter is not None:
         adapter.eval()
     
-    total_dice = 0
+    total_instance_dice = 0
+    total_semantic_dice = 0
     total_pq = 0
+    num_cells = 0
     num_samples = 0
     
     with torch.no_grad():
@@ -358,6 +420,7 @@ def validate(model, dataloader, criterion, device, adapter=None, use_pq=False):
             images = batch['image'].to(device)
             masks = batch['mask'].to(device)
             boxes = batch['boxes']
+            cell_ids = batch.get('cell_ids', None)
             
             # Apply channel adapter if present
             if adapter is not None:
@@ -369,11 +432,18 @@ def validate(model, dataloader, criterion, device, adapter=None, use_pq=False):
             for i in range(images.shape[0]):
                 sample_boxes = boxes[i]
                 sample_mask = masks[i]
-                combined_pred = torch.zeros_like(sample_mask)
+                sample_cell_ids = cell_ids[i] if cell_ids is not None else None
+                combined_pred = torch.zeros_like(sample_mask, dtype=torch.float32)
                 
-                for box in sample_boxes:
+                for j, box in enumerate(sample_boxes):
                     if box.sum() == 0:
                         continue
+                    
+                    # Get cell ID
+                    if sample_cell_ids is not None and j < len(sample_cell_ids):
+                        cell_id = sample_cell_ids[j].item() if hasattr(sample_cell_ids[j], 'item') else sample_cell_ids[j]
+                    else:
+                        cell_id = None
                     
                     box_tensor = torch.tensor([box.tolist()], dtype=torch.float32).unsqueeze(0).to(device)
                     
@@ -396,18 +466,41 @@ def validate(model, dataloader, criterion, device, adapter=None, use_pq=False):
                             align_corners=False
                         )[0, 0]
                         
-                        combined_pred = torch.maximum(combined_pred, torch.sigmoid(pred_mask))
+                        pred_sigmoid = torch.sigmoid(pred_mask)
+                        
+                        # Box clipping
+                        x1, y1, x2, y2 = [int(b) for b in box.tolist()]
+                        h, w = pred_mask.shape
+                        bw, bh = x2 - x1, y2 - y1
+                        x1_clip = max(0, int(x1 - bw * box_expand))
+                        y1_clip = max(0, int(y1 - bh * box_expand))
+                        x2_clip = min(w, int(x2 + bw * box_expand))
+                        y2_clip = min(h, int(y2 + bh * box_expand))
+                        
+                        pred_clipped = torch.zeros_like(pred_sigmoid)
+                        pred_clipped[y1_clip:y2_clip, x1_clip:x2_clip] = pred_sigmoid[y1_clip:y2_clip, x1_clip:x2_clip]
+                        
+                        # Compute instance-level Dice
+                        if cell_id is not None and cell_id > 0:
+                            target = (sample_mask == cell_id).float()
+                            pred_binary = (pred_clipped > 0.5).float()
+                            
+                            intersection = (pred_binary * target).sum()
+                            dice = (2 * intersection) / (pred_binary.sum() + target.sum() + 1e-8)
+                            total_instance_dice += dice.item()
+                            num_cells += 1
+                        
+                        combined_pred = torch.maximum(combined_pred, pred_clipped)
                         
                     except Exception:
                         continue
                 
-                # Compute Dice
+                # Semantic Dice (for backward compatibility logging)
                 pred_binary = (combined_pred > 0.5).float()
                 target_binary = (sample_mask > 0).float()
-                
                 intersection = (pred_binary * target_binary).sum()
-                dice = (2 * intersection) / (pred_binary.sum() + target_binary.sum() + 1e-8)
-                total_dice += dice.item()
+                semantic_dice = (2 * intersection) / (pred_binary.sum() + target_binary.sum() + 1e-8)
+                total_semantic_dice += semantic_dice.item()
                 
                 # Compute PQ if enabled
                 if use_pq:
@@ -418,10 +511,13 @@ def validate(model, dataloader, criterion, device, adapter=None, use_pq=False):
                 
                 num_samples += 1
     
-    avg_dice = total_dice / max(num_samples, 1)
+    avg_instance_dice = total_instance_dice / max(num_cells, 1)
+    avg_semantic_dice = total_semantic_dice / max(num_samples, 1)
     avg_pq = total_pq / max(num_samples, 1) if use_pq else 0.0
     
-    return avg_dice, avg_pq
+    # Return instance dice as primary metric
+    return avg_instance_dice, avg_pq, avg_semantic_dice
+
 
 
 def main():
@@ -481,9 +577,11 @@ def main():
     else:
         print("Using Dice for early stopping")
     
+    box_expand = config['loss'].get('box_expand', 0.1)
+    
     for epoch in range(config['training']['epochs']):
-        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device, scaler=scaler, adapter=adapter)
-        val_dice, val_pq = validate(model, val_loader, criterion, device, adapter=adapter, use_pq=use_pq_early_stop)
+        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device, scaler=scaler, adapter=adapter, box_expand=box_expand)
+        val_dice, val_pq, val_semantic_dice = validate(model, val_loader, criterion, device, adapter=adapter, use_pq=use_pq_early_stop, box_expand=box_expand)
         scheduler.step()
         
         # Select metric for early stopping
@@ -497,8 +595,8 @@ def main():
             metric_name = "Dice"
         
         print(f"Epoch [{epoch+1}/{config['training']['epochs']}] "
-              f"Train Loss: {train_loss:.4f}, Val Dice: {val_dice:.4f}, "
-              f"Val PQ: {val_pq:.4f}, LR: {scheduler.get_last_lr()[0]:.6f}")
+              f"Train Loss: {train_loss:.4f}, Instance Dice: {val_dice:.4f}, "
+              f"Semantic Dice: {val_semantic_dice:.4f}, PQ: {val_pq:.4f}, LR: {scheduler.get_last_lr()[0]:.6f}")
         
         # Save best model (including adapter if present)
         if current_metric > best_metric:
