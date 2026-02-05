@@ -30,15 +30,15 @@ from skimage import morphology, measure, filters
 
 
 def detect_nuclei(dapi_channel: np.ndarray, 
-                  min_area: int = 500, 
-                  max_area: int = 30000) -> list:
+                  min_area: int = 200,   # Updated for 1024px (2026-02-05)
+                  max_area: int = 10000) -> list:  # Updated for 1024px
     """
     Detect nuclei from DAPI channel using Otsu thresholding.
     
     Args:
         dapi_channel: DAPI fluorescence image
-        min_area: Minimum nucleus area in pixels
-        max_area: Maximum nucleus area in pixels
+        min_area: Minimum nucleus area in pixels (P1 at 1024px: 57, using 200 for safety)
+        max_area: Maximum nucleus area in pixels (P99 at 1024px: 10026)
     
     Returns:
         List of regionprops for detected nuclei
