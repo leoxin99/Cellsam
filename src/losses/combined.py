@@ -284,24 +284,126 @@ class SizeLoss(nn.Module):
         return size_diff + 0.5 * boundary_penalty
 
 
+class ContourLoss(nn.Module):
+    """
+    Contour distance loss for cell segmentation (2026-02-05).
+    
+    Computes distance transform based loss to penalize boundary errors.
+    Reference: boundary_enhancement_design.md section 1.2
+    """
+    
+    def __init__(self, boundary_width: int = 3):
+        """
+        Args:
+            boundary_width: Width of boundary region to focus on
+        """
+        super().__init__()
+        self.boundary_width = boundary_width
+    
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """
+        Compute contour distance loss.
+        
+        Args:
+            pred: Prediction probabilities (after sigmoid), shape (H, W)
+            target: Binary ground truth, shape (H, W)
+        
+        Returns:
+            Contour loss value
+        """
+        from scipy.ndimage import distance_transform_edt
+        from skimage import morphology
+        
+        device = pred.device
+        dtype = pred.dtype
+        
+        pred_np = (pred > 0.5).float().detach().cpu().numpy()
+        target_np = (target > 0).float().cpu().numpy()
+        
+        # Extract boundaries using erosion
+        struct = morphology.disk(1)
+        pred_boundary = pred_np - morphology.binary_erosion(pred_np, struct).astype(np.float32)
+        gt_boundary = target_np - morphology.binary_erosion(target_np, struct).astype(np.float32)
+        
+        # Compute distance transforms
+        if gt_boundary.sum() > 0:
+            gt_dist = distance_transform_edt(1 - gt_boundary)
+        else:
+            return torch.tensor(0.0, device=device, dtype=dtype)
+        
+        if pred_boundary.sum() > 0:
+            pred_dist = distance_transform_edt(1 - pred_boundary)
+        else:
+            return torch.tensor(1.0, device=device, dtype=dtype)
+        
+        # Average distance of pred boundary to GT boundary
+        pred_to_gt = gt_dist[pred_boundary > 0].mean() if pred_boundary.sum() > 0 else 0
+        gt_to_pred = pred_dist[gt_boundary > 0].mean() if gt_boundary.sum() > 0 else 0
+        
+        # Symmetric Hausdorff-like loss (normalized)
+        max_dist = max(gt_dist.max(), pred_dist.max(), 1.0)
+        loss = (pred_to_gt + gt_to_pred) / (2 * max_dist)
+        
+        return torch.tensor(loss, device=device, dtype=dtype)
+
+
 class CombinedLoss(nn.Module):
-    """Combined Dice + BCE + Boundary + AJI loss with class imbalance handling."""
+    """
+    Combined loss for instance segmentation (Updated 2026-02-05).
+    
+    Supports:
+    - Dice Loss (default)
+    - BCE Loss (default)
+    - Boundary Loss (configurable)
+    - AJI Loss (configurable)
+    - Topology Loss (configurable) - penalizes fragments
+    - Size Loss (configurable) - penalizes size deviations
+    - Contour Loss (configurable) - penalizes boundary distance errors
+    """
     
     def __init__(self, pos_weight=10.0, boundary_weight=0.3, aji_weight=0.2, 
-                 use_boundary=True, use_aji=True):
+                 use_boundary=True, use_aji=True,
+                 use_topology=False, topology_weight=0.1,
+                 use_size=False, size_weight=0.1,
+                 use_contour=False, contour_weight=0.1):
+        """
+        Args:
+            pos_weight: Weight for positive class in BCE
+            boundary_weight: Weight for boundary loss
+            aji_weight: Weight for AJI loss
+            use_boundary: Whether to use boundary loss
+            use_aji: Whether to use AJI loss
+            use_topology: Whether to use topology loss (Phase 2)
+            topology_weight: Weight for topology loss
+            use_size: Whether to use size loss (Phase 2)
+            size_weight: Weight for size loss
+            use_contour: Whether to use contour loss (Phase 2)
+            contour_weight: Weight for contour loss
+        """
         super().__init__()
         self.dice = DiceLoss()
         self.boundary = BoundaryLoss(boundary_width=3)
         self.aji = AJILoss()
+        self.topology = TopologyLoss()
+        self.size = SizeLoss()
+        self.contour = ContourLoss()
+        
         self.pos_weight = pos_weight
         self.boundary_weight = boundary_weight
         self.aji_weight = aji_weight
+        self.topology_weight = topology_weight
+        self.size_weight = size_weight
+        self.contour_weight = contour_weight
+        
         self.use_boundary = use_boundary
         self.use_aji = use_aji
+        self.use_topology = use_topology
+        self.use_size = use_size
+        self.use_contour = use_contour
 
     def forward(self, pred, target, box=None):
         """
-        Compute loss within bounding box region to handle class imbalance.
+        Compute combined loss within bounding box region.
         
         Args:
             pred: (H, W) prediction logits
@@ -312,7 +414,7 @@ class CombinedLoss(nn.Module):
             x1, y1, x2, y2 = box
             h, w = pred.shape[-2:]
             bw, bh = x2 - x1, y2 - y1
-            expand = 0.1  # Reduced from 0.2 to fix over-segmentation
+            expand = 0.1
             x1 = max(0, int(x1 - bw * expand))
             y1 = max(0, int(y1 - bh * expand))
             x2 = min(w, int(x2 + bw * expand))
@@ -343,30 +445,59 @@ class CombinedLoss(nn.Module):
 
         base_loss = 0.5 * dice + 0.5 * bce
         
-        # Calculate additional loss weights
-        remaining_weight = 1.0
-        total_loss = torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
+        # Calculate total weights
+        total_extra_weight = 0.0
+        if self.use_boundary:
+            total_extra_weight += self.boundary_weight
+        if self.use_aji:
+            total_extra_weight += self.aji_weight
+        if self.use_topology:
+            total_extra_weight += self.topology_weight
+        if self.use_size:
+            total_extra_weight += self.size_weight
+        if self.use_contour:
+            total_extra_weight += self.contour_weight
         
-        # Boundary loss
+        base_weight = max(0.3, 1.0 - total_extra_weight)  # Minimum 30% for base loss
+        
+        total_loss = base_weight * base_loss
+        
+        # Add optional losses
         if self.use_boundary and n_pos > 0:
             try:
                 boundary_loss = self.boundary(pred_sigmoid, target_box)
                 total_loss = total_loss + self.boundary_weight * boundary_loss
-                remaining_weight -= self.boundary_weight
             except Exception:
                 pass
         
-        # AJI loss
         if self.use_aji and n_pos > 0:
             try:
                 aji_loss = self.aji(pred_sigmoid, target_box)
                 total_loss = total_loss + self.aji_weight * aji_loss
-                remaining_weight -= self.aji_weight
             except Exception:
                 pass
         
-        # Base loss (Dice + BCE)
-        total_loss = total_loss + remaining_weight * base_loss
+        if self.use_topology and n_pos > 0:
+            try:
+                topo_loss = self.topology(pred_sigmoid, target_box)
+                total_loss = total_loss + self.topology_weight * topo_loss
+            except Exception:
+                pass
+        
+        if self.use_size and n_pos > 0:
+            try:
+                size_loss = self.size(pred_sigmoid, target_box)
+                total_loss = total_loss + self.size_weight * size_loss
+            except Exception:
+                pass
+        
+        if self.use_contour and n_pos > 0:
+            try:
+                contour_loss = self.contour(pred_sigmoid, target_box)
+                total_loss = total_loss + self.contour_weight * contour_loss
+            except Exception:
+                pass
 
         return total_loss
+
 

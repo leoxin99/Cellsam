@@ -556,8 +556,29 @@ def main():
         boundary_weight=config['loss']['boundary_weight'],
         aji_weight=config['loss'].get('aji_weight', 0.2),
         use_boundary=config['loss']['use_boundary'],
-        use_aji=config['loss'].get('use_aji', True)
+        use_aji=config['loss'].get('use_aji', True),
+        # Phase 2 losses (configurable)
+        use_topology=config['loss'].get('use_topology', False),
+        topology_weight=config['loss'].get('topology_weight', 0.1),
+        use_size=config['loss'].get('use_size', False),
+        size_weight=config['loss'].get('size_weight', 0.1),
+        use_contour=config['loss'].get('use_contour', False),
+        contour_weight=config['loss'].get('contour_weight', 0.1)
     )
+    
+    # Log enabled losses
+    enabled_losses = ["Dice", "BCE"]
+    if config['loss']['use_boundary']:
+        enabled_losses.append("Boundary")
+    if config['loss'].get('use_aji', True):
+        enabled_losses.append("AJI")
+    if config['loss'].get('use_topology', False):
+        enabled_losses.append("Topology")
+    if config['loss'].get('use_size', False):
+        enabled_losses.append("Size")
+    if config['loss'].get('use_contour', False):
+        enabled_losses.append("Contour")
+    print(f"Enabled losses: {', '.join(enabled_losses)}")
     
     # Mixed precision scaler
     use_amp = config['training'].get('use_amp', True) and device.type == 'cuda'

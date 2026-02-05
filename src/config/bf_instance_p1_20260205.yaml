@@ -1,0 +1,56 @@
+# =============================================================================
+# BF Instance Phase 1 - Quick Validation (Created 2026-02-05)
+# =============================================================================
+# Purpose: Fast validation that instance-level training works
+# Data: 10% training subset, 20 epochs
+# Losses: Dice, BCE, Boundary, AJI (no Topology/Size/Contour yet)
+# Augmentation: All including GridDistortion
+# Box: GT boxes (training), DAPI boxes (inference)
+# -----------------------------------------------------------------------------
+
+data:
+  splits_dir: "data/splits"
+  raw_data_dir: "data/raw/allen_segmented_fields_full"
+  processed_data_dir: "data/processed"
+  target_size: [1024, 1024]
+  max_boxes_per_image: 50
+  use_bf_only: true
+  use_semantic_mapping: false
+  train_subset: 0.1  # Use 10% for quick validation
+
+model:
+  checkpoint: null
+  freeze_encoder: true
+  freeze_decoder: false
+  use_adapter: false
+
+training:
+  epochs: 20
+  batch_size: 4
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  warmup_epochs: 3
+  early_stop_patience: 10
+  use_pq_early_stop: false
+
+loss:
+  type: "combined"
+  pos_weight: 10.0
+  boundary_weight: 0.5
+  use_boundary: true
+  use_aji: true
+  aji_weight: 0.2
+  box_expand: 0.1
+  # Phase 1: Core losses only
+  use_topology: false
+  use_size: false
+  use_contour: false
+
+optimizer:
+  type: "adamw"
+  scheduler: "cosine_warmup"
+
+output:
+  checkpoint_dir: "checkpoints"
+  save_every: 5
+  experiment_name: "E29_bf_instance_p1_20260205"

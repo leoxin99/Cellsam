@@ -104,6 +104,12 @@ def get_train_transforms(target_size=(1024, 1024)):
             sigma=12,
             p=0.3
         ),
+        # GridDistortion for boundary robustness (Added 2026-02-05)
+        A.GridDistortion(
+            num_steps=5,
+            distort_limit=0.3,
+            p=0.3
+        ),
         
         # Intensity transforms
         A.RandomBrightnessContrast(

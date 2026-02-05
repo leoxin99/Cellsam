@@ -1,8 +1,8 @@
 # CellSAM 项目方案 (Project Blueprint)
 
 > **文档类型**: 项目总览 (AI 必读)
-> **最后更新**: 2026-02-03
-> **当前阶段**: 阶段2.5 - 三通道消融训练 (准备提交 ALICE)
+> **最后更新**: 2026-02-05
+> **当前阶段**: 阶段3 - 实例级训练优化 (Instance-level Training)
 
 ---
 
@@ -20,13 +20,27 @@
 ### 关键指标
 | 指标 | 当前值 | 目标值 | 状态 |
 |-----|-------|-------|------|
-| **Detection (Hybrid)** | F1=78% | - | ✅ E23 修复后 |
-| **Pixel Dice (最佳)** | **0.7595** | 0.85+ | ✅ E25 Boundary Enhanced |
-| **Instance PQ** | 待评估 | 0.5+ | ⏳ 需 PQ 评估 |
+| **Detection (DAPI)** | F1=78% | - | ✅ E23 修复后 |
+| **Semantic Dice** | 0.7595 | - | ⚠️ 无意义(见下) |
+| **Instance Dice** | 0.03 (E25) | 0.50+ | ❌ 需要Instance训练 |
+| **Instance PQ** | 0.00 (E25) | 0.30+ | ❌ 需要Instance训练 |
 
-### 当前最佳模型
-- **最佳 Dice**: `checkpoints/boundary_enhanced_best.pt` (E25, Dice=0.7595)
-- **三通道**: `checkpoints/3ch_semantic_adapter_best.pt` (E27, Dice=0.7520)
+### ⚠️ 关键发现 (2026-02-05)
+
+**之前所有实验的 Semantic Dice 无意义**:
+- 训练用 `target = (mask > 0)` 合并所有细胞
+- 导致模型学习预测大 blob 而非单细胞
+- Instance Dice (每细胞) 仅 0.03
+
+**已修复**: Instance-level training with box clipping
+
+### 当前待训练实验
+| 实验ID | 配置 | 阶段 | 方案 |
+|--------|------|------|------|
+| E29 | bf_instance_p1_20260205.yaml | Phase 1 | BF单通道 |
+| E30 | adapter_instance_p1_20260205.yaml | Phase 1 | Semantic Adapter |
+| E31 | bf_instance_p2_20260205.yaml | Phase 2 | BF + 全部Loss |
+| E32 | adapter_instance_p2_20260205.yaml | Phase 2 | Adapter + 全部Loss |
 
 ---
 
@@ -100,8 +114,14 @@ src/
 ├── comparison/          # 参考实现
 │   └── sarcgraph_pipeline/
 ├── losses/
-│   └── combined.py      # Dice+BCE+Boundary+AJI
-└── train.py             # 主训练入口
+│   └── combined.py      # 损失函数 (Updated 2026-02-05)
+│                        # - DiceLoss, BCELoss (基础)
+│                        # - BoundaryLoss, AJILoss (Phase 1)
+│                        # - TopologyLoss, SizeLoss, ContourLoss (Phase 2)
+└── train.py             # 主训练入口 (Updated 2026-02-05)
+                         # - Instance-level target (cell_id)
+                         # - Box clipping for pred/target
+                         # - Instance Dice validation
 
 tools/
 ├── visualize_detection_comparison.py  # Napari 检测对比

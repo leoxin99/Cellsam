@@ -37,7 +37,7 @@ def topology_loss(pred_mask, gt_mask):
     labeled, n_components = ndimage.label(pred_binary.cpu().numpy())
     
     # 惩罚碎片 (面积 < min_size)
-    min_size = 500  # 最小细胞面积
+    min_size = 40836  # 来自 E17: GT P1 百分位 (数据驱动)
     fragment_penalty = 0
     for i in range(1, n_components + 1):
         component_size = (labeled == i).sum()

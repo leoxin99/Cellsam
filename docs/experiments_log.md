@@ -37,6 +37,38 @@
 | E26 | 2026-02-03 | 3ch No Adapter (L4) | Val Dice=0.7549 | ✅ 完成 |
 | E27 | 2026-02-04 | 3ch Semantic Adapter (A100) | Val Dice=0.7520 | ✅ 完成 |
 | E28 | 2026-02-04 | BF Adapter (A100) | Val Dice=0.7337 | ✅ 完成 |
+| **⚠️** | **2026-02-05** | **发现: Semantic Dice 无意义** | **Instance Dice=0.03** | **⚠️ 关键** |
+| E29 | 2026-02-05 | BF Instance P1 (快速验证) | 待训练 | ⏳ 待做 |
+| E30 | 2026-02-05 | Adapter Instance P1 (快速验证) | 待训练 | ⏳ 待做 |
+| E31 | 2026-02-05 | BF Instance P2 (全部Loss) | 待训练 | ⏳ 待做 |
+| E32 | 2026-02-05 | Adapter Instance P2 (全部Loss) | 待训练 | ⏳ 待做 |
+
+---
+
+## ⚠️ 关键发现: Semantic vs Instance Dice (2026-02-05) ⭐⭐⭐
+
+**问题诊断**:
+- 之前所有实验 (E01-E28) 使用 Semantic Dice 验证
+- 训练时 `target = (mask > 0)` 将所有细胞合并为语义掩码
+- 导致模型学习预测大 blob 而非单细胞
+
+**调试结果** (E25 Boundary Enhanced):
+```
+Pred area: 105,129 pixels (覆盖多个细胞)
+GT area:   41,477 pixels (单个细胞)
+Instance IoU: 0.033  ← 极低
+Instance Dice: 0.064 ← 极低
+```
+
+**修复方案**:
+1. Instance-level target: `target = (mask == cell_id)`
+2. Box clipping: 限制 pred/target 在 box 区域
+3. Instance Dice 验证: 每个细胞独立计算
+
+**新增功能 (2026-02-05)**:
+- `ContourLoss`: 边界距离惩罚
+- `GridDistortion`: 边界鲁棒性增强
+- Phase 1/2 分阶段训练配置
 
 ---
 
