@@ -13,7 +13,7 @@ data:
   raw_data_dir: "data/raw/allen_segmented_fields_full"
   processed_data_dir: "data/processed"
   target_size: [1024, 1024]
-  max_boxes_per_image: 50
+  max_boxes_per_image: 30  # Cardiomyocytes: ~15-20 cells/image
   use_bf_only: true
   use_semantic_mapping: false
   train_subset: 0.1  # Use 10% for quick validation
