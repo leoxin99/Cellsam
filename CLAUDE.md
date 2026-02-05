@@ -97,6 +97,18 @@ conda activate cellsam
 > **先方案后执行**: AI 在执行任何重大操作前，必须先提出方案供审批。
 
 ---
+---
+
+## 关键文档链接 📚
+
+| 文档 | 用途 | 更新频率 |
+|------|------|----------|
+| [error_log_and_checklist.md](docs/error_log_and_checklist.md) | 历史错误归纳 + 训练前检查清单 | 每次发现错误 |
+| [experiments_log.md](docs/experiments_log.md) | 实验记录 (E1-E30+) | 每次实验 |
+| [dataset_parameters.md](docs/dataset_parameters.md) | 数据集统计参数 (分辨率、阈值) | 参数变化时 |
+| [boundary_enhancement_design.md](docs/boundary_enhancement_design.md) | Loss 函数设计文档 | 设计变更时 |
+
+---
 
 ## 代码架构
 
