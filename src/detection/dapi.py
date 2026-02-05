@@ -227,8 +227,8 @@ def create_bounding_boxes(cell_groups: list,
 
 
 def detect_and_create_boxes(dapi_channel: np.ndarray,
-                            min_nucleus_area: int = 500,
-                            max_nucleus_area: int = 30000,
+                            min_nucleus_area: int = 200,    # Updated 2026-02-05: 1024px
+                            max_nucleus_area: int = 10000,  # Updated 2026-02-05: 1024px
                             **box_kwargs) -> tuple:
     """
     Complete pipeline: detect nuclei → merge → create boxes.
@@ -320,8 +320,8 @@ def filter_by_actn2(cell_groups: list,
 
 def detect_cardiomyocytes(dapi_channel: np.ndarray,
                           actn2_channel: np.ndarray,
-                          min_nucleus_area: int = 500,
-                          max_nucleus_area: int = 30000,
+                          min_nucleus_area: int = 200,    # Updated 2026-02-05: 1024px
+                          max_nucleus_area: int = 10000,  # Updated 2026-02-05: 1024px
                           actn2_coverage_threshold: float = 0.3,
                           **box_kwargs) -> tuple:
     """
@@ -364,7 +364,7 @@ def detect_cardiomyocytes(dapi_channel: np.ndarray,
 
 def detect_zlines_in_region(actn2_channel: np.ndarray,
                             center_y: int, center_x: int,
-                            search_radius: int = 400,
+                            search_radius: int = 256,     # Updated 2026-02-05: 1024px
                             threshold: float = 0.03,
                             min_sigma: float = 1.0,
                             max_sigma: float = 4.0) -> np.ndarray:
