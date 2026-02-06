@@ -40,6 +40,8 @@
 | `test_sarcgraph_detection.py` | E18 | SarcGraph Z-线检测对比 | 2026-01-22 |
 | `visualize_detection_comparison.py` | E18 | Napari 可视化检测对比 | 2026-01-23 |
 | `verify_training_config.py` | 通用 | 训练前配置验证 | 2026-02-02 |
+| `baseline_gt_cellsam_20260206.py` | E29基线 | GT框+预训练CellSAM对比 | 2026-02-06 |
+| `visualize_segmentation_20260206.py` | 通用 | 多通道分割结果可视化 | 2026-02-06 |
 
 ---
 
