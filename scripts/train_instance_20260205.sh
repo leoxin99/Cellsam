@@ -57,6 +57,12 @@ if [ -f "$HOME/.bashrc" ]; then
 fi
 conda activate cellsam
 
+# CellSAM authentication token (required for model weights download)
+export DEEPCELL_ACCESS_TOKEN="X2Od0tJX.te0hEWOzZlRXoJzh5pkvw7l4S5GdpPxs"
+
+# Add project to PYTHONPATH (for cellSAM_source if needed)
+export PYTHONPATH=$PYTHONPATH:~/CellSam/cellSAM_source
+
 # Navigate to project directory
 cd $HOME/CellSam
 
