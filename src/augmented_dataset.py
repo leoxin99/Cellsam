@@ -117,7 +117,7 @@ def get_train_transforms(target_size=(1024, 1024)):
             contrast_limit=0.2,
             p=0.5
         ),
-        A.GaussNoise(var_limit=(10, 50), p=0.3),
+        A.GaussNoise(std_range=(3.16, 7.07), p=0.3),  # Updated 2026-02-06: std = sqrt(var), was var_limit=(10,50)
         A.GaussianBlur(blur_limit=(3, 5), p=0.2),
         
         # Resize to target size

@@ -105,6 +105,42 @@
 
 ---
 
+### 错误 8: ALICE 环境配置不一致 ⭐⭐
+
+| 项目 | 内容 |
+|------|------|
+| **发现日期** | 2026-02-06 |
+| **问题脚本** | `scripts/train_instance_20260205.sh` |
+| **表现** | 训练 3 秒即退出，错误 `ModuleNotFoundError: No module named 'cellSAM'` |
+| **根本原因** | 新脚本与已验证的旧脚本 (`train_semantic.sh`) 环境配置不一致 |
+
+**新脚本 vs 旧脚本对比**:
+
+| 项目 | 旧脚本 (工作) | 新脚本 (失败) |
+|------|--------------|---------------|
+| **Shebang** | `#!/bin/bash -l` (login shell) | `#!/bin/bash` |
+| **Conda 路径** | 不显式指定 (靠 .bashrc) | `~/miniconda3` (路径错误) |
+| **PYTHONPATH** | `export PYTHONPATH=$PYTHONPATH:~/CellSam/cellSAM_source` | 无 |
+| **module load** | 无 | `module load cuda/11.8` (失败) |
+
+**修复步骤**:
+1. 使用 `#!/bin/bash -l` 启用 login shell 自动加载环境
+2. 使用 `source ~/.bashrc` 而非硬编码 conda 路径
+3. 在 ALICE 上安装 cellSAM: `pip install 'cellSAM @ git+https://github.com/vanvalenlab/cellSAM.git'`
+
+**教训**:
+> **⚠️ 创建新 ALICE 脚本时，必须复制已验证工作的旧脚本的环境配置部分！**
+> **⚠️ 本地能运行不代表 ALICE 能运行，路径、已安装包可能不同**
+> **⚠️ 新脚本首次运行前，先在空闲分区测试**
+
+**ALICE 环境检查清单**:
+- [ ] 验证 conda 环境路径正确
+- [ ] 验证所有 `import` 的包已安装
+- [ ] 使用 `#!/bin/bash -l` 启用 login shell
+- [ ] 首次在空闲 GPU 分区测试
+
+---
+
 ## 二、训练前强制检查清单 ✅
 
 ### A. 数据加载检查
