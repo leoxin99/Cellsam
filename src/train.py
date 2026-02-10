@@ -129,7 +129,8 @@ def create_model(config: dict, device):
     adapter = None
     if config['model'].get('use_adapter', False):
         adapter_config = config['model'].get('adapter', {})
-        adapter_type = adapter_config.get('type', 'independent')
+        # Support both nested (model.adapter.type) and flat (model.adapter_type) config keys
+        adapter_type = adapter_config.get('type', config['model'].get('adapter_type', 'independent'))
         
         if adapter_type == 'independent':
             adapter = IndependentChannelAdapter(
