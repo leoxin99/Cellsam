@@ -8,8 +8,8 @@
 # =============================================================================
 
 #SBATCH --job-name=inst_train
-#SBATCH --output=logs/inst_train_%A_%a.out
-#SBATCH --error=logs/inst_train_%A_%a.err
+#SBATCH --output=/home/s3890074/CellSam/logs/inst_train_%A_%a.out
+#SBATCH --error=/home/s3890074/CellSam/logs/inst_train_%A_%a.err
 #SBATCH --time=12:00:00
 #SBATCH --partition=gpu-a100-80g
 #SBATCH --gres=gpu:1

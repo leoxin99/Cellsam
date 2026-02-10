@@ -1,26 +1,25 @@
 """
 端到端评估：DAPI 检测 → SAM 分割
 
-与 comprehensive_eval.py 的区别：
-- comprehensive_eval: 使用 GT 框 (来自 mask) → 评估分割模型
-- 本脚本: 使用 DAPI 检测框 → 评估完整推理管线
+与 standardized_inference.py 的区别：
+- standardized_inference: 使用 GT 框 (Oracle) → 评估分割能力上限
+- 本脚本: 使用 DAPI 检测框 (E2E) → 评估真实部署效果
 
-评估流程：
-1. 加载图像
-2. DAPI 核检测 → 生成框
-3. SAM 分割每个框
-4. 与 GT mask 对比计算指标
+指标 (统一口径):
+- BM-1to1 Dice: Hungarian 一对一匹配 (主指标)
+- BM-Coverage Dice: 每 GT 取最大  (辅助)
+- Gap: Coverage - 1to1 (粘连诊断)
+- PQ@0.5
+更新: 2026-02-10 - 接入统一推理核心
 """
 
 import sys
 from pathlib import Path
 import numpy as np
 import torch
-import torch.nn.functional as F
 from tqdm import tqdm
 import json
 from datetime import datetime
-from skimage import measure
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "cellSAM_source"))
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -28,122 +27,33 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from cellSAM import get_model
 from augmented_dataset import AugmentedAllenDataset
 from detection.dapi import detect_and_create_boxes
+from inference.core import (
+    segment_with_boxes, InferenceConfig, load_cellsam_checkpoint
+)
+from metrics.instance_metrics import compute_all_metrics
 
 
-def compute_metrics(pred_mask, gt_mask):
-    """Compute instance segmentation metrics."""
-    # Get unique labels
-    pred_labels = np.unique(pred_mask)
-    pred_labels = pred_labels[pred_labels > 0]
-    gt_labels = np.unique(gt_mask)
-    gt_labels = gt_labels[gt_labels > 0]
-    
-    n_pred = len(pred_labels)
-    n_gt = len(gt_labels)
-    
-    # Dice (pixel-level)
-    if gt_mask.sum() > 0:
-        intersection = ((pred_mask > 0) & (gt_mask > 0)).sum()
-        dice = 2 * intersection / ((pred_mask > 0).sum() + (gt_mask > 0).sum() + 1e-8)
-    else:
-        dice = 0.0
-    
-    # Instance matching for PQ
-    matched_pred = set()
-    matched_gt = set()
-    iou_sum = 0
-    
-    for gt_label in gt_labels:
-        gt_region = (gt_mask == gt_label)
-        best_iou = 0
-        best_pred = -1
-        
-        for pred_label in pred_labels:
-            if pred_label in matched_pred:
-                continue
-            pred_region = (pred_mask == pred_label)
-            intersection = (gt_region & pred_region).sum()
-            union = (gt_region | pred_region).sum()
-            if union > 0:
-                iou = intersection / union
-                if iou > best_iou:
-                    best_iou = iou
-                    best_pred = pred_label
-        
-        if best_iou >= 0.5 and best_pred >= 0:
-            matched_gt.add(gt_label)
-            matched_pred.add(best_pred)
-            iou_sum += best_iou
-    
-    # PQ = SQ * RQ
-    tp = len(matched_gt)
-    fp = n_pred - tp
-    fn = n_gt - tp
-    
-    sq = iou_sum / tp if tp > 0 else 0
-    rq = tp / (tp + 0.5 * fp + 0.5 * fn) if (tp + fp + fn) > 0 else 0
-    pq = sq * rq
-    
-    # Also compute PQ@0.3
-    matched_pred_03 = set()
-    matched_gt_03 = set()
-    iou_sum_03 = 0
-    
-    for gt_label in gt_labels:
-        gt_region = (gt_mask == gt_label)
-        best_iou = 0
-        best_pred = -1
-        
-        for pred_label in pred_labels:
-            if pred_label in matched_pred_03:
-                continue
-            pred_region = (pred_mask == pred_label)
-            intersection = (gt_region & pred_region).sum()
-            union = (gt_region | pred_region).sum()
-            if union > 0:
-                iou = intersection / union
-                if iou > best_iou:
-                    best_iou = iou
-                    best_pred = pred_label
-        
-        if best_iou >= 0.3 and best_pred >= 0:
-            matched_gt_03.add(gt_label)
-            matched_pred_03.add(best_pred)
-            iou_sum_03 += best_iou
-    
-    tp_03 = len(matched_gt_03)
-    fp_03 = n_pred - tp_03
-    fn_03 = n_gt - tp_03
-    
-    sq_03 = iou_sum_03 / tp_03 if tp_03 > 0 else 0
-    rq_03 = tp_03 / (tp_03 + 0.5 * fp_03 + 0.5 * fn_03) if (tp_03 + fp_03 + fn_03) > 0 else 0
-    pq_03 = sq_03 * rq_03
-    
-    return {
-        'dice': dice,
-        'pq_05': pq,
-        'pq_03': pq_03,
-        'n_pred': n_pred,
-        'n_gt': n_gt,
-        'tp_05': tp,
-        'tp_03': tp_03,
-    }
+
+# NOTE: 本地 compute_metrics 已移除
+# 统一使用 metrics.instance_metrics.compute_all_metrics
 
 
-def evaluate_e2e():
-    """End-to-end evaluation with DAPI detection."""
+def evaluate_e2e(checkpoint_path="checkpoints/bf_baseline_full_best.pt",
+                 adapter_cls=None, adapter_kwargs=None):
+    """End-to-end evaluation: DAPI detection -> SAM segmentation."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
     
-    # Load model
-    model = get_model()
-    checkpoint = torch.load("checkpoints/bf_baseline_full_best.pt", map_location=device, weights_only=False)
-    if 'model_state_dict' in checkpoint:
-        model.load_state_dict(checkpoint['model_state_dict'])
-    else:
-        model.load_state_dict(checkpoint)
-    model = model.to(device)
-    model.eval()
+    # Load model (unified loader with adapter support)
+    model, adapter, ckpt_info = load_cellsam_checkpoint(
+        checkpoint_path, str(device),
+        adapter_cls=adapter_cls,
+        adapter_kwargs=adapter_kwargs,
+    )
+    print(f"Model loaded: {ckpt_info}")
+    
+    # 统一推理配置 (单一来源)
+    infer_cfg = InferenceConfig.default()
     
     # Load test data
     test_ids = Path("data/splits/test_ids.txt").read_text().strip().split('\n')
@@ -159,110 +69,70 @@ def evaluate_e2e():
     for idx in tqdm(range(len(dataset)), desc="E2E Eval"):
         sample = dataset[idx]
         
-        image = sample['image'].numpy()  # (3, 1024, 1024)
+        image = sample['image']  # (C, H, W) tensor
         gt_mask = sample['mask'].numpy().astype(np.int32)
         
-        # Step 1: DAPI detection (use normalized DAPI channel)
-        dapi = image[1]  # DAPI channel, normalized [0, 1]
+        # Step 1: DAPI detection
+        dapi = image[1].numpy() if image.shape[0] > 1 else image[0].numpy()
         result = detect_and_create_boxes(dapi)
         boxes = result[0] if isinstance(result, tuple) else result
         
         if not boxes or len(boxes) == 0:
-            all_results.append({
-                'dice': 0, 'pq_05': 0, 'pq_03': 0,
-                'n_pred': 0, 'n_gt': len(np.unique(gt_mask)) - 1,
-                'tp_05': 0, 'tp_03': 0,
-            })
+            all_results.append(compute_all_metrics(
+                np.zeros_like(gt_mask), gt_mask
+            ))
             continue
         
-        # Step 2: Prepare BF image for SAM
-        img_bf = np.stack([image[0], image[0], image[0]], axis=0)
-        img_tensor = torch.from_numpy(img_bf).float().unsqueeze(0).to(device)
-        img_tensor = (img_tensor - img_tensor.min()) / (img_tensor.max() - img_tensor.min() + 1e-8)
-        img_preprocessed = model.sam_preprocess(img_tensor)
+        # Step 2: SAM segmentation via unified core
+        boxes_tensor = torch.tensor(boxes, dtype=torch.float32)
         
-        with torch.no_grad():
-            image_embedding = model.model.image_encoder(img_preprocessed)
-        
-        # Step 3: Segment each box
-        pred_mask = np.zeros((1024, 1024), dtype=np.int32)
-        
-        for i, box in enumerate(boxes):
-            if len(box) < 4:
-                continue
-            
-            box_tensor = torch.tensor([box], dtype=torch.float32).unsqueeze(0).to(device)
-            
+        # Adapter preprocessing (if adapter loaded)
+        if adapter is not None:
+            img_np = image.numpy()
+            # Channel rearrange for semantic adapter: [BF,DAPI,ACTN2] -> [ACTN2,BF,DAPI]
+            img_semantic = np.stack([img_np[2], img_np[0], img_np[1]], axis=0)
+            img_tensor = torch.from_numpy(img_semantic).float().unsqueeze(0).to(device)
             with torch.no_grad():
-                sparse_emb, dense_emb = model.model.prompt_encoder(
-                    points=None, boxes=box_tensor, masks=None
-                )
-                low_res_masks, _ = model.model.mask_decoder(
-                    image_embeddings=image_embedding,
-                    image_pe=model.model.prompt_encoder.get_dense_pe(),
-                    sparse_prompt_embeddings=sparse_emb,
-                    dense_prompt_embeddings=dense_emb,
-                    multimask_output=False,
-                )
-            
-            pred = F.interpolate(
-                low_res_masks, size=(1024, 1024),
-                mode='bilinear', align_corners=False
-            ).squeeze()
-            
-            mask = (torch.sigmoid(pred) > 0.5).cpu().numpy()
-            
-            # Box clipping (expand=0.1)
-            x1, y1, x2, y2 = [int(b) for b in box]
-            h, w = mask.shape
-            bw, bh = x2 - x1, y2 - y1
-            expand = 0.1
-            x1_clip = max(0, int(x1 - bw * expand))
-            y1_clip = max(0, int(y1 - bh * expand))
-            x2_clip = min(w, int(x2 + bw * expand))
-            y2_clip = min(h, int(y2 + bh * expand))
-            
-            mask_clipped = np.zeros_like(mask)
-            mask_clipped[y1_clip:y2_clip, x1_clip:x2_clip] = mask[y1_clip:y2_clip, x1_clip:x2_clip]
-            
-            pred_mask[mask_clipped > 0] = i + 1
+                img_tensor = adapter(img_tensor)
+            image_for_seg = img_tensor.squeeze(0)  # [3, H, W]
+        else:
+            image_for_seg = image
         
-        # Step 4: Compute metrics
-        metrics = compute_metrics(pred_mask, gt_mask)
-        all_results.append(metrics)
+        try:
+            seg_result = segment_with_boxes(
+                model=model,
+                image=image_for_seg,
+                boxes=boxes_tensor,
+                config=infer_cfg,
+                device=str(device),
+            )
+            
+            m = compute_all_metrics(seg_result.instance_mask, gt_mask)
+            m['conflict_pixels'] = seg_result.conflict_pixels
+            all_results.append(m)
+            
+        except Exception as e:
+            print(f"  \u26a0\ufe0f Sample {idx} failed: {e}")
+            all_results.append(compute_all_metrics(
+                np.zeros_like(gt_mask), gt_mask
+            ))
     
     # Aggregate results
     print("\n" + "="*70)
-    print("端到端评估结果 (DAPI检测 → SAM分割)")
+    print("=== Evaluation Report ===")
+    print(f"Task:  E2E (DAPI detection \u2192 SAM segmentation)")
     print("="*70)
     
-    avg_dice = np.mean([r['dice'] for r in all_results])
-    avg_pq_05 = np.mean([r['pq_05'] for r in all_results])
-    avg_pq_03 = np.mean([r['pq_03'] for r in all_results])
-    avg_n_pred = np.mean([r['n_pred'] for r in all_results])
-    avg_n_gt = np.mean([r['n_gt'] for r in all_results])
-    avg_tp_05 = np.mean([r['tp_05'] for r in all_results])
-    avg_tp_03 = np.mean([r['tp_03'] for r in all_results])
+    for key in ['bm_1to1_dice', 'bm_coverage_dice', 'gap_dice', 'pq', 'aji', 'semantic_dice']:
+        vals = [r[key] for r in all_results if key in r]
+        if vals:
+            print(f"  {key:20s}: {np.mean(vals):.4f} \u00b1 {np.std(vals):.4f}")
     
-    std_dice = np.std([r['dice'] for r in all_results])
-    std_pq_05 = np.std([r['pq_05'] for r in all_results])
-    std_pq_03 = np.std([r['pq_03'] for r in all_results])
-    
-    print(f"\n【分割质量】")
-    print(f"  Dice:      {avg_dice:.4f} ± {std_dice:.4f}")
-    print(f"  PQ@0.5:    {avg_pq_05:.4f} ± {std_pq_05:.4f}")
-    print(f"  PQ@0.3:    {avg_pq_03:.4f} ± {std_pq_03:.4f}")
-    
-    print(f"\n【检测匹配】")
-    print(f"  平均预测数:     {avg_n_pred:.1f}")
-    print(f"  平均GT数:       {avg_n_gt:.1f}")
-    print(f"  平均TP@0.5:     {avg_tp_05:.1f} ({avg_tp_05/avg_n_gt*100:.1f}%召回)")
-    print(f"  平均TP@0.3:     {avg_tp_03:.1f} ({avg_tp_03/avg_n_gt*100:.1f}%召回)")
-    
-    # Compare with GT-box evaluation
-    print(f"\n【与GT框评估对比】")
-    print(f"  GT框评估:   使用 GT mask 提取的框 (理想情况)")
-    print(f"  端到端评估: 使用 DAPI 检测框 (实际推理)")
+    avg_gt = np.mean([r.get('n_gt_cells', 0) for r in all_results])
+    avg_pred = np.mean([r.get('n_pred_cells', 0) for r in all_results])
+    print(f"  {'n_gt_cells':20s}: {avg_gt:.1f}")
+    print(f"  {'n_pred_cells':20s}: {avg_pred:.1f}")
+    print("="*70)
     
     # Save results
     output_dir = Path("experiments/e2e_evaluation")
@@ -271,24 +141,24 @@ def evaluate_e2e():
     with open(output_dir / "results.json", 'w') as f:
         json.dump({
             'timestamp': datetime.now().isoformat(),
+            'task': 'E2E (DAPI detection -> SAM segmentation)',
             'config': {
                 'model': 'bf_baseline_full_best.pt',
                 'detection': 'DAPI detect_and_create_boxes',
-                'box_expand': 0.1,
+                'inference': {
+                    'mask_threshold': infer_cfg.mask_threshold,
+                    'box_expand': infer_cfg.box_expand,
+                    'conflict_policy': infer_cfg.conflict_policy,
+                    'apply_box_clipping': infer_cfg.apply_box_clipping,
+                },
             },
-            'metrics': {
-                'dice': {'mean': avg_dice, 'std': std_dice},
-                'pq_05': {'mean': avg_pq_05, 'std': std_pq_05},
-                'pq_03': {'mean': avg_pq_03, 'std': std_pq_03},
-            },
-            'detection': {
-                'avg_n_pred': avg_n_pred,
-                'avg_n_gt': avg_n_gt,
-                'avg_tp_05': avg_tp_05,
-                'avg_tp_03': avg_tp_03,
+            'summary': {
+                key: {'mean': float(np.mean([r[key] for r in all_results if key in r])),
+                      'std': float(np.std([r[key] for r in all_results if key in r]))}
+                for key in ['bm_1to1_dice', 'bm_coverage_dice', 'gap_dice', 'pq', 'aji', 'semantic_dice']
             },
             'per_sample': all_results,
-        }, f, indent=2)
+        }, f, indent=2, default=str)
     
     print(f"\n结果保存至: {output_dir / 'results.json'}")
     

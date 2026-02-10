@@ -1,14 +1,26 @@
 #!/usr/bin/env python
 """
-Unified Inference Script for CellSAM.
+[DEPRECATED] Legacy Inference Script for CellSAM.
 
-This is the standard way to run inference using the unified modules.
-Replaces scattered scripts like compare_e12_e15b.py, run_e15b_inference.py, etc.
+WARNING: This script uses the legacy inference pipeline (src/inference/pipeline.py)
+which uses 'first_write' conflict policy. This is INCONSISTENT with the unified
+inference core (src/inference/core.py) which defaults to 'argmax_prob'.
 
-Usage:
-    python tools/run_inference.py --checkpoint checkpoints/e12_boundary_best.pt --samples 5
-    python tools/run_inference.py --data-dir data/raw/allen_segmented_fields_full --output experiments/inference_results
+Use the unified entry points instead:
+  - Oracle evaluation:  python tools/standardized_inference.py
+  - E2E evaluation:     python tools/evaluate_e2e.py
+  - Comprehensive eval: python tools/comprehensive_eval.py
+
+All unified scripts use segment_with_boxes() + InferenceConfig.default().
+
+This file is retained only for backward compatibility with pre-Phase-0 experiments.
 """
+import warnings
+warnings.warn(
+    "run_inference.py uses legacy pipeline with 'first_write' conflict policy. "
+    "Use tools/evaluate_e2e.py or tools/standardized_inference.py instead.",
+    DeprecationWarning, stacklevel=2
+)
 import argparse
 import sys
 from pathlib import Path

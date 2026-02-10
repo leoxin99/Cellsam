@@ -117,7 +117,7 @@ def get_train_transforms(target_size=(1024, 1024)):
             contrast_limit=0.2,
             p=0.5
         ),
-        A.GaussNoise(std_range=(3.16, 7.07), p=0.3),  # Updated 2026-02-06: std = sqrt(var), was var_limit=(10,50)
+        A.GaussNoise(var_limit=(10, 50), p=0.3),  # Fixed: use var_limit for compatibility
         A.GaussianBlur(blur_limit=(3, 5), p=0.2),
         
         # Resize to target size
@@ -268,7 +268,9 @@ class AugmentedAllenDataset(Dataset):
         NOTE: We ONLY expand, never shrink, because:
         - GT box is already the minimum bounding box of the cell
         - Shrinking would cause the cell mask to exceed the box
-        - SAM cannot segment outside the box
+        - Box prompts are soft guidance in SAM-style decoding, so predictions
+          can extend outside the prompt box. Shrinking boxes therefore risks
+          truncating valid target regions during training.
         
         Args:
             box: [x1, y1, x2, y2] bounding box

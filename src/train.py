@@ -27,67 +27,21 @@ from cellSAM import get_model
 from augmented_dataset import AugmentedAllenDataset, collate_fn, load_split_ids
 from losses.combined import CombinedLoss
 from adapters import IndependentChannelAdapter, LightweightChannelAdapter
+from inference.core import segment_with_boxes, InferenceConfig
+from metrics.instance_metrics import (
+    compute_bm_1to1_dice,
+    compute_bm_coverage_dice,
+    compute_pq as compute_pq_unified,
+    compute_semantic_dice as compute_semantic_dice_unified,
+    compute_all_metrics,
+)
 
 
-def compute_pq(pred_mask, gt_mask, iou_threshold=0.5):
-    """
-    Compute Panoptic Quality (PQ) for instance segmentation.
-    
-    PQ = SQ × RQ
-    - SQ (Segmentation Quality): average IoU of matched instances  
-    - RQ (Recognition Quality): TP / (TP + 0.5*FP + 0.5*FN)
-    
-    Returns: pq, sq, rq
-    """
-    # Label connected components in prediction
-    pred_binary = (pred_mask > 0.5).astype(np.int32)
-    pred_labeled, n_pred = ndimage.label(pred_binary)
-    
-    # Get unique GT labels
-    gt_labels = np.unique(gt_mask)
-    gt_labels = gt_labels[gt_labels > 0]
-    n_gt = len(gt_labels)
-    
-    if n_pred == 0 and n_gt == 0:
-        return 1.0, 1.0, 1.0
-    if n_pred == 0 or n_gt == 0:
-        return 0.0, 0.0, 0.0
-    
-    # Match predictions to GT using IoU
-    matched_gt = set()
-    matched_ious = []
-    
-    for pred_id in range(1, n_pred + 1):
-        pred_region = (pred_labeled == pred_id)
-        best_iou = 0
-        best_gt_id = -1
-        
-        for gt_id in gt_labels:
-            if gt_id in matched_gt:
-                continue
-            gt_region = (gt_mask == gt_id)
-            
-            intersection = np.logical_and(pred_region, gt_region).sum()
-            union = np.logical_or(pred_region, gt_region).sum()
-            iou = intersection / (union + 1e-8)
-            
-            if iou > best_iou:
-                best_iou = iou
-                best_gt_id = gt_id
-        
-        if best_iou >= iou_threshold:
-            matched_gt.add(best_gt_id)
-            matched_ious.append(best_iou)
-    
-    tp = len(matched_ious)
-    fp = n_pred - tp
-    fn = n_gt - tp
-    
-    sq = np.mean(matched_ious) if matched_ious else 0.0
-    rq = tp / (tp + 0.5 * fp + 0.5 * fn) if (tp + fp + fn) > 0 else 0.0
-    pq = sq * rq
-    
-    return pq, sq, rq
+# NOTE: Local compute_pq / compute_best_match_dice 已移除
+# 统一使用 metrics.instance_metrics 中的实现
+# - compute_bm_1to1_dice   (Hungarian 1对1，主指标)
+# - compute_bm_coverage_dice (每GT取最大，辅助诊断)
+# - compute_pq_unified      (PQ with Hungarian matching)
 
 
 def load_config(config_path: str) -> dict:
@@ -399,124 +353,91 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
 
 
 def validate(model, dataloader, criterion, device, adapter=None, use_pq=False, box_expand=0.1):
-    """Validation with instance-level Dice and optionally PQ score computation.
+    """Validation using unified inference core and metrics.
     
-    Key improvements:
-    - Instance-level Dice: compute Dice per cell, not semantic
-    - box_expand: constrain predictions to box region
+    Uses segment_with_boxes for inference and compute_all_metrics for evaluation.
+    Reports:
+      - BM-1to1 Dice  (主指标, Hungarian 一对一)
+      - BM-Coverage Dice (辅助, 每GT取最大)
+      - Gap Dice (Coverage - 1to1, 诊断粘连)
+      - PQ@0.5
+      - Semantic Dice
     """
     model.eval()
     if adapter is not None:
         adapter.eval()
     
-    total_instance_dice = 0
-    total_semantic_dice = 0
-    total_pq = 0
-    num_cells = 0
+    # 累加器
+    total_bm_1to1 = 0.0
+    total_bm_coverage = 0.0
+    total_pq = 0.0
+    total_semantic_dice = 0.0
+    total_conflict_pixels = 0
     num_samples = 0
+    
+    # 统一推理配置 (单一来源, 仅 override box_expand from training config)
+    infer_cfg = InferenceConfig.default()
+    infer_cfg.box_expand = box_expand
+    infer_cfg.apply_postprocess = False
+    infer_cfg.validate_size = False
     
     with torch.no_grad():
         for batch in dataloader:
             images = batch['image'].to(device)
             masks = batch['mask'].to(device)
             boxes = batch['boxes']
-            cell_ids = batch.get('cell_ids', None)
             
             # Apply channel adapter if present
             if adapter is not None:
                 images = adapter(images)
             
-            img_preprocessed = model.sam_preprocess(images)
-            image_embedding = model.model.image_encoder(img_preprocessed)
-            
             for i in range(images.shape[0]):
                 sample_boxes = boxes[i]
                 sample_mask = masks[i]
-                sample_cell_ids = cell_ids[i] if cell_ids is not None else None
-                combined_pred = torch.zeros_like(sample_mask, dtype=torch.float32)
                 
-                for j, box in enumerate(sample_boxes):
-                    if box.sum() == 0:
-                        continue
-                    
-                    # Get cell ID
-                    if sample_cell_ids is not None and j < len(sample_cell_ids):
-                        cell_id = sample_cell_ids[j].item() if hasattr(sample_cell_ids[j], 'item') else sample_cell_ids[j]
-                    else:
-                        cell_id = None
-                    
-                    box_tensor = torch.tensor([box.tolist()], dtype=torch.float32).unsqueeze(0).to(device)
-                    
-                    try:
-                        sparse_emb, dense_emb = model.model.prompt_encoder(
-                            points=None, boxes=box_tensor, masks=None
-                        )
-                        low_res_masks, _ = model.model.mask_decoder(
-                            image_embeddings=image_embedding[i:i+1],
-                            image_pe=model.model.prompt_encoder.get_dense_pe(),
-                            sparse_prompt_embeddings=sparse_emb,
-                            dense_prompt_embeddings=dense_emb,
-                            multimask_output=False,
-                        )
-                        
-                        pred_mask = F.interpolate(
-                            low_res_masks,
-                            size=(1024, 1024),
-                            mode="bilinear",
-                            align_corners=False
-                        )[0, 0]
-                        
-                        pred_sigmoid = torch.sigmoid(pred_mask)
-                        
-                        # Box clipping
-                        x1, y1, x2, y2 = [int(b) for b in box.tolist()]
-                        h, w = pred_mask.shape
-                        bw, bh = x2 - x1, y2 - y1
-                        x1_clip = max(0, int(x1 - bw * box_expand))
-                        y1_clip = max(0, int(y1 - bh * box_expand))
-                        x2_clip = min(w, int(x2 + bw * box_expand))
-                        y2_clip = min(h, int(y2 + bh * box_expand))
-                        
-                        pred_clipped = torch.zeros_like(pred_sigmoid)
-                        pred_clipped[y1_clip:y2_clip, x1_clip:x2_clip] = pred_sigmoid[y1_clip:y2_clip, x1_clip:x2_clip]
-                        
-                        # Compute instance-level Dice
-                        if cell_id is not None and cell_id > 0:
-                            target = (sample_mask == cell_id).float()
-                            pred_binary = (pred_clipped > 0.5).float()
-                            
-                            intersection = (pred_binary * target).sum()
-                            dice = (2 * intersection) / (pred_binary.sum() + target.sum() + 1e-8)
-                            total_instance_dice += dice.item()
-                            num_cells += 1
-                        
-                        combined_pred = torch.maximum(combined_pred, pred_clipped)
-                        
-                    except Exception:
-                        continue
+                # 跳过空 box
+                if sample_boxes.shape[0] == 0 or sample_boxes.sum() == 0:
+                    continue
                 
-                # Semantic Dice (for backward compatibility logging)
-                pred_binary = (combined_pred > 0.5).float()
-                target_binary = (sample_mask > 0).float()
-                intersection = (pred_binary * target_binary).sum()
-                semantic_dice = (2 * intersection) / (pred_binary.sum() + target_binary.sum() + 1e-8)
-                total_semantic_dice += semantic_dice.item()
+                # === 统一推理 ===
+                result = segment_with_boxes(
+                    model=model,
+                    image=images[i],
+                    boxes=sample_boxes,
+                    config=infer_cfg,
+                    device=str(device),
+                )
                 
-                # Compute PQ if enabled
-                if use_pq:
-                    pred_np = combined_pred.cpu().numpy()
-                    gt_np = sample_mask.cpu().numpy()
-                    pq, _, _ = compute_pq(pred_np, gt_np, iou_threshold=0.5)
-                    total_pq += pq
+                pred_np = result.instance_mask
+                gt_np = sample_mask.cpu().numpy()
                 
+                # === 统一指标 ===
+                metrics = compute_all_metrics(pred_np, gt_np, iou_threshold=0.5)
+                
+                total_bm_1to1 += metrics['bm_1to1_dice']
+                total_bm_coverage += metrics['bm_coverage_dice']
+                total_pq += metrics['pq']
+                total_semantic_dice += metrics['semantic_dice']
+                total_conflict_pixels += result.conflict_pixels
                 num_samples += 1
     
-    avg_instance_dice = total_instance_dice / max(num_cells, 1)
-    avg_semantic_dice = total_semantic_dice / max(num_samples, 1)
-    avg_pq = total_pq / max(num_samples, 1) if use_pq else 0.0
+    n = max(num_samples, 1)
+    avg_bm_1to1 = total_bm_1to1 / n
+    avg_bm_coverage = total_bm_coverage / n
+    avg_pq = total_pq / n if use_pq else 0.0
+    avg_semantic_dice = total_semantic_dice / n
+    avg_conflict = total_conflict_pixels / n
+    avg_gap = avg_bm_coverage - avg_bm_1to1
     
-    # Return instance dice as primary metric
-    return avg_instance_dice, avg_pq, avg_semantic_dice
+    # 返回完整诊断信息
+    return {
+        'bm_1to1': avg_bm_1to1,
+        'bm_coverage': avg_bm_coverage,
+        'gap': avg_gap,
+        'pq': avg_pq,
+        'semantic_dice': avg_semantic_dice,
+        'conflict': avg_conflict,
+    }
 
 
 
@@ -602,7 +523,13 @@ def main():
     
     for epoch in range(config['training']['epochs']):
         train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device, scaler=scaler, adapter=adapter, box_expand=box_expand)
-        val_dice, val_pq, val_semantic_dice = validate(model, val_loader, criterion, device, adapter=adapter, use_pq=use_pq_early_stop, box_expand=box_expand)
+        val_metrics = validate(model, val_loader, criterion, device, adapter=adapter, use_pq=use_pq_early_stop, box_expand=box_expand)
+        val_dice = val_metrics['bm_1to1']
+        val_pq = val_metrics['pq']
+        val_semantic_dice = val_metrics['semantic_dice']
+        val_coverage = val_metrics['bm_coverage']
+        val_gap = val_metrics['gap']
+        val_conflict = val_metrics['conflict']
         scheduler.step()
         
         # Select metric for early stopping
@@ -616,15 +543,18 @@ def main():
             metric_name = "Dice"
         
         print(f"Epoch [{epoch+1}/{config['training']['epochs']}] "
-              f"Train Loss: {train_loss:.4f}, Instance Dice: {val_dice:.4f}, "
-              f"Semantic Dice: {val_semantic_dice:.4f}, PQ: {val_pq:.4f}, LR: {scheduler.get_last_lr()[0]:.6f}")
+              f"Train Loss: {train_loss:.4f}, "
+              f"BM-1to1: {val_dice:.4f}, BM-Cov: {val_coverage:.4f}, Gap: {val_gap:.4f}, "
+              f"PQ: {val_pq:.4f}, Sem: {val_semantic_dice:.4f}, "
+              f"Conflict: {val_conflict:.0f}, LR: {scheduler.get_last_lr()[0]:.6f}")
         
         # Save best model (including adapter if present)
         if current_metric > best_metric:
-            if use_pq_early_stop:
-                best_pq = val_pq
-            else:
-                best_dice = val_dice
+            # Always track both metrics for accurate final reporting.
+            # Note: under PQ early stop, best_dice is the dice at the best-PQ epoch,
+            # not necessarily the global maximum dice across all epochs.
+            best_dice = val_dice
+            best_pq = val_pq
             patience_counter = 0
             checkpoint = {
                 'model_state_dict': model.state_dict(),
@@ -652,6 +582,16 @@ def main():
                 'val_pq': val_pq,
             }
             torch.save(checkpoint, output_dir / f"epoch_{epoch+1}.pt")
+            
+            # Checkpoint retention: keep only last N periodic saves to avoid disk full
+            keep_last = config['output'].get('keep_last_checkpoints', 3)
+            if keep_last > 0:
+                import glob
+                periodic_ckpts = sorted(glob.glob(str(output_dir / "epoch_*.pt")))
+                if len(periodic_ckpts) > keep_last:
+                    for old_ckpt in periodic_ckpts[:-keep_last]:
+                        Path(old_ckpt).unlink()
+                        print(f"  [Retention] Removed old checkpoint: {Path(old_ckpt).name}")
     
     print(f"\nTraining complete! Best Val Dice: {best_dice:.4f}, Best Val PQ: {best_pq:.4f}")
     print(f"Model saved to: {output_dir}")

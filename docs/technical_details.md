@@ -94,14 +94,15 @@ python data/scripts/generate_splits.py
 
 ---
 
-## TIFF 通道映射
+## TIFF 通道映射 (已验证 2026-02-06)
 
 | 通道 | 内容 |
 |------|------|
 | Ch0 | Brightfield (明场) |
+| Ch1 | **Actn2 (肌动蛋白)** |
 | Ch4 | DAPI (核染色) |
-| Ch5 | Actn2 (肌动蛋白) |
-| Ch9 | GT Segmentation Mask |
+| Ch8 | Binary mask (二值掩码) |
+| Ch9 | GT Segmentation Mask (实例分割) |
 
 ---
 
