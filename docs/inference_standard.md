@@ -18,9 +18,11 @@
 | `sam_iou_threshold` | 0.5 | SAM IoU 过滤阈值 |
 | `apply_box_clipping` | True | mask 裁剪到 box 区域 |
 | `box_expand` | 0.1 | box 扩展比例 |
-| `conflict_policy` | `"confidence"` | 重叠像素归属策略 |
-| `min_cell_area` | 13884 | 细胞最小面积 (1024px) |
-| `max_cell_area` | 174735 | 细胞最大面积 (1024px) |
+| `conflict_policy` | `"argmax_prob"` | 重叠像素归属策略 (argmax_prob/first_write/last_write) |
+| `apply_postprocess` | False | 是否启用面积过滤后处理 |
+| `validate_size` | False | 是否验证细胞面积范围 |
+| `min_cell_area` | 500 | 细胞最小面积 (像素) |
+| `max_cell_area` | 200000 | 细胞最大面积 (像素) |
 
 ```python
 from src.inference.core import InferenceConfig, segment_with_boxes
@@ -44,9 +46,9 @@ result = segment_with_boxes(model, image, boxes, config)
   ↓
 逐 box 切片 → SAM predictor → sigmoid
   ↓
-resolve_conflicts (confidence/area policy)
+resolve_conflicts (argmax_prob policy)
   ↓
-postprocess (面积过滤)
+postprocess (仅当 apply_postprocess=True 时启用)
   ↓
 输出: InferenceResult (instance_mask, confidence_map, n_instances, stats)
 ```
@@ -55,8 +57,9 @@ postprocess (面积过滤)
 
 | 策略 | 说明 |
 |------|------|
-| `confidence` | **默认** — 重叠像素归属置信度最高的实例 |
-| `area` | 重叠像素归属面积最小的实例 |
+| `argmax_prob` | **默认** — 重叠像素归属 sigmoid 输出最高的实例 |
+| `first_write` | 先处理的 box 优先，后续不覆盖 |
+| `last_write` | 后处理的 box 覆盖之前的 |
 
 ### `postprocess_instance_mask()` — 后处理
 
@@ -93,18 +96,16 @@ RQ (Recognition Quality) = TP / (TP + 0.5*FP + 0.5*FN)
 
 | 工具 | 用途 | Box 来源 | 说明 |
 |------|------|----------|------|
-| `tools/comprehensive_eval.py` | **Oracle 评估** | GT boxes | 纯分割能力 |
+| `tools/comprehensive_eval.py` | **Oracle 评估** | GT boxes | 纯分割能力 (无 argparse，需改代码内参数) |
 | `tools/evaluate_e2e.py` | **E2E 评估** | DAPI 检测 | 含检测误差 |
 | `tools/test_unified_regression.py` | **回归测试** | GT boxes | 防止退化 |
-| `tools/smoke_test_e2e.py` | **冒烟测试** | GT boxes | 快速验证 (1 样本) |
+| `tools/smoke_test_e2e.py` | **冒烟测试** | GT boxes | 默认 30 样本 |
 
 ### 使用方式
 
 ```bash
-# Oracle 评估 (标准测试)
-python tools/comprehensive_eval.py \
-  --checkpoint checkpoints/E_phase1_rebalance_l4/best_model.pt \
-  --split val --samples 71
+# Oracle 评估 (需在脚本内修改 checkpoint 路径)
+python tools/comprehensive_eval.py
 
 # E2E 评估
 python tools/evaluate_e2e.py \

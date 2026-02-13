@@ -43,6 +43,17 @@ Phase 2 结构改进     [████████████░░░░░░
 - **验证**: 梯度 12/12 + 回归 10/10 通过
 - **Alice 操作**: `git pull && sbatch scripts/train_phase2a.sh`
 
+### 未来优化方向 (备忘)
+
+| 方向 | 说明 | 优先级 |
+|------|------|--------|
+| **Soft boundary averaging** | 冲突区域不做硬裁决，用概率加权平均边界 | P3+ |
+| **Watershed 冲突区域** | 冲突像素用 watershed 按距离分配 | P3+ |
+| **CRF/MRF 后处理** | 马尔可夫随机场，考虑空间连续性 | P3+ |
+| **三通道 Adapter 对比** | Channel Adapter vs BF-only 效果对比 | Phase 3 |
+
+> ⚠️ 推理端优化的前提是 Phase 2 训练端 (L_overlap) 先验证效果。
+
 ---
 
 ## ⚠️ 环境配置 (CRITICAL)

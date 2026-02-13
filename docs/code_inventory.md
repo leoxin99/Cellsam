@@ -34,7 +34,7 @@
 | `tools/comprehensive_eval.py` | Oracle 评估 | GT boxes → 全指标 (Dice/PQ/SQ/RQ/AJI) |
 | `tools/evaluate_e2e.py` | E2E 评估 | DAPI 检测 → 分割 → 评估 |
 | `tools/test_unified_regression.py` | 回归测试 | 训练前必跑，防止退化 |
-| `tools/smoke_test_e2e.py` | 冒烟测试 | 1 样本快速验证 |
+| `tools/smoke_test_e2e.py` | 冒烟测试 | 快速验证 (默认 30 样本) |
 
 ---
 
@@ -63,9 +63,9 @@
 
 | 目录 | 内容 |
 |------|------|
-| `archive/legacy_eval/` | E24-E28 旧评估脚本 |
-| `archive/legacy_experiment/` | E29 早期推理测试 |
-| `archive/tests_deprecated/` | 旧版测试 |
+| `tools/archive/legacy_eval/` | E24-E28 旧评估脚本 |
+| `tools/archive/legacy_experiment/` | E29 早期推理测试 |
+| `tools/archive/tests_deprecated/` | 旧版测试 |
 
 ---
 
