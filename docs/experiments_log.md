@@ -84,6 +84,7 @@
 | E32 | 2026-02-05 | Adapter Instance P2 (全部Loss) | 待训练 | ⏳ 待做 |
 
 | **E33** | **2026-02-06** | **GT Box + 预训练CellSAM (Baseline)** | **Instance Dice=0.35** | **✅ Baseline** |
+| BugFix | 2026-02-13 | GT 框面积过滤移除 | 5173/5173 通过 | 🔧 已修复 |
 
 
 

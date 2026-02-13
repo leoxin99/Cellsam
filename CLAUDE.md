@@ -41,7 +41,7 @@ Phase 2 结构改进     [████████████░░░░░░
 - **当前**: 在 Alice 提交 P2-A 训练 (`scripts/train_phase2a.sh`)
 - **配置**: `src/config/phase2a_neighbor_overlap.yaml`
 - **验证**: 梯度 12/12 + 回归 10/10 通过
-- **Alice 操作**: `git pull && sbatch scripts/train_phase2a.sh`
+- **Alice 操作**: 依次执行 `git pull`，再执行 `sbatch scripts/train_phase2a.sh`
 
 ### 未来优化方向 (备忘)
 
@@ -53,6 +53,10 @@ Phase 2 结构改进     [████████████░░░░░░
 | **三通道 Adapter 对比** | Channel Adapter vs BF-only 效果对比 | Phase 3 |
 
 > ⚠️ 推理端优化的前提是 Phase 2 训练端 (L_overlap) 先验证效果。
+
+### ⚠️ 已修复: GT 框面积过滤 Bug (2026-02-13)
+
+`_mask_to_boxes_with_ids` 曾用 `max_area_ratio=0.15` 过滤 GT regions，面积 >15% 图像的大细胞被静默丢弃。已删除该过滤，验证 5,173/5,173 GT regions 全部生成框。后续训练自动使用修复代码 (`git pull` 即可)。
 
 ---
 
@@ -92,10 +96,13 @@ conda activate cellsam
 | `docs/naming_convention.md` | 🟢 Active | 命名规范 |
 | `docs/error_log_and_checklist.md` | 🟢 Active | 错误归纳 + 检查清单 |
 | `docs/alice_quick_reference.md` | 🟢 Active | Alice HPC 指南 |
+| `docs/progress_timeline_2.13.md` | 🟢 Active | 导师汇报时间线 + 后续计划 |
+| `docs/phase2_design.md` | 🟢 Active | Phase 2 设计与执行计划 |
+| `docs/phase1_design.md` | 🟡 Historical | Phase 1 实施记录 |
 | `docs/boundary_enhancement_design.md` | 🟡 Historical | 早期设计草案 |
 | `docs/claude_pipeline_analysis.md` | 🟡 Historical | pipeline 分析 |
 
-> 新对话仅需 `CLAUDE.md` + `inference_standard.md` + `code_inventory.md` 即可定位下一步。
+> 新对话定位执行任务：优先读 `CLAUDE.md` + `inference_standard.md` + `code_inventory.md`；若需汇报，补读 `progress_timeline_2.13.md`。
 
 ---
 
@@ -156,12 +163,15 @@ conda activate cellsam
 
 | 文档 | 用途 | 更新频率 |
 |------|------|----------|
-| [codex_claude_seg.md](docs/codex_claude_seg.md) | **Codex+Claude 联合文档 (Ch1-16)** ⭐ | 每阶段 |
+| [codex_claude_seg.md](docs/codex_claude_seg.md) | **Codex+Claude 联合文档 (持续更新)** ⭐ | 每阶段 |
 | [error_log_and_checklist.md](docs/error_log_and_checklist.md) | 历史错误归纳 + 训练前检查清单 | 每次发现错误 |
 | [experiments_log.md](docs/experiments_log.md) | 实验记录 (E1-E30+ & Phase1) | 每次实验 |
 | [dataset_parameters.md](docs/dataset_parameters.md) | 数据集统计参数 (分辨率、阈值) | 参数变化时 |
 | [inference_standard.md](docs/inference_standard.md) | **推理标准** (Best-Match Dice) ⭐ | 推理方法变更时 |
 | [naming_convention.md](docs/naming_convention.md) | **命名规范** (模型/实验/检测方案) ⭐ | 新方案时 |
+| [progress_timeline_2.13.md](docs/progress_timeline_2.13.md) | 导师汇报材料 + 2.13 时间线 | 里程碑更新时 |
+| [phase2_design.md](docs/phase2_design.md) | Phase 2 方案与实验路线 | Phase 2 变更时 |
+| [phase1_design.md](docs/phase1_design.md) | Phase 1 实施记录 | 回溯 Phase 1 时 |
 | [boundary_enhancement_design.md](docs/boundary_enhancement_design.md) | Loss 函数设计文档 | 设计变更时 |
 | [code_inventory.md](docs/code_inventory.md) | 代码文件清单 + 版本记录 | 新增/修改代码时 |
 
@@ -210,7 +220,8 @@ tools/
 scripts/
 ├── train_phase1_full.sh   # ALICE A100 SLURM 脚本
 ├── train_phase1_l4.sh     # ALICE L4 SLURM 脚本
-└── train_phase2a.sh       # 🔄 P2-A SLURM 脚本 (含 gradient gate)
+├── train_phase2a.sh       # 🔄 P2-A L4 SLURM 脚本 (含 gradient gate)
+└── train_phase2a_a100.sh  # 🔄 P2-A A100 对照 SLURM 脚本
 
 docs/
 ├── claude_pipeline_analysis.md  # 三通道设计方案 ⭐
@@ -270,11 +281,13 @@ docs/
 
 ## 📚 新 AI 必读清单 (Required Reading)
 
-**只需阅读本文档即可开始工作。** 如需深入了解，按需查阅：
+**新对话建议先读 3 份文档：`CLAUDE.md` + `inference_standard.md` + `code_inventory.md`。** 如需深入了解，按需查阅：
 
 | 优先级 | 文档 | 用途 |
 |--------|------|------|
 | **P0** | `CLAUDE.md` (本文件) | 项目总览、任务清单、关键决策 |
+| **P0** | [inference_standard.md](docs/inference_standard.md) | 推理与评估口径 SSOT |
+| **P0** | [code_inventory.md](docs/code_inventory.md) | 当前活跃代码入口速查 |
 | **P0** | [error_log_and_checklist.md](docs/error_log_and_checklist.md) | ⚠️ **训练前必读** - 错误归纳 + 检查清单 |
 | P1 | [claude_pipeline_analysis.md](docs/claude_pipeline_analysis.md) | 三通道设计详细方案 |
 | P1 | [dataset_parameters.md](docs/dataset_parameters.md) | 数据集统计和参数 |
