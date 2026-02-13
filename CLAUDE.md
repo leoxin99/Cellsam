@@ -56,11 +56,17 @@ conda activate cellsam
 | 项目 | 值 |
 |------|-----|
 | **Conda 环境** | `cellsam` |
-| **CUDA** | 12.4 |
-| **PyTorch** | GPU 版本 |
+| **CUDA (conda)** | 12.1 (pytorch-cuda=12.1) |
+| **CUDA (Alice module)** | `CUDA/12.1.1` ⚠️ 不再是 `cuda/11.8` |
+| **PyTorch** | 2.1.2 GPU 版本 |
 | **训练位置** | ALICE HPC (L4/A100) + 本地 (评估) |
 
 > ⚠️ **重要**: 如果不激活环境，可能会使用系统 Python 导致 `CUDA not available` 错误。
+
+> ⚠️ **CUDA Module 更新 (2026-02-13)**: Alice 系统更新后 `cuda/11.8` 已移除。
+> SLURM 脚本必须使用 `module load CUDA/12.1.1`。
+> 注意：login 节点用 conda 自带 CUDA 可正常运行测试，但 compute 节点的 SLURM 脚本
+> 若 `module load` 失败会导致整个脚本静默退出（`set -e`），表现为训练不启动。
 
 ### AI 工作规范
 
@@ -287,6 +293,8 @@ python tools/verify_training_config.py
 
 | 日期 | 内容 |
 |------|------|
+| 2026-02-13 | Fix: CUDA module cuda/11.8 → CUDA/12.1.1 (Alice 系统更新) |
+| 2026-02-13 | P2-A 双 GPU 训练提交: L4 (979114) + A100 (979115) |
 | 2026-02-13 | Phase 2 Step 3 完成: L_neighbor + L_overlap + computability gating |
 | 2026-02-13 | P2-A SLURM 脚本 + 梯度门禁 12/12 + 回归 10/10 |
 | 2026-02-11 | Phase 1 完成 + test 锁定评估 + 文档全量更新 |

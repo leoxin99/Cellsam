@@ -1,6 +1,6 @@
 # ALICE 训练快速参考 (永久文档)
 
-> **最后更新**: 2026-02-03
+> **最后更新**: 2026-02-13
 
 ---
 
@@ -26,6 +26,10 @@
 | **`gpu-a100-80g`** | **A100** | **80GB** | **6** | **2** | **7天** | **⭐ 推荐** |
 
 > ⚠️ `gpu-a100` (40G) 分区已不存在。旧脚本中的 `--partition=gpu-a100` 需改为 `gpu-a100-80g`。
+
+> ⚠️ **CUDA Module 更新 (2026-02-13)**: `cuda/11.8` 已移除，当前可用: `CUDA/12.1.1`, `CUDA/12.3.0`。
+> SLURM 脚本统一使用 `module load CUDA/12.1.1`。
+> Login 节点用 conda 自带 CUDA 可跑测试，但 compute 节点必须正确加载 module。
 
 ---
 
@@ -78,6 +82,7 @@ pip install segment-anything scikit-image scikit-learn albumentations dask tqdm
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.err
 
+module load CUDA/12.1.1
 conda activate cellsam
 export PYTHONPATH=$PYTHONPATH:~/CellSam/cellSAM_source
 cd ~/CellSam
