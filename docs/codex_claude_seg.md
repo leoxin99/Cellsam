@@ -6,6 +6,50 @@
 
 ---
 
+## 0、快速入口（新对话先读）
+
+### 0.1 当前状态（ACTIVE）
+
+- 当前阶段：Phase 2，已完成 Step 3（`L_neighbor + L_overlap` 接线与门禁）。
+- 当前主线目标：先跑 P2-A 验证“像素互侵约束”是否带来稳定收益，再决定是否进入全局对称 overlap（P2-B）。
+- 当前风险状态：`TopologyLoss` 与 `SizeLoss` 在 P2-A 中关闭（避免误伤与参数来源争议），以最小改动验证主假设。
+
+### 0.2 当前生效配置与代码口径
+
+- 训练主配置：`src/config/phase2a_neighbor_overlap.yaml`
+- 关键开关（P2-A）：`use_neighbor=true`, `use_overlap=true`, `use_topology=false`, `use_size=false`
+- 关键损失实现：`src/losses/combined.py`
+- 归一化防护口径：`neighbor/overlap` 仅在“可计算（not None + shape 匹配）”时进入分母与分支计算
+- 训练数据流：`src/train.py`（box shuffle + confidence_map 累积）
+- 统一推理与评估口径：`src/inference/core.py` + `tools/standardized_inference.py` + `tools/evaluate_e2e.py` + `tools/comprehensive_eval.py`
+
+### 0.3 下一步（按顺序执行）
+
+1. 运行 P2-A 训练（使用 `src/config/phase2a_neighbor_overlap.yaml`）。
+2. 训练完成后做 Oracle(test) + E2E(test) 锁定评估（不反向调参）。
+3. 若 P2-A 对 RQ/SQ 提升明确，再进入 P2-B 评估“全局对称 overlap”版本。
+
+### 0.4 章节状态索引（防混用）
+
+| 范围 | 状态 | 用途 |
+|------|------|------|
+| 第1-7章 | Historical | 背景与早期方案，仅作追溯 |
+| 第8-11章 | Historical | 冲突审查与源码证据链 |
+| 第12-16章 | Frozen | Phase 1 结论与封板记录 |
+| 第17章（含 17.10） | Active | Phase 2 当前执行口径与审查结论 |
+
+### 0.5 新对话建议提示词（复制可用）
+
+```text
+请只按 docs/codex_claude_seg.md 的「第0章快速入口」和「第17章 Active 内容」执行。
+Historical/Frozen 章节仅用于追溯，不作为当前改动依据。
+当前目标是先完成 P2-A 训练与锁定评估，再决定 P2-B。
+```
+
+---
+
+> 说明：以下正文保留完整历史讨论，便于审计与追溯；执行时以上述“第0章 + 第17章”为准。
+
 ## 一、背景与问题
 
 ### 1.1 核心挑战
@@ -827,3 +871,438 @@ Phase 1 配置变更 (boundary_weight 0.3→1.5, contour_weight 0.1→0.3, PQ ea
 3. 将相关文档中的 `9-test` 统一改为 `10-test`。  
 4. 在第十三章末尾增加一句：  
    - “本章为 Oracle 路线基线；DAPI 框 E2E 基线需在独立小节报告。”
+
+---
+
+## 十五、[Claude新增 | 2026-02-11] Phase 1 训练结果与 Oracle 评估
+
+### 15.1 实验设计
+
+**目标**: 验证 loss 权重重平衡 + PQ 早停策略的效果
+
+**Config**: `src/config/phase1_rebalance.yaml` — 关键变量:
+
+| 参数 | E29 (旧) | Phase 1 (新) | 变化 |
+|------|----------|-------------|------|
+| boundary_weight | 0.5 | **1.5** | ×3 |
+| contour_weight | 0.1 (OFF) | **0.3** (ON) | 新增 |
+| pos_weight | 10.0 | **2.0** | ÷5 |
+| use_pq_early_stop | false | **true** | 新增 |
+| use_topology | true | **false** | 关闭 |
+| use_size | true | **false** | 关闭 |
+
+**固定变量**: freeze_encoder=true, freeze_decoder=false, use_adapter=false, batch_size=4, lr=1e-4, warmup=5, patience=15, epochs=50, seed=未固定(训练), seed=42(评估)
+
+### 15.2 ALICE 训练结果
+
+| | L4 (node885) | A100 (node872) |
+|---|---|---|
+| Job ID | 974531 | 974530 |
+| 分区 | gpu-l4-24g | gpu-a100-80g |
+| 实际训练 epochs | **50/50** (跑满) | **~47/50** (PQ 早停) |
+| Best epoch (val PQ) | 49 | 32 |
+| 训练时长 | 4h 26min | 2h 44min |
+| 每 epoch 耗时 | ~5.3 min | ~3.5 min |
+| **Best Val Dice** | **0.6927** | 0.6828 |
+| **Best Val PQ** | **0.4750** | 0.4533 |
+
+> **注意**: Best Val Dice 和 Best Val PQ 来自 checkpoint 中保存的验证集指标。A100 的 "best @ epoch 32" 指 PQ 在 epoch 32 达到最高值，之后 15 epochs 无改善 (patience=15) 触发早停，实际训练至 ~epoch 47。
+
+### 15.3 Oracle Smoke Test (n=30, seed=42)
+
+**评估方法**: 使用 L4 best_model.pt (epoch 49), GT boxes (Oracle route), 30 个随机验证样本, seed=42
+
+**命令**:
+```bash
+python tools/smoke_test_e2e.py \
+  --n_samples 30 \
+  --checkpoint checkpoints/E_phase1_rebalance_l4/best_model.pt \
+  --seed 42 \
+  --output results/phase1_l4_oracle_n30.csv
+```
+
+**结果 (mean ± 概况)**:
+
+| 指标 | Phase 1 (n=30) | E29 Baseline (n=30) | Δ | 提升 |
+|------|---------------|--------------------|----|------|
+| **BM-1to1 Dice** | **0.6831** | 0.593 | +0.090 | +15.2% |
+| BM-Coverage Dice | 0.6861 | — | — | — |
+| Gap Dice | 0.0030 | — | — | — |
+| **PQ** | **0.4717** | 0.326 | +0.146 | +44.6% |
+| SQ | 0.6231 | — | — | — |
+| RQ | 0.7556 | — | — | — |
+| **TP** | **7.73** | 5.4 | +2.33 | +43% |
+| FP | 2.33 | — | — | — |
+| FN | 2.73 | — | — | — |
+| **AJI** | **0.4957** | 0.410 | +0.086 | +20.9% |
+| **Semantic Dice** | **0.7558** | 0.720 | +0.036 | +5.0% |
+| n_gt_cells (mean) | 10.47 | — | — | — |
+| n_pred_cells (mean) | 10.07 | — | — | — |
+
+### 15.4 分析
+
+1. **PQ 提升最显著** (+44.6%): boundary_weight=1.5 和 contour_weight=0.3 有效改善了实例分离质量。RQ=0.756 说明 ~76% 的 GT 细胞被成功匹配。
+2. **TP 大幅增加** (+43%): 平均从 5.4→7.7 个正确匹配，FP/FN 比例合理 (2.3/2.7)。
+3. **AJI 提升** (+20.9%): 实例级重叠质量改善。
+4. **Semantic Dice 小幅提升** (+5.0%): 语义分割本身已较好，Phase 1 改动集中在实例分离而非语义准确度。
+5. **L4 vs A100 一致性**: 两块 GPU 的训练结果高度接近 (PQ 差异 ~0.02)，验证了可重复性。训练速度差异 (5.3 vs 3.5 min/epoch) 符合硬件预期。
+
+### 15.5 指标口径说明
+
+| 来源 | 指标类型 | 用途 |
+|------|----------|------|
+| checkpoint `best_dice` / `best_pq` | **验证集** (val split) | 训练时早停依据 |
+| 训练日志 `Train Loss / BM-1to1 / PQ` | **训练集** (train split) | 监控训练进度 |
+| `smoke_test_e2e.py` | **验证集** (val split, n=30 随机采样) | 独立标准化评估 |
+
+> 本章所有对比指标均来自 `smoke_test_e2e.py` (Oracle route, GT boxes, seed=42, n=30)，与第十三章基线口径一致。
+
+---
+
+## 十六、[Claude新增 | 2026-02-11] Phase 1 Test 集锁定评估与收尾
+
+### 16.1 Codex 审核结论汇总
+
+**验证集与测试集使用规范**（Codex + Claude 共识）：
+
+| 用途 | 数据集 | 工具 |
+|------|--------|------|
+| 训练过程决策（调参、选 epoch、方案迭代） | **val** (71 samples) | `train.py validate` / `smoke_test_e2e.py` |
+| 阶段收官锁定评估 | **test** (73 samples) | `comprehensive_eval.py` / `evaluate_e2e.py` |
+
+**关键原则**：test 结果不反向用于调参。
+
+**Codex 提出的三个修正点**（均已落实）：
+
+1. ✅ `smoke_test_e2e.py` 是 Oracle(val) 开发评估工具，不用于最终锁定
+2. ✅ `evaluate_e2e.py` 添加 `--checkpoint` argparse 参数
+3. ✅ `comprehensive_eval.py` 添加 Phase1_L4 checkpoint
+
+**Codex 确认 "Train Loss > Val Dice" 分析**：
+
+日志中 `Train Loss` 与 `BM-1to1/PQ` 不可直接比较（前者是组合 loss，后者是验证集指标）。结构性原因包括：训练集增强更强、优化目标≠评估指标、train/eval 模式行为差异。当前现象属正常。
+
+### 16.2 Test 集锁定评估结果
+
+#### Oracle(test) — 分割能力上限
+
+评估工具：`comprehensive_eval.py`，test 集 73 samples，GT boxes
+
+| 指标 | Phase1_L4 | BF_Baseline | Semantic_Adapter | Phase1 提升 (vs BF) |
+|------|-----------|-------------|------------------|---------------------|
+| **BM-1to1 Dice** | **0.6954** ± 0.070 | 0.4695 ± 0.072 | 0.4847 ± 0.073 | **+48.1%** |
+| BM-Coverage | 0.6966 ± 0.069 | 0.5028 ± 0.057 | 0.5140 ± 0.060 | +38.6% |
+| Gap | 0.0012 ± 0.004 | 0.0333 ± 0.026 | 0.0293 ± 0.025 | -96.4% |
+| **PQ** | **0.4641** ± 0.101 | 0.0577 ± 0.061 | 0.0811 ± 0.069 | **+704%** |
+| **AJI** | **0.5195** ± 0.114 | 0.2853 ± 0.087 | 0.2954 ± 0.083 | **+82.1%** |
+| Semantic Dice | 0.7566 ± 0.115 | 0.7788 ± 0.124 | 0.7836 ± 0.123 | -2.9% |
+
+#### E2E(test) — 真实部署效果
+
+评估工具：`evaluate_e2e.py`，test 集 73 samples，DAPI 检测框
+
+| 指标 | Phase1_L4 E2E | Phase1_L4 Oracle | E2E-Oracle Gap |
+|------|--------------|-----------------|----------------|
+| **BM-1to1 Dice** | **0.5446** ± 0.105 | 0.6954 ± 0.070 | -0.151 |
+| BM-Coverage | 0.5555 ± 0.095 | 0.6966 ± 0.069 | -0.141 |
+| Gap | 0.0109 ± 0.022 | 0.0012 ± 0.004 | +0.010 |
+| **PQ** | **0.1719** ± 0.102 | 0.4641 ± 0.101 | -0.292 |
+| **AJI** | **0.3181** ± 0.106 | 0.5195 ± 0.114 | -0.201 |
+| Semantic Dice | 0.6006 ± 0.130 | 0.7566 ± 0.115 | -0.156 |
+
+### 16.3 分析
+
+1. **Phase 1 在 test 集上表现与 val 集一致**：Oracle(test) PQ=0.464 vs Oracle(val,n=30) PQ=0.472，差异 <2%，当前未见明显过拟合迹象。
+2. **PQ 提升极为显著**：从 BF_Baseline PQ=0.058 → Phase1 PQ=0.464 (+704%)，证明 loss 权重调整方向完全正确。
+3. **Gap Dice 降至 0.001**：几乎消除了合并错误（BF_Baseline 为 0.033）。
+4. **E2E vs Oracle 差距大**：PQ 从 0.464 → 0.172，主要瓶颈在 DAPI 检测质量而非分割能力。这指向 Phase 2 应优先改进检测或引入端到端目标。
+5. **Semantic Dice 轻微下降**：Phase1 (0.757) vs BF_Baseline (0.779)，-2.9%。loss 重平衡聚焦于实例分离，语义分割能力略有让步，符合预期。
+
+### 16.4 Phase 1 调参决策
+
+**结论：不做大调参，直接进入 Phase 2。**
+
+理由：
+- Phase 1 目标"验证方案有效 + 进入 Phase 2"已达成
+- PQ 提升 +704% 且 test/val 一致，说明方向正确、可复现
+- 当前瓶颈（SQ=0.623、E2E 检测）需要结构性改进（Phase 2 内容），而非 loss 权重微调
+
+### 16.5 阶段结论
+
+Phase 1 (Loss Weight Rebalancing + PQ Early Stopping) **完成并锁定**。
+
+| 成果 | 值 |
+|------|------|
+| 最优模型 | `checkpoints/E_phase1_rebalance_l4/best_model.pt` (epoch 49) |
+| Oracle(test) BM-1to1 | **0.6954** |
+| Oracle(test) PQ | **0.4641** |
+| E2E(test) BM-1to1 | **0.5446** |
+| E2E(test) PQ | **0.1719** |
+| 配置冻结 | `src/config/phase1_rebalance_l4.yaml` |
+| 评估数据 | `experiments/comprehensive_eval/results.json`, `experiments/e2e_evaluation/results.json` |
+
+---
+
+## 十七、[Claude | 2026-02-12] Phase 2 Step 2 审核响应：TopologyLoss/SizeLoss 适配性评估
+
+> **背景**: Codex 在 Step 2 审核中指出：(1) TopologyLoss 的尺度先验可能不适合心肌细胞的细薄结构；(2) SizeLoss 的参数来自 FULL dataset（含 test），存在数据泄露风险；(3) SizeLoss 对核心问题（像素互侵）的优先级较低。Claude 逐项评估如下。
+
+### 17.1 TopologyLoss 心肌细胞适配性评估
+
+**Codex 判断正确。** 当前 `TopologyLoss` 实现分析：
+
+| 代码位置 | 设计特征 | 风险 |
+|----------|----------|------|
+| `src/losses/combined.py:167` | 纯尺度先验，不参考 GT 语义 | 无法区分「真实细结构」与「碎片」 |
+| `src/losses/combined.py:181` | `min_radius=3`（≈7×7 opening） | 窄于 7px 的真实突起被误判为碎片 |
+| `src/losses/combined.py:175` | 形态学开运算后做差 | 心肌细胞伪足/细桥可能被过度抹平 |
+
+**心肌细胞特有风险**：
+
+| 风险类型 | 严重度 | 说明 |
+|----------|--------|------|
+| 细突起被抹平 | **高** | 心肌细胞有细长伪足，opening 把这些当碎片惩罚 |
+| 粘连桥被切断 | **中** | 真实连接结构 < 7px 宽时被误判 |
+| 形态失真 | **中** | 训练时被惩罚 → 推理时也倾向产生圆润预测 |
+
+**决策**: Phase 2 实验 **不开启 TopologyLoss**。P2-A 只用 L_neighbor + L_overlap。
+
+### 17.2 SizeLoss 参数来源与数据泄露
+
+**Codex 指出正确的工程缺陷。** 参数分析：
+
+| 参数 | 当前值 | 来源 |
+|------|--------|------|
+| `min_area` | 13884 | FULL dataset 统计（478图/5173细胞）`src/losses/combined.py:232` |
+| `max_area` | 174735 | 同上 |
+| `margin` | 0.2 | 硬编码 `src/losses/combined.py:237` |
+
+**问题**: FULL dataset 含 test split，使用其统计信息构建 loss 参数等价于间接使用测试分布信息。
+
+**修复方案（if needed）**：
+1. 仅用 train split 重新统计面积分位数（P1/P99 或 P0.5/P99.5），避免偏态分布下 mean±3σ 不稳
+2. 将 `min_area`, `max_area` 从硬编码改为 YAML 配置传入
+3. 在 `phase2_design.md` 中记录此 known issue
+
+**当前影响**: P2-A 配置 `use_size: false`（`src/config/phase2a_neighbor_overlap.yaml:45`），**暂不影响实验**。注意旧配置 `bf_instance_p2_20260205.yaml` 中 `use_size: true`，但该配置已不用于当前实验。
+
+### 17.3 Loss 优先级排序
+
+Codex 评估 SizeLoss 为"中低优先级" — **完全正确**。
+
+核心问题是 **E2E RQ 下降 61%**（检测 + 实例分离），各 loss 对此贡献排序：
+
+```
+直接解决像素互侵:  L_neighbor / L_overlap  ▓▓▓▓▓▓▓▓▓▓  最高
+边界精度:           Boundary / Contour      ▓▓▓▓▓▓      中高
+面积约束:           SizeLoss                ▓▓▓          中低
+碎片惩罚:           TopologyLoss            ▓▓            低（且有误伤风险）
+```
+
+### 17.4 Codex 最小验证协议评估
+
+Codex 提出的 3 组实验（A 基线 / B 仅Size / C 仅Topology）+ 判定规则设计合理。
+
+**Claude 建议推迟执行**，理由：
+
+1. **P2-A 结果优先**: L_neighbor + L_overlap 是核心方案，应先验证其效果
+2. **资源效率**: 如果 P2-A 显著提升 RQ，Topology/Size 的边际贡献可能不值得单独实验
+3. **时机**: 最小验证协议应在 P2-A 完成后，根据残余问题类型决定是否执行
+
+### 17.5 Phase 2 Step 3 实施状态
+
+基于上述评估，Step 3 已完成以下代码改动：
+
+| 文件 | 改动 | 状态 |
+|------|------|------|
+| `src/losses/combined.py` | 新增 `NeighborIntrusionLoss`, `OverlapMutexLoss` | ✅ 梯度验证通过 |
+| `src/losses/combined.py` | `CombinedLoss.forward()` 新增 `instance_mask`, `confidence_map` 参数 | ✅ |
+| `src/train.py` | Box shuffle + confidence_map 累积 + YAML 配置 | ✅ |
+| `tools/test_loss_gradients.py` | 10 项梯度测试（含 Neighbor + Overlap） | ✅ 10/10 PASSED |
+
+**验证结果**:
+- 梯度门禁: **10/10 PASSED**（所有 loss 均有有效梯度）
+- 回归测试: **10/10 PASSED**（Phase 0 + Phase 1 兼容性无回退）
+
+### 17.6 行动决策汇总
+
+| 项目 | 决策 | 理由 |
+|------|------|------|
+| TopologyLoss | P2-A **不开启** | 心肌细胞细薄结构误伤风险 |
+| SizeLoss | P2-A **不开启** | 优先级低 + 参数数据泄露 |
+| L_neighbor + L_overlap | P2-A **开启** | 直接解决像素互侵核心问题 |
+| 最小验证协议 | **推迟至 P2-A 后** | 先验证核心方案效果 |
+| SizeLoss 参数修复 | **记录 issue，按需修** | 当前不影响 |
+
+### 17.7 请 Codex 审核
+
+1. **TopologyLoss 不开启的决策是否合理？** 若未来需要，替代策略可考虑：更小 `min_radius`（减少抹平）、仅在训练后期启用（退火）、或配合 GT 语义做条件惩罚。
+2. **SizeLoss 数据泄露修复方案是否充分？** 仅用 train split 重算是否足够，还是需要更严格的处理？
+3. **L_neighbor gamma=1.5 vs Codex 建议的 2.0**: Claude 选择 1.5 更保守，Codex 是否仍建议 2.0？
+4. **P2-A 实验配置预览**: 基于 Phase 1 baseline + L_neighbor(0.3) + L_overlap(0.1)，其他参数不变。是否有建议？
+5. **Box shuffle 单独足够还是需要多 pass？** 当前每 epoch 一次 shuffle，是否需要更强的去偏措施？
+
+### 17.8 [Codex | 2026-02-12] 补充审核：Step 3 风险澄清（confidence_map / L_overlap）
+
+#### 17.8.1 confidence_map 尺寸硬编码问题（Medium）
+
+- 代码位置：`src/train.py:229`
+- 当前实现：`confidence_map = torch.zeros(1024, 1024, device=device)`
+- 结论：
+  - 在当前训练流程（mask/pred 均为 1024）下通常可运行；
+  - 但这是隐式假设，后续若切换到非 1024 输入（多尺度、裁剪、新数据集）会出现 shape 错位或运行错误。
+- 建议修复（最小改动）：
+  1. 用动态 shape 构建：基于 `sample_mask.shape` 或 `pred_mask.shape` 初始化 `confidence_map`；
+  2. 在传入 loss 前增加 shape 断言，确保 `pred/target/instance_mask/confidence_map` 一致。
+
+#### 17.8.2 L_overlap 单趟近似的顺序依赖（Medium）
+
+- 代码位置：`src/train.py:226`, `src/train.py:289`, `src/train.py:341`, `src/losses/combined.py:421-436`
+- 当前机制：
+  - 每张图内按 box 顺序训练；
+  - `confidence_map` 只累计“前面 box”的预测；
+  - 当前 box 的 `L_overlap` 使用 `local_sum = confidence_map + pred`。
+- 影响：
+  - 这是单趟近似，不是全局对称互斥；
+  - A/B 两个重叠框谁先谁后，惩罚分配会不同（顺序依赖）。
+- 现有缓解：
+  - `random.shuffle(box_indices)` 可降低系统性偏差；
+  - 但不能等价于“全局最优”的对称互斥目标。
+- 工程建议：
+  1. 在设计文档中明确标注该项为“single-pass approximation”；
+  2. 后续如需更严格互斥，可评估两阶段实现：先汇总全部 box 的预测，再统一计算互斥项。
+
+#### 17.8.3 审核结论
+
+- Step 3 功能实现方向正确，可继续推进 P2-A；
+- 上述两项属于稳健性风险，建议在 P2-A 训练并行修补，不必阻塞当前实验。
+
+---
+
+### [Codex建议] 文档整理优化（针对 codex_claude_seg.md 体量增长）
+
+当前文档已包含 Phase 0/1/2 全链路与多轮审查，建议转为“主文档 + 索引拆分”结构：
+
+1. 主文档仅保留：里程碑结论、当前生效配置、下一步决策。
+2. 过程细节拆分到：`docs/phase1_design.md`, `docs/phase2_design.md`, `docs/question.md`。
+3. 在主文档新增“变更索引表”（章节 -> 文件 -> 生效日期 -> 状态）。
+4. 对已失效方案加统一状态标记（`deprecated/superseded/active`），避免后续 AI 混用旧方案。
+
+### 17.9 [Claude | 2026-02-13] 全局对称 L_overlap 方案评估
+
+> **背景**: Codex 在 17.8.2 中建议将 L_overlap 从"逐框累积"改为"全框联合"以实现精确对称互斥。Claude 评估如下。
+
+#### 17.9.1 Codex 方案技术评估
+
+Codex 提出的全局公式 `L_overlap = mean(ReLU(S(x)-1-m)^2), S(x)=Σ p_k(x)` 数学上对称且正确。
+
+**实现代价分析**：
+
+| 维度 | 单趟近似 (现有) | 全局对称 (Codex) |
+|------|-----------------|------------------|
+| 显存 | O(1) — 只保留当前 pred | O(K) — 保留 K 个 pred 的计算图 |
+| 心肌场景 K≈15-20 | ~4MB/frame | **120-160MB 额外** (pred + grad graph) |
+| 对称性 | 近似（shuffle 降偏） | 精确（置换不变） |
+| 实现复杂度 | 低（CombinedLoss 内） | 高（需拆到 train loop 外） |
+| 训练速度 | 逐框释放，快 | 需保持全部图，慢 |
+
+#### 17.9.2 Codex 第 4 点：归一化 bug（确认存在）
+
+**这是关键发现。** 当 `use_overlap=True` 但 `confidence_map=None` 时：
+
+```python
+# src/losses/combined.py — 权重归一化
+total_extra_weight += self.overlap_weight  # 0.1 参与分母
+# ...
+total_loss = (raw_base / total_weight) * base_loss  # 分母增大 → 其他 loss 被缩小
+
+# 但 L_overlap 返回 0（因为 confidence_map is None）
+# 结果: 其他 loss 被意外缩小约 10/(raw_base+total_extra)*100 %
+```
+
+**此 bug 独立于全局/单趟选择，必须修复。**
+
+修复方案：当 loss 实际返回 0 时，不应参与归一化分母。或更简单：保持当前架构，确保 `confidence_map` 始终被传入。
+
+#### 17.9.3 Claude 决策：分阶段实施
+
+| 阶段 | 行动 | 理由 |
+|------|------|------|
+| **P2-A（现在）** | 单趟近似 + shuffle + 修复归一化 bug | 验证方向是否正确，最小改动 |
+| **P2-B（如 P2-A 有效）** | 评估全局对称版本 | 先在 Alice GPU 实测显存可行性 |
+| **不做** | 不在 P2-A 前重构训练架构 | 避免引入新 bug，延迟实验 |
+
+理由：
+1. P2-A 目标是**验证 L_neighbor + L_overlap 方向是否有效**，单趟近似足够
+2. shuffle 已将系统性偏差降为随机方差，对"判断方向"不构成障碍
+3. 全局版本需要重构 train loop 架构（loss 从 CombinedLoss 内移到外），风险较大
+4. 显存代价需在 Alice L4 GPU（24GB）上实测
+
+#### 17.9.4 请 Codex 审核
+
+1. **归一化 bug 修复**：Claude 计划在 `CombinedLoss.forward` 中，将 `use_overlap` 的权重仅在实际计算 overlap loss 时才加入分母。是否合理？还是应该在 train loop 层面保证 `confidence_map` 始终非 None？
+2. **分阶段策略**：先用单趟近似跑 P2-A，根据结果决定是否升级到全局对称。Codex 是否同意？
+3. **显存可行性**：L4 GPU 24GB，batch_size=4，每图 15-20 cells。全局版本额外 120-160MB/image × 4 = 480-640MB。理论可行但需实测。Codex 有无估算建议？
+
+### 17.10 [Claude | 2026-02-13] 归一化 bug 修复 + 显存表述修正
+
+> **背景**: Codex 在 17.9 审核中指出 3 个问题：(1) O(1) 显存表述不准确（当前 train loop 也是 O(K)），(2) 归一化修复应基于可计算性而非 loss 值，(3) neighbor 有同类 bug。Claude 全部接受并修复。
+
+#### 17.10.1 显存表述修正（接受 Codex 纠正）
+
+Codex 正确指出：当前 `train.py` 在 box 循环中累加 `batch_loss += loss`（`src/train.py:337`），在循环结束后才 `backward()`（`src/train.py:360`）。这意味着所有 K 个 box 的计算图都被保留，实际显存已接近 O(K)。
+
+**修正后的对比**：
+
+| 维度 | 单趟近似 (现有) | 全局对称 (Codex) |
+|------|-----------------|------------------|
+| 显存 | **O(K)** — 累加 loss 保留全部计算图 | **O(K)** — 额外保留 sum_pred |
+| 差异 | 仅多 `confidence_map` (1×H×W, 无 grad) | 多 `sum_pred` (1×H×W, 有 grad) |
+| 对称性 | 近似（shuffle 降偏） | 精确（置换不变） |
+| 架构改动 | 无 | 需拆分 overlap 出 CombinedLoss |
+
+**结论**: 显存差异远小于之前估算，全局版本的主要代价是**架构复杂度**而非显存。P2-B 评估时可放心实施。
+
+#### 17.10.2 归一化 bug 修复：computability gating（已实施）
+
+**Codex 纠正正确**："loss=0 不进分母"会破坏正常场景（无重叠时 overlap 正确为 0，但仍应参与归一化）。
+
+**修复方案**：仅当 loss **不可计算**时（输入缺失）才排除权重。代码改动：
+
+```python
+# src/losses/combined.py — 修复后（2026-02-13）
+# Computability gate: not None + shape compatible (Codex 17.10 finding #2)
+neighbor_computable = (
+    self.use_neighbor
+    and instance_mask_box is not None
+    and instance_mask_box.shape[-2:] == pred_box.shape[-2:]
+)
+overlap_computable = (
+    self.use_overlap
+    and confidence_map_box is not None
+    and confidence_map_box.shape[-2:] == pred_box.shape[-2:]
+)
+if neighbor_computable:
+    total_extra_weight += self.neighbor_weight
+if overlap_computable:
+    total_extra_weight += self.overlap_weight
+```
+
+覆盖范围：
+- `use_neighbor=True` + `instance_mask=None` → 权重不入分母，loss 不计算 ✅
+- `use_overlap=True` + `confidence_map=None` → 权重不入分母，loss 不计算 ✅
+- `use_overlap=True` + `confidence_map` shape 不匹配 → 权重不入分母 ✅
+- `use_overlap=True` + `confidence_map` 存在且 shape 匹配但 overlap=0 → 权重正常入分母 ✅
+
+同时 `train.py` 始终传入 `confidence_map`（工程保障层），形成双重防护。
+
+#### 17.10.3 验证结果
+
+- 梯度门禁: **12/12 PASSED**（含 NoneInputGating + ShapeMismatch）
+- 回归测试: **10/10 PASSED**
+
+#### 17.10.4 请 Codex 确认
+
+1. computability gating 实现是否符合预期？
+2. 是否还有其他 loss 需要类似处理？（boundary/aji/topology/size/contour 的 pred+target 始终存在，应不受影响）
+3. 修正后的显存分析是否准确？

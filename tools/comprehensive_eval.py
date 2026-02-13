@@ -30,6 +30,11 @@ from metrics.instance_metrics import compute_all_metrics
 
 # Checkpoints
 CHECKPOINTS = {
+    "Phase1_L4": {
+        "path": "checkpoints/E_phase1_rebalance_l4/best_model.pt",
+        "adapter": False,
+        "semantic": False,
+    },
     "BF_Baseline_Full": {
         "path": "checkpoints/bf_baseline_full_best.pt",
         "adapter": False,
@@ -135,12 +140,15 @@ def run_comprehensive_evaluation():
         # Aggregate results
         if all_metrics:
             aggregated = {}
-            for key in ['bm_1to1_dice', 'bm_coverage_dice', 'gap_dice', 'pq', 'aji', 'semantic_dice']:
-                values = [m[key] for m in all_metrics]
-                aggregated[key] = {
-                    'mean': float(np.mean(values)),
-                    'std': float(np.std(values)),
-                }
+            for key in ['bm_1to1_dice', 'bm_coverage_dice', 'gap_dice',
+                        'pq', 'sq', 'rq', 'aji', 'semantic_dice',
+                        'tp', 'fp', 'fn', 'n_gt_cells', 'n_pred_cells']:
+                values = [m[key] for m in all_metrics if key in m]
+                if values:
+                    aggregated[key] = {
+                        'mean': float(np.mean(values)),
+                        'std': float(np.std(values)),
+                    }
             
             results[model_name] = aggregated
             
@@ -149,8 +157,11 @@ def run_comprehensive_evaluation():
             print(f"  BM-Coverage:  {aggregated['bm_coverage_dice']['mean']:.4f} ± {aggregated['bm_coverage_dice']['std']:.4f}")
             print(f"  Gap:          {aggregated['gap_dice']['mean']:.4f}")
             print(f"  PQ@0.5:       {aggregated['pq']['mean']:.4f} ± {aggregated['pq']['std']:.4f}")
+            print(f"  SQ:           {aggregated.get('sq', {}).get('mean', 0):.4f} ± {aggregated.get('sq', {}).get('std', 0):.4f}")
+            print(f"  RQ:           {aggregated.get('rq', {}).get('mean', 0):.4f} ± {aggregated.get('rq', {}).get('std', 0):.4f}")
             print(f"  AJI:          {aggregated['aji']['mean']:.4f} ± {aggregated['aji']['std']:.4f}")
             print(f"  Semantic Dice:{aggregated['semantic_dice']['mean']:.4f} ± {aggregated['semantic_dice']['std']:.4f}")
+            print(f"  TP/FP/FN:     {aggregated.get('tp', {}).get('mean', 0):.1f} / {aggregated.get('fp', {}).get('mean', 0):.1f} / {aggregated.get('fn', {}).get('mean', 0):.1f}")
     
     # Save results
     output_dir = Path("experiments/comprehensive_eval")

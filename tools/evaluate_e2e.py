@@ -123,15 +123,20 @@ def evaluate_e2e(checkpoint_path="checkpoints/bf_baseline_full_best.pt",
     print(f"Task:  E2E (DAPI detection \u2192 SAM segmentation)")
     print("="*70)
     
-    for key in ['bm_1to1_dice', 'bm_coverage_dice', 'gap_dice', 'pq', 'aji', 'semantic_dice']:
+    for key in ['bm_1to1_dice', 'bm_coverage_dice', 'gap_dice',
+                'pq', 'sq', 'rq', 'aji', 'semantic_dice']:
         vals = [r[key] for r in all_results if key in r]
         if vals:
-            print(f"  {key:20s}: {np.mean(vals):.4f} \u00b1 {np.std(vals):.4f}")
+            print(f"  {key:20s}: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
     
     avg_gt = np.mean([r.get('n_gt_cells', 0) for r in all_results])
     avg_pred = np.mean([r.get('n_pred_cells', 0) for r in all_results])
+    avg_tp = np.mean([r.get('tp', 0) for r in all_results])
+    avg_fp = np.mean([r.get('fp', 0) for r in all_results])
+    avg_fn = np.mean([r.get('fn', 0) for r in all_results])
     print(f"  {'n_gt_cells':20s}: {avg_gt:.1f}")
     print(f"  {'n_pred_cells':20s}: {avg_pred:.1f}")
+    print(f"  {'TP/FP/FN':20s}: {avg_tp:.1f} / {avg_fp:.1f} / {avg_fn:.1f}")
     print("="*70)
     
     # Save results
@@ -143,7 +148,7 @@ def evaluate_e2e(checkpoint_path="checkpoints/bf_baseline_full_best.pt",
             'timestamp': datetime.now().isoformat(),
             'task': 'E2E (DAPI detection -> SAM segmentation)',
             'config': {
-                'model': 'bf_baseline_full_best.pt',
+                'model': checkpoint_path,
                 'detection': 'DAPI detect_and_create_boxes',
                 'inference': {
                     'mask_threshold': infer_cfg.mask_threshold,
@@ -155,7 +160,9 @@ def evaluate_e2e(checkpoint_path="checkpoints/bf_baseline_full_best.pt",
             'summary': {
                 key: {'mean': float(np.mean([r[key] for r in all_results if key in r])),
                       'std': float(np.std([r[key] for r in all_results if key in r]))}
-                for key in ['bm_1to1_dice', 'bm_coverage_dice', 'gap_dice', 'pq', 'aji', 'semantic_dice']
+                for key in ['bm_1to1_dice', 'bm_coverage_dice', 'gap_dice',
+                            'pq', 'sq', 'rq', 'aji', 'semantic_dice',
+                            'tp', 'fp', 'fn', 'n_gt_cells', 'n_pred_cells']
             },
             'per_sample': all_results,
         }, f, indent=2, default=str)
@@ -166,4 +173,9 @@ def evaluate_e2e(checkpoint_path="checkpoints/bf_baseline_full_best.pt",
 
 
 if __name__ == "__main__":
-    evaluate_e2e()
+    import argparse
+    parser = argparse.ArgumentParser(description='E2E Evaluation (DAPI detection → SAM segmentation)')
+    parser.add_argument('--checkpoint', type=str, default="checkpoints/bf_baseline_full_best.pt",
+                        help='Path to model checkpoint')
+    args = parser.parse_args()
+    evaluate_e2e(checkpoint_path=args.checkpoint)

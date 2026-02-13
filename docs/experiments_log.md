@@ -750,3 +750,50 @@ CombinedLoss import OK
 **结论**:  Baseline 已建立。Instance Dice 0.35 为微调目标提供参考。
 
 ---
+
+---
+
+## Phase 1: Loss Weight Rebalancing + PQ Early Stopping
+
+**Date**: 2026-02-10 ~ 2026-02-11
+**Config**: `src/config/phase1_rebalance_l4.yaml`
+**Cluster**: ALICE (L4 gpu-l4-24g, A100 gpu-a100-80g)
+
+### Key Changes (vs E29 baseline)
+| Parameter | E29 | Phase 1 | Change |
+|-----------|-----|---------|--------|
+| boundary_weight | 0.5 | 1.5 | x3 |
+| contour_weight | OFF | 0.3 | New |
+| pos_weight | 10.0 | 2.0 | /5 |
+| use_pq_early_stop | false | true | New |
+| use_topology | true | false | Off |
+| use_size | true | false | Off |
+
+### Training Results
+| | L4 (Job 974531) | A100 (Job 974530) |
+|---|---|---|
+| Epochs | 50/50 | ~47/50 (PQ early stop) |
+| Best epoch | 49 | 32 |
+| Time | 4h26m | 2h44m |
+| Val Dice | 0.6927 | 0.6828 |
+| Val PQ | 0.4750 | 0.4533 |
+
+### Test Set Lockdown (Phase 1 L4 best_model.pt)
+
+**Oracle(test, 73 samples)**:
+| Metric | Value |
+|--------|-------|
+| BM-1to1 Dice | 0.6954 |
+| PQ | 0.4641 |
+| AJI | 0.5195 |
+| Semantic Dice | 0.7566 |
+
+**E2E(test, 73 samples, DAPI detection)**:
+| Metric | Value |
+|--------|-------|
+| BM-1to1 Dice | 0.5446 |
+| PQ | 0.1719 |
+| AJI | 0.3181 |
+| Semantic Dice | 0.6006 |
+
+**Conclusion**: Phase 1 locked. PQ +704% vs BF baseline. No hyperparameter tuning needed. Proceed to Phase 2.

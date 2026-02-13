@@ -220,7 +220,18 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
             sample_mask = masks[i]
             sample_cell_ids = cell_ids[i] if cell_ids is not None else None
             
-            for j, box in enumerate(sample_boxes):
+            # Phase 2: Shuffle boxes per image to reduce L_overlap approximation bias
+            box_indices = list(range(len(sample_boxes)))
+            import random
+            random.shuffle(box_indices)
+            
+            # Phase 2: Initialize confidence map for L_overlap (accumulates per-cell predictions)
+            # Shape from sample_mask to handle non-1024 inputs
+            conf_h, conf_w = sample_mask.shape[-2:]
+            confidence_map = torch.zeros(conf_h, conf_w, device=device)
+            
+            for j in box_indices:
+                box = sample_boxes[j]
                 if box.sum() == 0:
                     continue
                 
@@ -275,7 +286,9 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
                             target_clipped = torch.zeros_like(target)
                             target_clipped[y1_clip:y2_clip, x1_clip:x2_clip] = target[y1_clip:y2_clip, x1_clip:x2_clip]
                             
-                            loss = criterion(pred_clipped, target_clipped, box=box.tolist())
+                            loss = criterion(pred_clipped, target_clipped, box=box.tolist(),
+                                             instance_mask=sample_mask.float(),
+                                             confidence_map=confidence_map.detach())
                     else:
                         sparse_emb, dense_emb = model.model.prompt_encoder(
                             points=None, boxes=box_tensor, masks=None
@@ -317,12 +330,21 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
                         target_clipped = torch.zeros_like(target)
                         target_clipped[y1_clip:y2_clip, x1_clip:x2_clip] = target[y1_clip:y2_clip, x1_clip:x2_clip]
                         
-                        loss = criterion(pred_clipped, target_clipped, box=box.tolist())
+                        loss = criterion(pred_clipped, target_clipped, box=box.tolist(),
+                                         instance_mask=sample_mask.float(),
+                                         confidence_map=confidence_map.detach())
                     
                     batch_loss += loss
                     num_cells += 1
                     
+                    # Phase 2: Accumulate confidence map for L_overlap
+                    with torch.no_grad():
+                        pred_sigmoid_full = torch.sigmoid(pred_clipped)
+                        confidence_map = confidence_map + pred_sigmoid_full
+                    
                 except Exception as e:
+                    import warnings
+                    warnings.warn(f"Box {j} in sample {i} failed: {e}")
                     continue
         
         if num_cells > 0:
@@ -485,7 +507,14 @@ def main():
         use_size=config['loss'].get('use_size', False),
         size_weight=config['loss'].get('size_weight', 0.1),
         use_contour=config['loss'].get('use_contour', False),
-        contour_weight=config['loss'].get('contour_weight', 0.1)
+        contour_weight=config['loss'].get('contour_weight', 0.1),
+        # Phase 2 Step 3: L_neighbor and L_overlap
+        use_neighbor=config['loss'].get('use_neighbor', False),
+        neighbor_weight=config['loss'].get('neighbor_weight', 0.3),
+        use_overlap=config['loss'].get('use_overlap', False),
+        overlap_weight=config['loss'].get('overlap_weight', 0.1),
+        neighbor_gamma=config['loss'].get('neighbor_gamma', 1.5),
+        overlap_margin=config['loss'].get('overlap_margin', 0.05),
     )
     
     # Log enabled losses
@@ -500,6 +529,10 @@ def main():
         enabled_losses.append("Size")
     if config['loss'].get('use_contour', False):
         enabled_losses.append("Contour")
+    if config['loss'].get('use_neighbor', False):
+        enabled_losses.append("Neighbor")
+    if config['loss'].get('use_overlap', False):
+        enabled_losses.append("Overlap")
     print(f"Enabled losses: {', '.join(enabled_losses)}")
     
     # Mixed precision scaler

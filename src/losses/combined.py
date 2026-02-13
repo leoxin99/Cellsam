@@ -166,68 +166,60 @@ class AJILoss(nn.Module):
 
 class TopologyLoss(nn.Module):
     """
-    Topology constraint loss for cell segmentation.
+    Differentiable topology loss for cell segmentation (GPU).
     
-    Penalizes:
-    1. Small fragments (connected components smaller than min_size)
-    2. Multiple disconnected regions per prediction
+    Penalizes small prediction fragments using morphological opening.
+    opening = dilation(erosion(pred)) removes small objects.
+    fragments = pred - opening(pred) = pixels that shouldn't exist.
     
-    Based on E17 analysis (1736×1776 → 1024px scaled):
-    - Original P1: 40836 → Scaled: 13884 (×0.340)
+    Fully differentiable: uses max-pool based morphology (no numpy/scipy).
+    
+    Replaces: old scipy.ndimage version (zero gradient, 2026-02-05).
+    Updated: 2026-02-12 (Phase 2 Step 2).
     """
     
-    def __init__(self, min_size: int = 13884, max_components: int = 1):
+    def __init__(self, min_radius: int = 3):
         """
         Args:
-            min_size: Minimum valid component size (E17 P1 scaled to 1024)
-            max_components: Expected number of components per cell (usually 1)
+            min_radius: Objects smaller than this radius are considered fragments.
+                        Kernel size = 2 * min_radius + 1.
         """
         super().__init__()
-        self.min_size = min_size
-        self.max_components = max_components
+        self.min_radius = min_radius
+        self.kernel_size = 2 * min_radius + 1
+    
+    def _ensure_4d(self, x):
+        """Ensure tensor is (B, C, H, W) for max_pool2d."""
+        if x.dim() == 2:
+            return x.unsqueeze(0).unsqueeze(0)
+        elif x.dim() == 3:
+            return x.unsqueeze(0)
+        return x
     
     def forward(self, pred: torch.Tensor, target: torch.Tensor = None) -> torch.Tensor:
         """
         Compute topology loss.
         
         Args:
-            pred: Prediction probabilities (after sigmoid), shape (H, W)
+            pred: (H, W) prediction probabilities (after sigmoid)
             target: Not used, for API consistency
         
         Returns:
-            Topology loss value
+            Scalar loss — mean of fragment pixels
         """
-        from scipy import ndimage
+        p = self._ensure_4d(pred)
+        pad = self.kernel_size // 2
         
-        # Binarize prediction
-        pred_binary = (pred > 0.5).float().cpu().numpy()
+        # Morphological erosion: min_pool = 1 - max_pool(1 - p)
+        eroded = 1.0 - F.max_pool2d(1.0 - p, self.kernel_size, stride=1, padding=pad)
         
-        # Label connected components
-        labeled, n_components = ndimage.label(pred_binary)
+        # Morphological dilation: max_pool on eroded
+        opened = F.max_pool2d(eroded, self.kernel_size, stride=1, padding=pad)
         
-        if n_components == 0:
-            return torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
+        # Fragment mask: pred pixels removed by opening
+        fragments = (pred - opened.squeeze()).clamp(0, 1)
         
-        # Fragment penalty: count small components
-        fragment_count = 0
-        total_fragment_area = 0
-        
-        for i in range(1, n_components + 1):
-            component_size = (labeled == i).sum()
-            if component_size < self.min_size:
-                fragment_count += 1
-                total_fragment_area += component_size
-        
-        # Penalty based on fragment ratio
-        fragment_penalty = fragment_count / max(n_components, 1)
-        
-        # Component count penalty: penalize multiple disconnected regions
-        component_penalty = max(0, n_components - self.max_components) / max(n_components, 1)
-        
-        # Combined penalty
-        loss = 0.5 * fragment_penalty + 0.5 * component_penalty
-        
-        return torch.tensor(loss, device=pred.device, dtype=pred.dtype)
+        return fragments.mean()
 
 
 class SizeLoss(nn.Module):
@@ -297,100 +289,171 @@ class SizeLoss(nn.Module):
 
 class ContourLoss(nn.Module):
     """
-    Contour distance loss for cell segmentation (2026-02-05).
+    Differentiable contour distance loss for cell segmentation (GPU).
     
-    Computes distance transform based loss to penalize boundary errors.
-    Reference: boundary_enhancement_design.md section 1.2
+    Uses max-pool erosion (same as BoundaryLoss) to extract boundaries,
+    then iterative dilation to approximate distance transform.
+    Penalizes pred pixels far from GT boundary + missing GT boundary pixels.
+    
+    Fully differentiable: pure PyTorch operations (no numpy/scipy).
+    
+    Replaces: old scipy.ndimage.distance_transform_edt version (zero gradient).
+    Updated: 2026-02-12 (Phase 2 Step 2).
     """
     
-    def __init__(self, boundary_width: int = 3):
+    def __init__(self, boundary_width: int = 3, n_distance_steps: int = 5):
         """
         Args:
-            boundary_width: Width of boundary region to focus on
+            boundary_width: Erosion kernel radius for boundary extraction
+            n_distance_steps: Number of dilation steps for distance approximation
         """
         super().__init__()
         self.boundary_width = boundary_width
+        self.kernel_size = 2 * boundary_width + 1
+        self.n_distance_steps = n_distance_steps
+    
+    def _ensure_4d(self, x):
+        if x.dim() == 2:
+            return x.unsqueeze(0).unsqueeze(0)
+        elif x.dim() == 3:
+            return x.unsqueeze(0)
+        return x
+    
+    def _extract_boundary(self, mask):
+        """Extract boundary via GPU erosion: boundary = mask - erode(mask)."""
+        m = self._ensure_4d(mask.float())
+        pad = self.kernel_size // 2
+        eroded = 1.0 - F.max_pool2d(1.0 - m, self.kernel_size, stride=1, padding=pad)
+        boundary = (m - eroded).squeeze().clamp(0, 1)
+        return boundary
+    
+    def _approx_distance(self, boundary):
+        """
+        Approximate distance transform via iterative 3x3 dilation.
+        Returns distance map where each pixel = distance to nearest boundary pixel.
+        """
+        b = self._ensure_4d(boundary)
+        distance = torch.zeros_like(b)
+        reached = (b > 0.5).float()
+        
+        for step in range(1, self.n_distance_steps + 1):
+            # Dilate the reached region
+            dilated = F.max_pool2d(reached, 3, stride=1, padding=1)
+            new_pixels = (dilated - reached).clamp(0, 1)
+            distance = distance + step * new_pixels
+            reached = dilated
+        
+        return distance.squeeze()
     
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """
         Compute contour distance loss.
         
         Args:
-            pred: Prediction probabilities (after sigmoid), shape (H, W)
-            target: Binary ground truth, shape (H, W)
+            pred: (H, W) prediction probabilities (after sigmoid)
+            target: (H, W) binary ground truth
         
         Returns:
-            Contour loss value
+            Scalar contour loss
         """
-        from scipy.ndimage import distance_transform_edt
-        from skimage import morphology
+        gt_boundary = self._extract_boundary(target)
         
-        device = pred.device
-        dtype = pred.dtype
+        if gt_boundary.sum() < 5:
+            return torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
         
-        pred_np = (pred > 0.5).float().detach().cpu().numpy()
-        target_np = (target > 0).float().cpu().numpy()
+        # Approximate distance from GT boundary
+        gt_dist = self._approx_distance(gt_boundary)
         
-        # Extract boundaries using erosion
-        struct = morphology.disk(1)
-        pred_boundary = pred_np - morphology.binary_erosion(pred_np, struct).astype(np.float32)
-        gt_boundary = target_np - morphology.binary_erosion(target_np, struct).astype(np.float32)
+        # Normalize distance to [0, 1]
+        max_dist = gt_dist.max().clamp(min=1.0)
+        gt_dist_norm = gt_dist / max_dist
         
-        # Compute distance transforms
-        if gt_boundary.sum() > 0:
-            gt_dist = distance_transform_edt(1 - gt_boundary)
-        else:
-            return torch.tensor(0.0, device=device, dtype=dtype)
+        # Loss 1: Penalize pred=high far from GT boundary
+        # pred pixels weighted by their distance to GT boundary
+        far_penalty = (pred * gt_dist_norm).mean()
         
-        if pred_boundary.sum() > 0:
-            pred_dist = distance_transform_edt(1 - pred_boundary)
-        else:
-            return torch.tensor(1.0, device=device, dtype=dtype)
+        # Loss 2: Penalize missing GT boundary pixels
+        miss_penalty = ((1 - pred) * gt_boundary).mean()
         
-        # Average distance of pred boundary to GT boundary
-        pred_to_gt = gt_dist[pred_boundary > 0].mean() if pred_boundary.sum() > 0 else 0
-        gt_to_pred = pred_dist[gt_boundary > 0].mean() if gt_boundary.sum() > 0 else 0
+        return far_penalty + miss_penalty
+
+
+class NeighborIntrusionLoss(nn.Module):
+    """
+    Neighbor intrusion loss (L_neighbor) — Phase 2 Step 3.
+    
+    Penalizes predicting high confidence in neighboring cell GT regions.
+    Works per-box (needs instance_mask).
+    
+    Formula: L_neighbor(k) = mean(n_k * p_k^gamma)
+    where n_k = neighbor GT pixels, p_k = prediction probability.
+    """
+    
+    def __init__(self, gamma: float = 1.5):
+        super().__init__()
+        self.gamma = gamma
+    
+    def forward(self, pred: torch.Tensor, target: torch.Tensor,
+                instance_mask: torch.Tensor = None) -> torch.Tensor:
+        if instance_mask is None:
+            return torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
         
-        # Symmetric Hausdorff-like loss (normalized)
-        max_dist = max(gt_dist.max(), pred_dist.max(), 1.0)
-        loss = (pred_to_gt + gt_to_pred) / (2 * max_dist)
+        # Neighbor region: other cells (not current, not background)
+        cell_region = target > 0.5
+        neighbor_region = (instance_mask > 0) & (~cell_region)
+        neighbor_mask = neighbor_region.float()
         
-        return torch.tensor(loss, device=device, dtype=dtype)
+        n_neighbor = neighbor_mask.sum()
+        if n_neighbor < 1:
+            return torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
+        
+        intrusion = neighbor_mask * (pred ** self.gamma)
+        return intrusion.sum() / (n_neighbor + 1e-6)
+
+
+class OverlapMutexLoss(nn.Module):
+    """
+    Overlap mutex loss (L_overlap) — Phase 2 Step 3.
+    
+    Prevents same pixel from being claimed by multiple cells.
+    Single-pass approximation: confidence_map (detached) holds prior boxes.
+    
+    Formula: L_overlap = mean(ReLU(S - 1 - margin)^2)
+    where S(x) = confidence_map(x) + pred(x).
+    """
+    
+    def __init__(self, margin: float = 0.05):
+        super().__init__()
+        self.margin = margin
+    
+    def forward(self, pred: torch.Tensor,
+                confidence_map: torch.Tensor = None) -> torch.Tensor:
+        if confidence_map is None:
+            return torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
+        
+        local_sum = confidence_map + pred
+        excess = F.relu(local_sum - 1.0 - self.margin)
+        return (excess ** 2).mean()
 
 
 class CombinedLoss(nn.Module):
     """
-    Combined loss for instance segmentation (Updated 2026-02-05).
+    Combined loss for instance segmentation.
     
-    Supports:
-    - Dice Loss (default)
-    - BCE Loss (default)
-    - Boundary Loss (configurable)
-    - AJI Loss (configurable)
-    - Topology Loss (configurable) - penalizes fragments
-    - Size Loss (configurable) - penalizes size deviations
-    - Contour Loss (configurable) - penalizes boundary distance errors
+    Updated 2026-02-12 (Phase 2):
+    - All losses fully differentiable (GPU)
+    - Normalized weights (sum to 1.0)
+    - L_neighbor + L_overlap support
     """
     
     def __init__(self, pos_weight=10.0, boundary_weight=0.3, aji_weight=0.2, 
                  use_boundary=True, use_aji=True,
                  use_topology=False, topology_weight=0.1,
                  use_size=False, size_weight=0.1,
-                 use_contour=False, contour_weight=0.1):
-        """
-        Args:
-            pos_weight: Weight for positive class in BCE
-            boundary_weight: Weight for boundary loss
-            aji_weight: Weight for AJI loss
-            use_boundary: Whether to use boundary loss
-            use_aji: Whether to use AJI loss
-            use_topology: Whether to use topology loss (Phase 2)
-            topology_weight: Weight for topology loss
-            use_size: Whether to use size loss (Phase 2)
-            size_weight: Weight for size loss
-            use_contour: Whether to use contour loss (Phase 2)
-            contour_weight: Weight for contour loss
-        """
+                 use_contour=False, contour_weight=0.1,
+                 use_neighbor=False, neighbor_weight=0.3,
+                 use_overlap=False, overlap_weight=0.1,
+                 neighbor_gamma=1.5, overlap_margin=0.05):
         super().__init__()
         self.dice = DiceLoss()
         self.boundary = BoundaryLoss(boundary_width=3)
@@ -398,6 +461,8 @@ class CombinedLoss(nn.Module):
         self.topology = TopologyLoss()
         self.size = SizeLoss()
         self.contour = ContourLoss()
+        self.neighbor_loss_fn = NeighborIntrusionLoss(gamma=neighbor_gamma)
+        self.overlap_loss_fn = OverlapMutexLoss(margin=overlap_margin)
         
         self.pos_weight = pos_weight
         self.boundary_weight = boundary_weight
@@ -405,14 +470,19 @@ class CombinedLoss(nn.Module):
         self.topology_weight = topology_weight
         self.size_weight = size_weight
         self.contour_weight = contour_weight
+        self.neighbor_weight = neighbor_weight
+        self.overlap_weight = overlap_weight
         
         self.use_boundary = use_boundary
         self.use_aji = use_aji
         self.use_topology = use_topology
         self.use_size = use_size
         self.use_contour = use_contour
+        self.use_neighbor = use_neighbor
+        self.use_overlap = use_overlap
 
-    def forward(self, pred, target, box=None):
+    def forward(self, pred, target, box=None,
+                instance_mask=None, confidence_map=None):
         """
         Compute combined loss within bounding box region.
         
@@ -420,6 +490,8 @@ class CombinedLoss(nn.Module):
             pred: (H, W) prediction logits
             target: (H, W) binary ground truth
             box: [x1, y1, x2, y2] bounding box (optional)
+            instance_mask: (H, W) full instance mask for L_neighbor (Phase 2)
+            confidence_map: (H, W) accumulated predictions for L_overlap (Phase 2)
         """
         if box is not None:
             x1, y1, x2, y2 = box
@@ -433,9 +505,15 @@ class CombinedLoss(nn.Module):
 
             pred_box = pred[..., y1:y2, x1:x2]
             target_box = target[..., y1:y2, x1:x2]
+            
+            # Clip instance_mask and confidence_map to box
+            instance_mask_box = instance_mask[..., y1:y2, x1:x2] if instance_mask is not None else None
+            confidence_map_box = confidence_map[..., y1:y2, x1:x2] if confidence_map is not None else None
         else:
             pred_box = pred
             target_box = target
+            instance_mask_box = instance_mask
+            confidence_map_box = confidence_map
 
         n_pos = target_box.sum()
         n_neg = target_box.numel() - n_pos
@@ -456,7 +534,11 @@ class CombinedLoss(nn.Module):
 
         base_loss = 0.5 * dice + 0.5 * bce
         
-        # Calculate total weights
+        # Normalized weight computation
+        # Computability-gated: only include weight in denominator if the loss
+        # CAN be computed (required inputs are present). This prevents silent
+        # loss scale reduction when instance_mask or confidence_map is None.
+        # (Codex finding 17.9.2, 2026-02-13)
         total_extra_weight = 0.0
         if self.use_boundary:
             total_extra_weight += self.boundary_weight
@@ -468,47 +550,89 @@ class CombinedLoss(nn.Module):
             total_extra_weight += self.size_weight
         if self.use_contour:
             total_extra_weight += self.contour_weight
+        # Neighbor/overlap: only count weight if input is computable
+        # Check both presence AND shape compatibility (Codex 17.10 finding #2)
+        neighbor_computable = (
+            self.use_neighbor
+            and instance_mask_box is not None
+            and instance_mask_box.shape[-2:] == pred_box.shape[-2:]
+        )
+        overlap_computable = (
+            self.use_overlap
+            and confidence_map_box is not None
+            and confidence_map_box.shape[-2:] == pred_box.shape[-2:]
+        )
+        if neighbor_computable:
+            total_extra_weight += self.neighbor_weight
+        if overlap_computable:
+            total_extra_weight += self.overlap_weight
         
-        base_weight = max(0.3, 1.0 - total_extra_weight)  # Minimum 30% for base loss
+        raw_base = 0.3
+        total_weight = raw_base + total_extra_weight
         
-        total_loss = base_weight * base_loss
+        total_loss = (raw_base / total_weight) * base_loss
         
         # Add optional losses
         if self.use_boundary and n_pos > 0:
             try:
                 boundary_loss = self.boundary(pred_sigmoid, target_box)
-                total_loss = total_loss + self.boundary_weight * boundary_loss
-            except Exception:
-                pass
+                total_loss = total_loss + (self.boundary_weight / total_weight) * boundary_loss
+            except Exception as e:
+                import warnings
+                warnings.warn(f"BoundaryLoss failed: {e}")
         
         if self.use_aji and n_pos > 0:
             try:
                 aji_loss = self.aji(pred_sigmoid, target_box)
-                total_loss = total_loss + self.aji_weight * aji_loss
-            except Exception:
-                pass
+                total_loss = total_loss + (self.aji_weight / total_weight) * aji_loss
+            except Exception as e:
+                import warnings
+                warnings.warn(f"AJILoss failed: {e}")
         
         if self.use_topology and n_pos > 0:
             try:
                 topo_loss = self.topology(pred_sigmoid, target_box)
-                total_loss = total_loss + self.topology_weight * topo_loss
-            except Exception:
-                pass
+                total_loss = total_loss + (self.topology_weight / total_weight) * topo_loss
+            except Exception as e:
+                import warnings
+                warnings.warn(f"TopologyLoss failed: {e}")
         
         if self.use_size and n_pos > 0:
             try:
                 size_loss = self.size(pred_sigmoid, target_box)
-                total_loss = total_loss + self.size_weight * size_loss
-            except Exception:
-                pass
+                total_loss = total_loss + (self.size_weight / total_weight) * size_loss
+            except Exception as e:
+                import warnings
+                warnings.warn(f"SizeLoss failed: {e}")
         
         if self.use_contour and n_pos > 0:
             try:
                 contour_loss = self.contour(pred_sigmoid, target_box)
-                total_loss = total_loss + self.contour_weight * contour_loss
-            except Exception:
-                pass
+                total_loss = total_loss + (self.contour_weight / total_weight) * contour_loss
+            except Exception as e:
+                import warnings
+                warnings.warn(f"ContourLoss failed: {e}")
+        
+        if neighbor_computable and n_pos > 0:
+            try:
+                neighbor_loss = self.neighbor_loss_fn(pred_sigmoid, target_box, instance_mask_box)
+                total_loss = total_loss + (self.neighbor_weight / total_weight) * neighbor_loss
+            except Exception as e:
+                import warnings
+                warnings.warn(f"NeighborIntrusionLoss failed: {e}")
+        
+        if overlap_computable:
+            try:
+                overlap_loss = self.overlap_loss_fn(pred_sigmoid, confidence_map_box)
+                total_loss = total_loss + (self.overlap_weight / total_weight) * overlap_loss
+            except Exception as e:
+                import warnings
+                warnings.warn(f"OverlapMutexLoss failed: {e}")
 
         return total_loss
+
+
+
+
 
 
