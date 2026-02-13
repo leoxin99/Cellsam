@@ -322,19 +322,11 @@ class AugmentedAllenDataset(Dataset):
         cell_ids = []
         
         img_h, img_w = mask.shape
-        img_area = img_h * img_w
+        # NOTE: GT annotations are ground truth — do NOT filter by area.
         
-        # Relative size thresholds (for generalization across datasets)
-        min_area_ratio = 0.0005  # 0.05% of image
-        max_area_ratio = 0.15    # 15% of image
-        min_box_area = img_area * min_area_ratio
-        max_box_area = img_area * max_area_ratio
-        
+
         for region in measure.regionprops(mask.astype(np.int32)):
-            # Relative size filtering
-            if region.area < min_box_area or region.area > max_box_area:
-                continue
-            
+
             y1, x1, y2, x2 = region.bbox
             pad = 5
             x1 = max(0, x1 - pad)
