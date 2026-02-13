@@ -70,6 +70,23 @@ conda activate cellsam
 > - 不要 `source ~/miniconda3/...`，用 `eval "$(conda shell.bash hook)"`
 > - `set -eo pipefail` 放在最前面，`set -u` 放在 `conda activate` **之后**
 > - Login 节点能跑通的命令不代表 SLURM 脚本也能跑通（初始化路径不同）
+### 核心文档状态 (2026-02-13)
+
+| 文档 | 状态 | 用途 |
+|------|------|------|
+| `docs/inference_standard.md` | 🟢 Active | 推理口径 SSOT |
+| `docs/code_inventory.md` | 🟢 Active | 代码入口速查 |
+| `docs/experiments_log.md` | 🟢 Active | 实验流水账 |
+| `docs/dataset_parameters.md` | 🟢 Active | 数据集参数 |
+| `docs/naming_convention.md` | 🟢 Active | 命名规范 |
+| `docs/error_log_and_checklist.md` | 🟢 Active | 错误归纳 + 检查清单 |
+| `docs/alice_quick_reference.md` | 🟢 Active | Alice HPC 指南 |
+| `docs/boundary_enhancement_design.md` | 🟡 Historical | 早期设计草案 |
+| `docs/claude_pipeline_analysis.md` | 🟡 Historical | pipeline 分析 |
+
+> 新对话仅需 `CLAUDE.md` + `inference_standard.md` + `code_inventory.md` 即可定位下一步。
+
+---
 
 ### AI 工作规范
 

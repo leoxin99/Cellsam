@@ -1,8 +1,8 @@
 # CellSAM 错误归纳与检查清单
 
-> **创建日期**: 2026-02-02
-> **目的**: 记录历史错误，形成训练前强制检查清单
-> **规则**: 每次训练前必须逐条确认
+> **状态**: 🟢 Active — 训练前强制检查清单
+> **最后更新**: 2026-02-13
+> **事实来源**: 此文档 + `tools/verify_training_config.py`
 
 ---
 
@@ -142,6 +142,14 @@
 ---
 
 ## 二、训练前强制检查清单 ✅
+
+### 错误 9: SLURM 脚本 Alice 维护后失败 ⭐⭐⭐ (2026-02-13)
+
+三个问题叠加: (1) `cuda/11.8` 移除 → `CUDA/12.1.1`，(2) `~/miniconda3` 路径消失 → `eval conda hook`，(3) `set -u` + MKL unbound variable → 延迟 `set -u`。
+
+**教训**: Login 节点通过 ≠ SLURM 通过。`verify_training_config.py --slurm-dir` 可检测。
+
+## 三、训练前强制检查清单 ✅
 
 ### A. 数据加载检查
 

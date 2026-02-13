@@ -2,6 +2,9 @@
 
 ## 概述
 
+> **状态**: 🟢 Active — 命名规范参考文档
+> **最后更新**: 2026-02-13
+
 本文档定义了 CellSAM 项目中模型、实验和方案的标准命名规范，避免混淆。
 
 ---
@@ -70,7 +73,9 @@ E{编号}_{模型类型}_{阶段}_{日期}
 | 阶段 | 说明 | 主要特征 |
 |------|------|---------|
 | **P1** | Phase 1 - 基础训练 | Dice + BCE + Boundary + AJI |
-| **P2** | Phase 2 - 高级训练 | P1 + Topology + Size + Contour |
+| **P2-A** | Phase 2-A - 邻居约束 | P1 + L_neighbor(0.3) + L_overlap(0.1) |
+| **P2-B** | Phase 2-B - 边界精度 | P2-A + DiffContour + DiffTopology |
+| **P2-C** | Phase 2-C - 参数优化 | P2-A + lr=5e-5, epochs=80 |
 
 ---
 

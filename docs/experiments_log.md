@@ -1,12 +1,9 @@
 # CellSAM 实验记录 (Experiment Log)
 
-
-
-> **项目**: hiPSC-CM 细胞自动分割
-
+> **状态**: 🟢 Active — 实验流水账主文档
+> **最后更新**: 2026-02-13
+> **事实来源**: 此文档为实验记录的 SSOT，按时间顺序记录所有实验
 > **维护者**: Research Documentation Architect
-
-> **最后更新**: 2026-02-02
 
 
 

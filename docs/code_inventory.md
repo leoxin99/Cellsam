@@ -1,126 +1,100 @@
-# CellSAM 代码清单与版本记录
+# CellSAM 代码清单
 
-> **目的**: 记录所有代码文件的用途、版本、所属实验
-> **创建**: 2026-01-23
-> **最后更新**: 2026-02-05
-> **更新规则**: 新增/修改代码后必须更新此文档
-
----
-
-## 1. 核心代码 (src/)
-
-| 文件 | 功能 | 版本 | 最后更新 | 备注 |
-|------|------|------|----------|------|
-| `detection/dapi.py` | DAPI核检测+框生成 | v4 | 2026-02-05 | 参数更新为 1024px; detect_nuclei, detect_with_adaptive_box, detect_cardiomyocytes |
-| `losses/combined.py` | 损失函数 | v3 | 2026-02-05 | 更新 min_area/max_area 为 1024px 缩放值 (×0.340) |
-| `train.py` | 训练脚本 | v2 | 2026-02-05 | Instance-level training with box clipping |
-| `inference/postprocess.py` | 后处理 | v2 | 2026-02-05 | 更新 MIN/MAX_CELL_AREA 为 1024px 值 |
-| `adapters/channel_adapter.py` | Semantic Channel Adapter | v1 | 2026-01-30 | 3通道→RGB 映射 |
-| `augmented_dataset.py` | 数据加载 | v2 | 2026-02-05 | Instance-level target (cell_id) |
+> **状态**: 🟢 Active — 代码入口速查
+> **最后更新**: 2026-02-13
+> **事实来源**: 文件系统 (`src/`, `tools/`, `scripts/`)
+> **规则**: 新增/修改代码后必须更新此文档
 
 ---
 
-## 2. 配置文件 (src/config/)
+## 1. 训练入口
 
-| 文件 | 实验 | 功能 | 创建日期 |
-|------|------|------|----------|
-| `bf_instance_p1_20260205.yaml` | E29 | BF单通道 Phase 1 (Instance训练) | 2026-02-05 |
-| `adapter_instance_p1_20260205.yaml` | E30 | Semantic Adapter Phase 1 | 2026-02-05 |
-| `bf_instance_p2_20260205.yaml` | E31 | BF + 全部Loss Phase 2 | 2026-02-05 |
-| `adapter_instance_p2_20260205.yaml` | E32 | Adapter + 全部Loss Phase 2 | 2026-02-05 |
-| `semantic_adapter.yaml` | E21 | Semantic Adapter 标准配置 | 2026-01-30 |
-
----
-
-## 3. 实验代码 (tools/)
-
-| 文件 | 所属实验 | 功能 | 创建日期 |
-|------|---------|------|----------|
-| `evaluate_box_generation.py` | E18扩展 | 对比 DAPI/Adaptive 框与 GT | 2026-01-23 |
-| `test_sarcgraph_detection.py` | E18 | SarcGraph Z-线检测对比 | 2026-01-22 |
-| `visualize_detection_comparison.py` | E18 | Napari 可视化检测对比 | 2026-01-23 |
-| `verify_training_config.py` | 通用 | 训练前配置验证 | 2026-02-02 |
-| `baseline_gt_cellsam_20260206.py` | E29基线 | GT框+预训练CellSAM对比 | 2026-02-06 |
-| `visualize_segmentation_20260206.py` | 通用 | 多通道分割结果可视化 | 2026-02-06 |
-
----
-
-## 4. 对比实验代码 (anti_test/)
-
-| 文件 | 所属实验 | 功能 |
-|------|---------|------|
-| `test_dapi_detection.py` | E03 | DAPI 核检测验证 (基准) |
-| `test_traditional_detection.py` | E02 | 传统检测方法对比 |
-| `visualize_test_results.py` | 通用 | 结果可视化 |
-| `eval_metrics.py` | 通用 | 评估指标计算 |
-
----
-
-## 5. SarcGraph 对比代码 (src/comparison/)
-
-| 文件 | 功能 | 来源 |
+| 文件 | 功能 | 说明 |
 |------|------|------|
-| `sarcgraph_pipeline/prompt_generator.py` | Z-线检测+框生成 | Claude 方案 |
-| `sarcgraph_pipeline/preprocessing.py` | 语义通道映射 | Claude 方案 |
+| `src/train.py` | **训练主入口** | Instance-level training with box clipping |
+| `src/config/phase2a_neighbor_overlap.yaml` | **当前配置** ⭐ | Phase 2-A (L_neighbor + L_overlap) |
+| `src/config/phase1_rebalance_l4.yaml` | Phase 1 配置 | 已完成，产出 best_model.pt |
+
+### 训练 SLURM 入口
+
+| 脚本 | 状态 | 说明 |
+|------|------|------|
+| `scripts/train_phase2a.sh` | ⭐ Active | Phase 2-A L4 训练 |
+| `scripts/train_phase2a_a100.sh` | ⭐ Active | Phase 2-A A100 对照 |
+| `scripts/train_phase1_*.sh` | Legacy | Phase 1 已完成 |
 
 ---
 
-## 6. ALICE 脚本 (scripts/)
+## 2. 推理与评估
 
-| 文件 | 功能 | 创建日期 |
-|------|------|----------|
-| `train_instance_20260205.sh` | Instance训练 SLURM 脚本 (E29-E32) | 2026-02-05 |
-| `train_instance_alice.sh` | 通用 ALICE 训练脚本 | 2026-02-03 |
-
----
-
-## 7. 版本更新日志
-
-| 日期 | 文件 | 更新内容 | 版本 |
-|------|------|---------|------|
-| **2026-02-05** | `detection/dapi.py` | ⭐ 全部函数参数更新为 1024px (min=200, max=10000, margin=32, search_radius=256) | v4 |
-| **2026-02-05** | `losses/combined.py` | ⭐ TopologyLoss/SizeLoss 参数更新 (×0.340 缩放) | v3 |
-| **2026-02-05** | `train.py` | Instance-level training with box clipping | v2 |
-| **2026-02-05** | `inference/postprocess.py` | MIN/MAX_CELL_AREA 更新为 13884/174735 | v2 |
-| 2026-01-23 | `detection/dapi.py` | 添加 detect_with_adaptive_box, filter_by_actn2 | v3 |
-| 2026-01-23 | `evaluate_box_generation.py` | 使用 detect_cardiomyocytes, 新增边缘过滤 | v2 |
-| 2026-01-22 | `detection/dapi.py` | 添加 detect_cardiomyocytes (Actn2过滤) | v2 |
+| 文件 | 功能 | 说明 |
+|------|------|------|
+| `src/inference/core.py` | **统一推理核心** ⭐ | InferenceConfig + segment_with_boxes |
+| `src/inference/postprocess.py` | 后处理 | 面积过滤、形态学操作 |
+| `tools/comprehensive_eval.py` | Oracle 评估 | GT boxes → 全指标 (Dice/PQ/SQ/RQ/AJI) |
+| `tools/evaluate_e2e.py` | E2E 评估 | DAPI 检测 → 分割 → 评估 |
+| `tools/test_unified_regression.py` | 回归测试 | 训练前必跑，防止退化 |
+| `tools/smoke_test_e2e.py` | 冒烟测试 | 1 样本快速验证 |
 
 ---
 
-## 8. 文件头部模板
+## 3. 训练前验证
 
-新代码文件必须包含以下头部注释:
-
-```python
-"""
-[文件名]
-
-功能: [简要描述]
-所属实验: [E编号 或 "核心代码"]
-创建日期: [YYYY-MM-DD]
-最后修改: [YYYY-MM-DD]
-版本: [vN]
-
-依赖函数:
-- [列出核心依赖]
-
-更新日志:
-- [日期]: [更新内容]
-"""
-```
+| 文件 | 功能 | 说明 |
+|------|------|------|
+| `tools/verify_training_config.py` | 配置验证 | 文件/配置/数据/SLURM lint 检查 |
+| `tools/test_loss_gradients.py` | 梯度检查 | 验证所有 loss 分支有梯度 |
+| `tools/test_checkpoint_format.py` | Checkpoint 格式 | 验证模型保存/加载一致性 |
 
 ---
 
-## 9. DAPI 参数速查 (1024px 分辨率)
+## 4. 核心模块
 
-| 参数 | 值 | 函数 | 说明 |
-|------|-----|------|------|
-| min_area | 200 | detect_nuclei | 核最小面积 |
-| max_area | 10000 | detect_nuclei | 核最大面积 (P99) |
-| margin | 32 | create_bounding_boxes | 边缘裁切距离 |
-| search_radius | 256 | detect_zlines_in_region | Z-线搜索半径 |
-| expansion_long | 5.0 | create_bounding_boxes | 长轴扩展因子 |
-| expansion_short | 3.0 | create_bounding_boxes | 短轴扩展因子 |
-| expansion_isotropic | 4.0 | create_bounding_boxes | 圆形核扩展因子 |
+| 文件 | 功能 | 版本 |
+|------|------|------|
+| `src/losses/combined.py` | CombinedLoss (Phase 2 含 Neighbor + Overlap) | v4 |
+| `src/augmented_dataset.py` | 数据加载 (Instance-level) | v2 |
+| `src/detection/dapi.py` | DAPI 核检测 + 框生成 | v4 |
+| `src/adapters/channel_adapter.py` | Semantic Channel Adapter | v1 |
 
+---
+
+## 5. 已归档代码 (tools/archive/)
+
+| 目录 | 内容 |
+|------|------|
+| `archive/legacy_eval/` | E24-E28 旧评估脚本 |
+| `archive/legacy_experiment/` | E29 早期推理测试 |
+| `archive/tests_deprecated/` | 旧版测试 |
+
+---
+
+## 6. 配置文件速查
+
+### Active
+
+| 文件 | 阶段 | 说明 |
+|------|------|------|
+| `phase2a_neighbor_overlap.yaml` | P2-A | ⭐ 当前训练 |
+| `phase1_rebalance_l4.yaml` | P1 | L4 训练 (已完成) |
+| `phase1_rebalance_a100.yaml` | P1 | A100 训练 (已完成) |
+
+### Legacy
+
+| 文件 | 说明 |
+|------|------|
+| `bf_instance_p1_20260205.yaml` | E29 旧配置 |
+| `adapter_instance_p1_20260205.yaml` | E30 旧配置 |
+| `bf_instance_p2_20260205.yaml` | E31 旧配置 |
+| `adapter_instance_p2_20260205.yaml` | E32 旧配置 |
+| `semantic_adapter.yaml` | E21 旧配置 |
+
+---
+
+## 更新日志
+
+| 日期 | 更新 |
+|------|------|
+| **2026-02-13** | 重构为 Active/Legacy 分类；Phase 2-A 入口加入 |
+| 2026-02-05 | 更新全部面积参数为 1024px 缩放 (×0.340) |
+| 2026-01-23 | 初始创建 |

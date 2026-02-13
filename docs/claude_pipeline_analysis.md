@@ -1,8 +1,8 @@
 # Claude Pipeline 方案分析报告
 
-> **分析日期**: 2026-01-23
-> **文档来源**: `claude tempt/cellsam_pipeline/`
-> **状态**: 待集成
+> **状态**: 🟡 Historical — 分析报告，未集成到主线
+> **分析日期**: 2026-01-23 | **降级日期**: 2026-02-13
+> **事实来源**: 分析对象 `claude tempt/cellsam_pipeline/`，主线使用 `src/` 独立实现
 
 ---
 

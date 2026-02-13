@@ -1,42 +1,80 @@
 # CellSAM 推理标准文档
 
-## 概述
-
-本文档定义了 CellSAM 项目的标准推理流程和评估指标计算方法。所有推理测试都应遵循本文档的标准。
+> **状态**: 🟢 Active — 推理与评估的唯一口径文档
+> **最后更新**: 2026-02-13
+> **事实来源**: `src/inference/core.py` (InferenceConfig + segment_with_boxes)
+> **规则**: 所有推理/评估脚本必须调用 `core.py` 的函数，不允许硬编码参数
 
 ---
 
-## 评估指标标准
+## 一、统一推理配置 (InferenceConfig)
+
+所有推理参数由 `InferenceConfig.default()` 定义，**不允许脚本内硬编码**：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `mask_threshold` | 0.5 | sigmoid → 二值化阈值 |
+| `use_sam_iou_filter` | False | 是否过滤低 IoU 预测 |
+| `sam_iou_threshold` | 0.5 | SAM IoU 过滤阈值 |
+| `apply_box_clipping` | True | mask 裁剪到 box 区域 |
+| `box_expand` | 0.1 | box 扩展比例 |
+| `conflict_policy` | `"confidence"` | 重叠像素归属策略 |
+| `min_cell_area` | 13884 | 细胞最小面积 (1024px) |
+| `max_cell_area` | 174735 | 细胞最大面积 (1024px) |
+
+```python
+from src.inference.core import InferenceConfig, segment_with_boxes
+
+# 正确用法:
+config = InferenceConfig.default()
+result = segment_with_boxes(model, image, boxes, config)
+
+# ❌ 错误: 不要自己写阈值
+# mask = (pred > 0.5).float()  # hardcoded!
+```
+
+---
+
+## 二、推理核心函数
+
+### `segment_with_boxes()` — 统一入口
+
+```
+输入: model, image [C,H,W], boxes [N,4], config
+  ↓
+逐 box 切片 → SAM predictor → sigmoid
+  ↓
+resolve_conflicts (confidence/area policy)
+  ↓
+postprocess (面积过滤)
+  ↓
+输出: InferenceResult (instance_mask, confidence_map, n_instances, stats)
+```
+
+### `resolve_conflicts()` — 重叠裁决
+
+| 策略 | 说明 |
+|------|------|
+| `confidence` | **默认** — 重叠像素归属置信度最高的实例 |
+| `area` | 重叠像素归属面积最小的实例 |
+
+### `postprocess_instance_mask()` — 后处理
+
+1. 移除面积 < `min_cell_area` 的碎片
+2. 移除面积 > `max_cell_area` 的异常区域
+
+---
+
+## 三、评估指标标准
 
 ### Instance Dice (Best-Match 方法) ⭐
 
-**这是项目的官方 Instance Dice 计算方法。**
+**项目官方 Dice 计算方法**: 每个 GT 细胞找最佳匹配的预测细胞。
 
-```python
-def compute_best_match_instance_dice(pred_mask, gt_mask):
-    """
-    每个 GT 细胞找最佳匹配的预测细胞
-    """
-    for gt_region in gt_regions:
-        gt_cell = (gt_mask == gt_region.label)
-        best_dice = 0
-        
-        for pred_region in pred_regions:
-            pred_cell = (pred_mask == pred_region.label)
-            intersection = np.sum(gt_cell & pred_cell)
-            union = np.sum(gt_cell) + np.sum(pred_cell)
-            dice = 2 * intersection / union
-            best_dice = max(best_dice, dice)  # 取最高匹配
-        
-        dices.append(best_dice)
-    
-    return np.mean(dices)
 ```
-
-**为什么使用 Best-Match:**
-- 与论文标准一致
-- 对多预测覆盖情况更公平
-- 不惩罚边界过分割
+Training Dice: Direct-Match (box → cell_id 一对一)
+Evaluation Dice: Best-Match (GT 找最佳预测匹配)
+```
 
 ### PQ@0.5 (Panoptic Quality)
 
@@ -51,78 +89,63 @@ RQ (Recognition Quality) = TP / (TP + 0.5*FP + 0.5*FN)
 
 ---
 
-## 训练 vs 推理的 Dice 差异
+## 四、评估工具分工
 
-| 阶段 | 方法 | 说明 |
-|------|------|------|
-| **训练** | Direct-Match | 每个 box 对应固定的 cell_id |
-| **推理** | Best-Match | 每个 GT 找最佳预测匹配 |
+| 工具 | 用途 | Box 来源 | 说明 |
+|------|------|----------|------|
+| `tools/comprehensive_eval.py` | **Oracle 评估** | GT boxes | 纯分割能力 |
+| `tools/evaluate_e2e.py` | **E2E 评估** | DAPI 检测 | 含检测误差 |
+| `tools/test_unified_regression.py` | **回归测试** | GT boxes | 防止退化 |
+| `tools/smoke_test_e2e.py` | **冒烟测试** | GT boxes | 快速验证 (1 样本) |
 
-训练使用 Direct-Match 因为有明确的 box→cell_id 对应关系。
-推理使用 Best-Match 因为需要评估整体分割质量。
-
----
-
-## 标准推理流程
-
-```
-1. 加载模型
-   - Baseline: get_model() (预训练权重)
-   - 微调: get_model() + load_state_dict(checkpoint)
-
-2. 加载数据
-   - 验证集: load_split_ids(split='val')
-   - 使用 AugmentedAllenDataset
-   - target_size=(1024, 1024)
-   - use_bf_only=True
-
-3. 推理
-   - 使用 segment_cellular_image() API
-   - normalize=False (数据已预处理)
-   - 传入 GT boxes
-
-4. 评估
-   - Instance Dice: Best-Match 方法
-   - PQ@0.5: 标准计算
-```
-
----
-
-## 标准推理脚本
-
-使用 `tools/standardized_inference.py`:
+### 使用方式
 
 ```bash
-# 对比 Baseline vs E29
-python tools/standardized_inference.py --samples 71
+# Oracle 评估 (标准测试)
+python tools/comprehensive_eval.py \
+  --checkpoint checkpoints/E_phase1_rebalance_l4/best_model.pt \
+  --split val --samples 71
 
-# 只测试 Baseline
-python tools/standardized_inference.py --model baseline --samples 71
+# E2E 评估
+python tools/evaluate_e2e.py \
+  --checkpoint checkpoints/E_phase1_rebalance_l4/best_model.pt
 
-# 测试自定义 checkpoint
-python tools/standardized_inference.py --model checkpoints/E30_adapter_best.pt --samples 71
+# 回归测试 (训练前必跑)
+python tools/test_unified_regression.py
+
+# 训练前完整验证
+python tools/verify_training_config.py --config src/config/CONFIG.yaml
 ```
 
 ---
 
-## 历史结果记录
+## 五、Checkpoint 加载标准
 
-| 日期 | 模型 | Instance Dice | PQ@0.5 | 样本数 | 备注 |
-|------|------|---------------|--------|--------|------|
-| 2026-02-07 | Baseline (预训练) | **0.589 ± 0.237** | **0.337 ± 0.140** | 71 | Best-Match |
-| 2026-02-07 | E29 (BF P1) | 待确认 | 待确认 | 71 | - |
+使用 `load_cellsam_checkpoint()` 统一加载，支持 adapter：
+
+```python
+from src.inference.core import load_cellsam_checkpoint
+
+model, adapter, info = load_cellsam_checkpoint(
+    checkpoint_path="checkpoints/xxx/best_model.pt",
+    device="cuda"
+)
+# info 包含: epoch, best_dice, best_pq, config
+```
 
 ---
 
-## 注意事项
+## 六、历史结果
 
-1. **不要使用 overlap-based dice** - 这会低估分割质量
-2. **normalize 参数**: 如果数据已预处理，设置 `normalize=False`
-3. **GT boxes**: 标准测试使用 GT boxes，DAPI 检测是另一个测试维度
-4. **样本数**: 标准测试使用全部 71 个验证样本
+| 日期 | 模型 | Oracle Dice | Oracle PQ | 样本数 |
+|------|------|-------------|-----------|--------|
+| 2026-02-10 | Baseline (预训练) | 0.589 ± 0.237 | 0.337 ± 0.140 | 71 (val) |
+| 2026-02-10 | Phase 1 (L4 best) | 0.695 | 0.464 | 71 (val) |
+| 2026-02-13 | Phase 2-A | 训练中... | — | — |
 
 ---
 
 ## 更新日志
 
+- 2026-02-13: 重写文档，以 `core.py` 为 SSOT，移除旧 API 引用
 - 2026-02-07: 创建文档，确立 Best-Match 为标准方法

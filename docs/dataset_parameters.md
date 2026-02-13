@@ -1,8 +1,8 @@
 # Allen Dataset 参数文档
 
-> **目的**: 记录数据集的常用信息和参数，供实验和代码开发参考
-> **数据集**: Allen Segmented Fields (Full)
-> **最后更新**: 2026-01-25
+> **状态**: 🟢 Active — 数据集参数参考文档
+> **数据集**: Allen Segmented Fields (Full, 478 张)
+> **最后更新**: 2026-02-13
 
 ---
 
