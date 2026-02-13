@@ -27,7 +27,7 @@ echo "GPU: $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader)"
 echo "Date: $(date)"
 echo "============================================"
 
-module load cuda/11.8
+module load CUDA/12.1.1
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate cellsam
 
