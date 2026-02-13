@@ -55,18 +55,21 @@ conda activate cellsam
 
 | 项目 | 值 |
 |------|-----|
-| **Conda 环境** | `cellsam` |
-| **CUDA (conda)** | 12.1 (pytorch-cuda=12.1) |
-| **CUDA (Alice module)** | `CUDA/12.1.1` ⚠️ 不再是 `cuda/11.8` |
-| **PyTorch** | 2.1.2 GPU 版本 |
+| **Conda 发行版** | Miniforge3 (系统级: `/easybuild/software/Miniforge3/`) |
+| **Conda 环境** | `cellsam` (pytorch 2.1.2 + pytorch-cuda=12.1) |
+| **CUDA Module** | `CUDA/12.1.1` ⚠️ 不再是 `cuda/11.8` |
 | **训练位置** | ALICE HPC (L4/A100) + 本地 (评估) |
 
-> ⚠️ **重要**: 如果不激活环境，可能会使用系统 Python 导致 `CUDA not available` 错误。
-
-> ⚠️ **CUDA Module 更新 (2026-02-13)**: Alice 系统更新后 `cuda/11.8` 已移除。
-> SLURM 脚本必须使用 `module load CUDA/12.1.1`。
-> 注意：login 节点用 conda 自带 CUDA 可正常运行测试，但 compute 节点的 SLURM 脚本
-> 若 `module load` 失败会导致整个脚本静默退出（`set -e`），表现为训练不启动。
+> ⚠️ **Alice 环境踩坑记录 (2026-02-13)**:
+> Alice 集群会定期维护更新，可能导致：
+> 1. **CUDA Module 名称变化**: `cuda/11.8` → `CUDA/12.1.1`（大小写也变了）
+> 2. **Conda 路径变化**: `~/miniconda3` → 系统级 Miniforge3（用户 home 下不再有 conda）
+> 3. **Conda activate 脚本冲突**: MKL 环境变量未定义 + `set -u` = 脚本静默退出
+>
+> **SLURM 脚本最佳实践**:
+> - 不要 `source ~/miniconda3/...`，用 `eval "$(conda shell.bash hook)"`
+> - `set -eo pipefail` 放在最前面，`set -u` 放在 `conda activate` **之后**
+> - Login 节点能跑通的命令不代表 SLURM 脚本也能跑通（初始化路径不同）
 
 ### AI 工作规范
 

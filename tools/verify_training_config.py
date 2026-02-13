@@ -7,6 +7,7 @@
 """
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -267,6 +268,66 @@ def verify_config_file(config_path: str) -> bool:
     return ok
 
 
+def verify_slurm_scripts(slurm_dir: str = "scripts") -> bool:
+    """检查 SLURM 脚本中的已知 Alice 环境陷阱。"""
+    print(f"\n[SLURM 脚本检查] {slurm_dir}/")
+    slurm_path = Path(slurm_dir)
+    if not slurm_path.exists():
+        _warn(f"{slurm_dir} 目录不存在，跳过 SLURM 检查")
+        return True
+
+    sh_files = list(slurm_path.glob("*.sh"))
+    if not sh_files:
+        _warn(f"{slurm_dir} 下无 .sh 文件")
+        return True
+
+    ok = True
+    for sh_file in sh_files:
+        content = sh_file.read_text(encoding="utf-8", errors="replace")
+        if "#SBATCH" not in content:
+            continue  # 非 SLURM 脚本
+
+        print(f"  检查: {sh_file.name}")
+        lines = content.splitlines()
+
+        # 检查 1: 硬编码 ~/miniconda3 路径
+        for i, line in enumerate(lines, 1):
+            if "miniconda3" in line and not line.strip().startswith("#"):
+                _fail(f"  L{i}: 硬编码 ~/miniconda3 路径（Alice 已迁移到 Miniforge3）")
+                ok = False
+
+        # 检查 2: 旧的 cuda module 名称（小写 cuda/）
+        for i, line in enumerate(lines, 1):
+            if re.search(r"module\s+load\s+cuda/", line, re.IGNORECASE):
+                if "cuda/11" in line.lower():
+                    _fail(f"  L{i}: 使用已移除的 cuda/11.x module（应为 CUDA/12.1.1）")
+                    ok = False
+
+        # 检查 3: set -u 在 conda activate 之前
+        set_u_line = None
+        conda_activate_line = None
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if re.search(r"set\s+-[a-z]*u", stripped) and set_u_line is None:
+                set_u_line = i
+            if "conda activate" in stripped and conda_activate_line is None:
+                conda_activate_line = i
+
+        if set_u_line and conda_activate_line and set_u_line < conda_activate_line:
+            _fail(
+                f"  set -u (L{set_u_line}) 在 conda activate (L{conda_activate_line}) 之前，"
+                "conda MKL 脚本可能因 unbound variable 失败"
+            )
+            ok = False
+
+        if ok:
+            _ok(f"{sh_file.name}: 无已知陷阱")
+
+    return ok
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -288,6 +349,12 @@ def main() -> int:
         default=3,
         help="数据检查抽样数量",
     )
+    parser.add_argument(
+        "--slurm-dir",
+        type=str,
+        default="scripts",
+        help="SLURM 脚本目录",
+    )
     args = parser.parse_args()
 
     cfg_path = Path(args.config)
@@ -306,6 +373,7 @@ def main() -> int:
         ("数据加载", verify_dataset(cfg, split=args.split, n_samples=args.n_samples)),
         ("训练运行前提", verify_train_runtime_assumptions(cfg)),
         ("统一推理口径", verify_inference_consistency()),
+        ("SLURM 脚本", verify_slurm_scripts(args.slurm_dir)),
     ]
 
     print("\n" + "=" * 60)

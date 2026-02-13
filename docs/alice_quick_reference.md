@@ -53,6 +53,10 @@ tail -f logs/<job_name>_<job_id>.log
 
 # 取消任务
 scancel <job_id>
+
+# 维护后检查（重要！）
+module avail CUDA
+conda info --base
 ```
 
 ---
@@ -60,7 +64,8 @@ scancel <job_id>
 ## 四、CellSAM 训练环境配置 (一次性)
 
 ```bash
-module load Miniforge3/24.3.0-0
+# 注意: Miniforge3 版本号会随系统维护变化，用 module avail Miniforge3 查看当前版本
+module load Miniforge3/24.11.3-0
 conda create --name cellsam python=3.11 -y
 conda activate cellsam
 conda install pytorch==2.1.2 torchvision==0.16.2 pytorch-cuda=12.1 -c pytorch -c nvidia -y
@@ -82,8 +87,13 @@ pip install segment-anything scikit-image scikit-learn albumentations dask tqdm
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.err
 
+set -eo pipefail                        # 不加 -u，等 conda 初始化完再加
+
 module load CUDA/12.1.1
+eval "$(conda shell.bash hook)"
 conda activate cellsam
+set -u                                  # conda 激活完毕，启用 nounset
+
 export PYTHONPATH=$PYTHONPATH:~/CellSam/cellSAM_source
 cd ~/CellSam
 mkdir -p logs checkpoints
@@ -134,3 +144,21 @@ ssh s3890074@login.alice.universiteitleiden.nl "cd ~/CellSam && git pull origin 
 | **可靠性** | ⚠️ 易遗漏 | ✅ 自动同步 |
 | **版本追踪** | ❌ 无 | ✅ 有 |
 | **推荐场景** | 紧急修复 | 日常开发 |
+
+---
+
+## 七、系统维护踩坑记录
+
+> Alice 集群会定期维护，可能导致环境变化。以下是已遇到的问题。
+
+| 日期 | 变化 | 影响 | 修复 |
+|------|------|------|------|
+| ~2026-02 | `cuda/11.8` 移除 | SLURM `module load` 失败 | 改用 `CUDA/12.1.1` |
+| ~2026-02 | Miniforge3 升级，`~/miniconda3` 消失 | `source ~/miniconda3/conda.sh` 失败 | 改用 `eval "$(conda shell.bash hook)"` |
+| ~2026-02 | MKL 激活脚本引用未定义变量 | `set -u` 导致脚本静默退出 | `set -u` 移到 conda activate 之后 |
+
+**教训**:
+1. **Login ≠ Compute**: login 节点能跑通的命令不代表 SLURM 脚本也能跑通（初始化路径不同）
+2. **维护后必检**: 每次 Alice 维护后先检查 `module avail CUDA` 和 `conda info --base`
+3. **不硬编码路径**: 用 `eval "$(conda shell.bash hook)"` 替代 `source ~/miniconda3/...`
+4. **注意 set -u**: conda 的激活脚本会引用未定义变量，`set -u` 必须在 conda activate 之后
