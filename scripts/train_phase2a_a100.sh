@@ -8,7 +8,7 @@
 #SBATCH --output=logs/p2a_a100_%j.log
 #SBATCH --error=logs/p2a_a100_%j.err
 
-set -euo pipefail
+set -eo pipefail
 
 # ============================================
 # Phase 2-A Training - A100 (80GB)
@@ -30,6 +30,9 @@ echo "============================================"
 module load CUDA/12.1.1
 eval "$(conda shell.bash hook)"
 conda activate cellsam
+
+# Re-enable nounset after conda activation (conda scripts use unbound vars)
+set -u
 
 cd "${SLURM_SUBMIT_DIR:-$HOME/CellSam}"
 mkdir -p logs checkpoints
