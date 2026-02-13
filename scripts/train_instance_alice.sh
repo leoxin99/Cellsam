@@ -38,8 +38,8 @@ echo "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader)"
 echo "============================================"
 
 # Setup environment
-module load cuda/11.8
-source ~/miniconda3/etc/profile.d/conda.sh
+module load CUDA/12.1.1
+eval "$(conda shell.bash hook)"
 conda activate cellsam
 
 # Navigate to project directory

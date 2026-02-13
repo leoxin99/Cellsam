@@ -48,13 +48,8 @@ echo "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader)"
 echo "============================================"
 
 # Setup environment
-# Note: conda is already initialized in .bashrc on ALICE
-module load cuda/12.1 2>/dev/null || module load cuda/11.8 2>/dev/null || echo "CUDA module not loaded"
-
-# Activate conda environment
-if [ -f "$HOME/.bashrc" ]; then
-    source "$HOME/.bashrc"
-fi
+module load CUDA/12.1.1
+eval "$(conda shell.bash hook)"
 conda activate cellsam
 
 # CellSAM authentication token (required for model weights download)

@@ -23,8 +23,8 @@ echo "Date: $(date)"
 echo "============================================"
 
 # Setup environment
-module load cuda/11.8
-source ~/miniconda3/etc/profile.d/conda.sh
+module load CUDA/12.1.1
+eval "$(conda shell.bash hook)"
 conda activate cellsam
 
 cd ~/CellSam
