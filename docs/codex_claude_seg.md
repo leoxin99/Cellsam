@@ -25,9 +25,18 @@
 
 ### 0.3 下一步（按顺序执行）
 
-1. 运行 P2-A 训练（使用 `src/config/phase2a_neighbor_overlap.yaml`）。
-2. 训练完成后做 Oracle(test) + E2E(test) 锁定评估（不反向调参）。
-3. 若 P2-A 对 RQ/SQ 提升明确，再进入 P2-B 评估“全局对称 overlap”版本。
+1. **Alice 预检** (手动):
+   ```bash
+   cd ~/CellSam && git pull origin main
+   python tools/test_loss_gradients.py       # 期望 12/12
+   python tools/test_unified_regression.py   # 期望 10/10
+   ```
+2. **提交 P2-A 训练**:
+   ```bash
+   sbatch scripts/train_phase2a.sh
+   ```
+3. 训练完成后做 Oracle(test) + E2E(test) 锁定评估（不反向调参）。
+4. 若 P2-A 对 RQ/SQ 提升明确，再进入 P2-B 评估“全局对称 overlap”版本。
 
 ### 0.4 章节状态索引（防混用）
 

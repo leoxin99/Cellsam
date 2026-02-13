@@ -1,8 +1,8 @@
 # CellSAM 项目方案 (Project Blueprint)
 
 > **文档类型**: 项目总览 (AI 必读)
-> **最后更新**: 2026-02-11
-> **当前阶段**: Phase 1 完成 → 准备进入 Phase 2
+> **最后更新**: 2026-02-13
+> **当前阶段**: Phase 2 Step 3 完成 → Step 4 P2-A 训练
 
 ---
 
@@ -14,7 +14,7 @@
 阶段2 检测优化       [████████████████████] 100%  ✅ 完成 (Hybrid DAPI+Actn2)
 阶段2.5 三通道适配   [████████░░░░░░░░░░░░]  40%  🔄 Semantic Mapper + Adapter 已完成
 Phase 1 Loss优化     [████████████████████] 100%  ✅ 完成 + Test锁定
-Phase 2 结构改进     [░░░░░░░░░░░░░░░░░░░░]   0%  ⏳ 待开始
+Phase 2 结构改进     [████████████░░░░░░░░]  60%  🔄 Step 3 完成, Step 4 训练中
 阶段4 论文结果       [░░░░░░░░░░░░░░░░░░░░]   0%  ⏳ 待开始
 ```
 
@@ -36,10 +36,12 @@ Phase 2 结构改进     [░░░░░░░░░░░░░░░░░░
 | 训练平台 | ALICE L4 (Job 974531) |
 | Best Epoch | 49/50 |
 
-### 下一步: Phase 2
-- E2E PQ 瓶颈在 DAPI 检测（Oracle→E2E PQ 降 63%）
-- 方向: L_neighbor / L_overlap 等结构性改进
-- 或改进检测→分割的端到端流程
+### 下一步: Phase 2 Step 4 — P2-A 训练
+- **Step 3 已完成**: L_neighbor + L_overlap 实现 + Codex 审核通过
+- **当前**: 在 Alice 提交 P2-A 训练 (`scripts/train_phase2a.sh`)
+- **配置**: `src/config/phase2a_neighbor_overlap.yaml`
+- **验证**: 梯度 12/12 + 回归 10/10 通过
+- **Alice 操作**: `git pull && sbatch scripts/train_phase2a.sh`
 
 ---
 
@@ -145,27 +147,33 @@ src/
 ├── metrics/
 │   └── instance_metrics.py  # 统一指标 (BM-1to1, PQ, AJI, SQ, RQ)
 ├── losses/
-│   └── combined.py      # 损失函数 (Updated 2026-02-10)
+│   └── combined.py      # 损失函数 (Updated 2026-02-13)
 │                        # - DiceLoss, BCELoss (基础)
 │                        # - BoundaryLoss, AJILoss, ContourLoss (Phase 1)
+│                        # - NeighborIntrusionLoss, OverlapMutexLoss (Phase 2)
 │                        # - TopologyLoss, SizeLoss (Phase 2 备用)
+│                        # - Computability-gated normalization
 ├── config/              # 实验配置
-│   ├── phase1_rebalance_l4.yaml   # ✅ Phase 1 锁定配置
-│   └── phase1_rebalance_a100.yaml
-└── train.py             # 主训练入口 (Updated 2026-02-10)
+│   ├── phase1_rebalance_l4.yaml        # ✅ Phase 1 锁定配置
+│   ├── phase1_rebalance_a100.yaml
+│   └── phase2a_neighbor_overlap.yaml   # 🔄 P2-A 当前配置
+└── train.py             # 主训练入口 (Updated 2026-02-13)
                          # - Instance-level target, PQ early stop
-                         # - Box clipping, adapter support
+                         # - Box shuffle + confidence_map accumulation
+                         # - Neighbor/overlap loss data flow
 
 tools/
 ├── smoke_test_e2e.py              # Oracle(val) 开发评估
 ├── comprehensive_eval.py          # Oracle(test) 最终评估
 ├── evaluate_e2e.py                # E2E(test) 部署效果评估
 ├── test_unified_regression.py     # 10-test 回归测试
+├── test_loss_gradients.py         # 12-test 梯度门禁 (Phase 2)
 └── run_inference.py               # [DEPRECATED] 旧推理入口，仅兼容提示
 
 scripts/
 ├── train_phase1_full.sh   # ALICE A100 SLURM 脚本
-└── train_phase1_l4.sh     # ALICE L4 SLURM 脚本
+├── train_phase1_l4.sh     # ALICE L4 SLURM 脚本
+└── train_phase2a.sh       # 🔄 P2-A SLURM 脚本 (含 gradient gate)
 
 docs/
 ├── claude_pipeline_analysis.md  # 三通道设计方案 ⭐
@@ -199,10 +207,13 @@ docs/
 - [x] Oracle(val,n=30) + Oracle(test,73) + E2E(test,73) 评估
 - [x] **Phase 1 已锁定** — 不再调参
 
-### Phase 2: 结构性改进 ⏳
-- [ ] L_neighbor / L_overlap 损失
-- [ ] 改进检测→分割端到端流程
-- [ ] 三通道 Adapter 对比实验
+### Phase 2: 结构性改进 🔄
+- [x] Step 1: SQ/RQ 评估工具补全
+- [x] Step 2: Loss 基础设施修复 (归一化 + 可微 Contour/Topology)
+- [x] Step 3: L_neighbor + L_overlap 实现 + Codex 审核通过
+- [/] **Step 4: P2-A 训练** (`phase2a_neighbor_overlap.yaml`)
+- [ ] Step 5: 评估 + 决定是否 P2-B
+- [ ] 三通道 Adapter 对比实验 (Phase 3)
 
 ---
 
@@ -276,6 +287,8 @@ python tools/verify_training_config.py
 
 | 日期 | 内容 |
 |------|------|
+| 2026-02-13 | Phase 2 Step 3 完成: L_neighbor + L_overlap + computability gating |
+| 2026-02-13 | P2-A SLURM 脚本 + 梯度门禁 12/12 + 回归 10/10 |
 | 2026-02-11 | Phase 1 完成 + test 锁定评估 + 文档全量更新 |
 | 2026-02-10 | ALICE 训练提交 (L4+A100)，统一推理核心 |
 | 2026-02-05 | Instance-level 训练修复，E29 基线 |
