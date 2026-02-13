@@ -28,7 +28,7 @@ echo "Date: $(date)"
 echo "============================================"
 
 module load CUDA/12.1.1
-source ~/miniconda3/etc/profile.d/conda.sh
+eval "$(conda shell.bash hook)"
 conda activate cellsam
 
 cd "${SLURM_SUBMIT_DIR:-$HOME/CellSam}"
