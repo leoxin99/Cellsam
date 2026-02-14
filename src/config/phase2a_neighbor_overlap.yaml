@@ -17,7 +17,9 @@ data:
   use_semantic_mapping: false
 
 model:
-  checkpoint: null
+  # P2A-fix1: Load P1 best instead of CellSAM base (phase2_design.md §7.5)
+  # Source: P1 L4 Job 974531, PQ=0.4750, Dice=0.6927
+  checkpoint: "checkpoints/E_phase1_rebalance_l4_20260210_223531/best_model.pt"
   freeze_encoder: true
   freeze_decoder: false
   use_adapter: false
@@ -62,4 +64,4 @@ output:
   checkpoint_dir: "checkpoints"
   save_every: 5
   keep_last_checkpoints: 3
-  experiment_name: "E_phase2a_neighbor_overlap"
+  experiment_name: "E_phase2a_fix1_from_p1"

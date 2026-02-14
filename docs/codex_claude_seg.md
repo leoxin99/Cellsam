@@ -1315,3 +1315,32 @@ if overlap_computable:
 1. computability gating 实现是否符合预期？
 2. 是否还有其他 loss 需要类似处理？（boundary/aji/topology/size/contour 的 pred+target 始终存在，应不受影响）
 3. 修正后的显存分析是否准确？
+
+
+### 17.11 [Claude | 2026-02-13] 检测与训练数据修复
+
+> **背景**: 在准备 P2-A 训练与可视化 check 时，发现 2 个关键数据问题（GT 框遗漏 + 默认参数过小）。Claude 已修复并在此记录。
+
+#### 17.11.1 训练数据修复：GT 框面积过滤移除 (Critical)
+
+**问题**: ugmented_dataset.py 曾包含硬编码的相对面积过滤 (min=0.05%, max=15%)。
+- **影响**: Sample 9a6f399d 中 Label 2 (158,975 px) 占图像 15.16%，被静默丢弃。
+- **后果**: 模型从未学习过最大的心肌细胞（这些往往是分割难点）。
+- **修复**: **完全移除 GT 框生成的面积过滤**。GT 是 ground truth，不应被过滤。
+- **验证**: 全数据集 (train/val/test) 共 5,173/5,173 个 GT regions 全部生成框 (**ZERO missing**)。
+
+#### 17.11.2 推理参数修正：min_cell_area
+
+**问题**: core.py:InferenceConfig 默认 min_cell_area=500，严重偏小。
+- **数据依据**: GT 统计 (1024px) 显示 P1=13,884 px, P99=174,735 px。
+- **修复**: 更新 InferenceConfig 默认值：
+  - min_cell_area: 500 -> **13,884** (GT P1)
+  - max_cell_area: 200,000 -> **174,735** (GT P99)
+- **备注**: 此参数主要用于 postprocess (默认关闭) 和 alidate_size。修正后与 postprocess.py 里的常量对齐。
+
+#### 17.11.3 Step 4.5 检测参数锁定计划
+
+为避免测试集泄漏 (Test Leakage)，检测参数调优将严格遵守：
+1. **调参集**: 仅使用 validation set (71 images)。
+2. **锁定**: dapi.py 的 min/max_nucleus_area 和 search_radius 等参数在 val 上确定后，**封板**。
+3. **评估**: 在 test set (73 images) 上仅做一次性最终评估 (Oracle/E2E)，禁止根据 test 结果反向调参。

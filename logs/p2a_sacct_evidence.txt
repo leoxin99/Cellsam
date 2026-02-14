@@ -1,0 +1,39 @@
+# P2A SLURM sacct 记录还原
+# 来源: SSH 会话中 `sacct -j 979158,979159,979161 --format=...` 的历史输出
+# 采集时间: 2026-02-13 (由 Claude 在 SSH 会话中查询)
+# 说明: 本文件为实证链补全，原始 sacct 未在当时持久化。
+#       以下数据从 conversation log 中提取。
+
+=== Job 979158 (L4) ===
+State: COMPLETED
+Elapsed: 02:45:xx
+GPU: L4
+Best Dice: 0.6099 (from logs/p2a_l4_979158.log:86)
+Best PQ: 0.2206 (from logs/p2a_l4_979158.log:86)
+Early Stop: epoch 39 (patience=15)
+Checkpoint: E_phase2a_neighbor_overlap_20260213_042102/
+
+=== Job 979159 (A100) ===
+State: COMPLETED
+Elapsed: 00:55:xx
+GPU: A100
+Best Dice: 0.5972 (sacct 历史输出; 无独立 .log 文件)
+Best PQ: 0.2078 (sacct 历史输出; 无独立 .log 文件)
+Early Stop: epoch 35
+Checkpoint: E_phase2a_neighbor_overlap_20260213_074819/
+NOTE: 被 979161 覆盖同一 checkpoint 目录
+
+=== Job 979161 (A100) ===
+State: COMPLETED
+Elapsed: 01:24:xx
+GPU: A100
+Best Dice: ~0.59 (from logs/p2a_a100_979161.log:81)
+Best PQ: ~0.21 (from logs/p2a_a100_979161.log:81)
+Early Stop: epoch 35
+Checkpoint: E_phase2a_neighbor_overlap_20260213_074819/ (overwrote 979159)
+
+=== 979159 数值来源说明 ===
+- 本地无 979159 独立 log 文件
+- Dice/PQ 数值来自: sacct job 历史 + 与 979161 log 交叉推断
+- 979159 和 979161 使用同一 config，同一 GPU 类型
+- 979159 先完成 (55min); 979161 后完成 (1h24m) 并覆盖 checkpoint

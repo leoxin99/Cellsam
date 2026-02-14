@@ -28,8 +28,8 @@ class InferenceConfig:
     conflict_policy: str = "argmax_prob"  # argmax_prob, first_write, last_write
     apply_postprocess: bool = False
     validate_size: bool = False
-    min_cell_area: int = 500       # 心肌细胞最小面积 (像素)
-    max_cell_area: int = 200000    # 心肌细胞最大面积 (像素)
+    min_cell_area: int = 13884     # GT 分布 P1 @1024px (原始 40836 × 0.340)
+    max_cell_area: int = 174735    # GT 分布 P99 @1024px (原始 513928 × 0.340)
     
     @classmethod
     def default(cls) -> "InferenceConfig":

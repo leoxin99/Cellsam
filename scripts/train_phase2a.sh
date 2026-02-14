@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#SBATCH --job-name=p2a_neigh
+#SBATCH --job-name=p2a_fix1
 #SBATCH --partition=gpu-l4-24g
 #SBATCH --gres=gpu:1
 #SBATCH --time=60:00:00
@@ -13,7 +13,8 @@ set -eo pipefail
 # ============================================
 # Phase 2-A Training - L4 (24GB)
 # Config: phase2a_neighbor_overlap.yaml
-# Experiment: E_phase2a_neighbor_overlap
+# Experiment: E_phase2a_fix1_from_p1
+# Fix1: checkpoint=P1_best (L4 PQ=0.4750), all else unchanged
 # Delta vs Phase 1: +L_neighbor(0.3) +L_overlap(0.1)
 #   Topology/Size OFF (see codex_claude_seg.md Ch17)
 # Time: 60h (same as Phase 1)
@@ -56,7 +57,7 @@ python src/train.py --config src/config/phase2a_neighbor_overlap.yaml
 EXIT_CODE=$?
 set -e
 
-CKPT_DIR=$(ls -td checkpoints/E_phase2a_neighbor_overlap_* 2>/dev/null | head -1)
+CKPT_DIR=$(ls -td checkpoints/E_phase2a_fix1_from_p1_* 2>/dev/null | head -1)
 if [ -n "$CKPT_DIR" ] && [ -f "$CKPT_DIR/best_model.pt" ]; then
     echo ""
     echo "Best model metrics:"

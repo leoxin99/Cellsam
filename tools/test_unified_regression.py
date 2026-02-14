@@ -73,8 +73,8 @@ def test_config_consistency():
     assert cfg1.box_expand == cfg2.box_expand == 0.1
     assert cfg1.conflict_policy == cfg2.conflict_policy == "argmax_prob"
     assert cfg1.apply_box_clipping == cfg2.apply_box_clipping == True
-    assert cfg1.min_cell_area == cfg2.min_cell_area == 500
-    assert cfg1.max_cell_area == cfg2.max_cell_area == 200000
+    assert cfg1.min_cell_area == cfg2.min_cell_area == 13884
+    assert cfg1.max_cell_area == cfg2.max_cell_area == 174735
 
     print(f"  [OK] threshold={cfg1.mask_threshold}")
     print(f"  [OK] box_expand={cfg1.box_expand}")
