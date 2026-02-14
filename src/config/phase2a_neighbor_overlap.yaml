@@ -50,10 +50,10 @@ loss:
   contour_weight: 0.3            # Same as Phase 1
   # Phase 2 Step 3: NEW - neighbor intrusion + overlap mutex
   use_neighbor: true
-  neighbor_weight: 0.3           # Codex range [0.2, 0.5], Claude chose 0.3
+  neighbor_weight: 0.1           # Fix2: Reduced 0.3 -> 0.1 to avoid segmentation collapse
   neighbor_gamma: 1.5            # Focusing param (Codex suggested 2.0, Claude 1.5)
   use_overlap: true
-  overlap_weight: 0.1            # Conservative start
+  overlap_weight: 0.05           # Fix2: Reduced 0.1 -> 0.05
   overlap_margin: 0.05           # 5% overlap tolerance
 
 optimizer:
@@ -64,4 +64,4 @@ output:
   checkpoint_dir: "checkpoints"
   save_every: 5
   keep_last_checkpoints: 3
-  experiment_name: "E_phase2a_fix1_from_p1"
+  experiment_name: "E_phase2a_fix2_low_weight"
