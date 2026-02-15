@@ -453,7 +453,8 @@ class CombinedLoss(nn.Module):
                  use_contour=False, contour_weight=0.1,
                  use_neighbor=False, neighbor_weight=0.3,
                  use_overlap=False, overlap_weight=0.1,
-                 neighbor_gamma=1.5, overlap_margin=0.05):
+                 neighbor_gamma=1.5, overlap_margin=0.05,
+                 delay_epochs=0, ramp_epochs=10):
         super().__init__()
         self.dice = DiceLoss()
         self.boundary = BoundaryLoss(boundary_width=3)
@@ -470,8 +471,14 @@ class CombinedLoss(nn.Module):
         self.topology_weight = topology_weight
         self.size_weight = size_weight
         self.contour_weight = contour_weight
+        # Fix3: Store base weights for delayed enable (phase2_design.md §8.4)
+        self._base_neighbor_weight = neighbor_weight
+        self._base_overlap_weight = overlap_weight
         self.neighbor_weight = neighbor_weight
         self.overlap_weight = overlap_weight
+        self.delay_epochs = delay_epochs
+        self.ramp_epochs = ramp_epochs
+        self._current_epoch = 0
         
         self.use_boundary = use_boundary
         self.use_aji = use_aji
@@ -480,6 +487,24 @@ class CombinedLoss(nn.Module):
         self.use_contour = use_contour
         self.use_neighbor = use_neighbor
         self.use_overlap = use_overlap
+
+    def set_epoch(self, epoch):
+        """Update N/O weights based on epoch for delayed enable + linear ramp.
+        
+        Fix3 schedule (phase2_design.md §8.4):
+          epoch < delay_epochs       → N/O weight = 0 (pure P1 losses)
+          delay ≤ epoch < delay+ramp → linear ramp from 0 to base weight
+          epoch ≥ delay+ramp         → full base weight
+        """
+        self._current_epoch = epoch
+        if epoch < self.delay_epochs:
+            scale = 0.0
+        elif self.ramp_epochs > 0:
+            scale = min(1.0, (epoch - self.delay_epochs) / self.ramp_epochs)
+        else:
+            scale = 1.0
+        self.neighbor_weight = self._base_neighbor_weight * scale
+        self.overlap_weight = self._base_overlap_weight * scale
 
     def forward(self, pred, target, box=None,
                 instance_mask=None, confidence_map=None):

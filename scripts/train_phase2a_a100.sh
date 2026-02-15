@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#SBATCH --job-name=p2a_fix2_a100
+#SBATCH --job-name=p2a_fix3_a100
 #SBATCH --partition=gpu-a100-80g
 #SBATCH --gres=gpu:1
 #SBATCH --time=60:00:00
@@ -13,9 +13,10 @@ set -eo pipefail
 # ============================================
 # Phase 2-A Training - A100 (80GB)
 # Config: phase2a_neighbor_overlap.yaml
-# Experiment: E_phase2a_fix2_low_weight
-# Fix2: checkpoint=P1_best, weights reduced (Neighbor 0.1, Overlap 0.05)
-# Rationale: Fix1 (0.3/0.1) caused rapid PQ collapse to 0.23
+# Experiment: E_phase2a_fix3_delayed
+# Fix3: delay_epochs=10, ramp_epochs=10 (N/O weight=0 for first 10 epochs,
+#   then linear ramp to N=0.1, O=0.05 by epoch 20)
+# Base: Fix2 weights (Neighbor 0.1, Overlap 0.05) + P1 best checkpoint
 #   Topology/Size OFF (see codex_claude_seg.md Ch17)
 # Time: 60h (same as Phase 1)
 # ============================================
@@ -57,7 +58,7 @@ python src/train.py --config src/config/phase2a_neighbor_overlap.yaml
 EXIT_CODE=$?
 set -e
 
-CKPT_DIR=$(ls -td checkpoints/E_phase2a_fix2_low_weight_* 2>/dev/null | head -1)
+CKPT_DIR=$(ls -td checkpoints/E_phase2a_fix3_delayed_* 2>/dev/null | head -1)
 if [ -n "$CKPT_DIR" ] && [ -f "$CKPT_DIR/best_model.pt" ]; then
     echo ""
     echo "Best model metrics:"

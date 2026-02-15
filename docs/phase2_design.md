@@ -1,8 +1,8 @@
 # Phase 2: 分割质量提升 — 设计文档
 
-> **状态**: 📋 规划中 (2026-02-12)  
+> **状态**: 🟡 P2-A 训练完成 / 退化分析中 (2026-02-14)  
 > **前置依赖**: Phase 1 已锁定  
-> **审核**: 经 Codex 三轮审核修正
+> **审核**: 经 Codex 三轮审核修正 + P2-A 退化分析 (2026-02-14)
 
 ---
 
@@ -278,3 +278,198 @@ Step 3: L_neighbor + L_overlap + train.py 改造
 P2-A: ALICE 训练 → Oracle(test) + E2E(test) 锁定
   ↓ 评估后决定是否继续 P2-B/D/E
 ```
+
+---
+
+## 7. P2-A 训练结果与退化分析 (2026-02-14)
+
+### 7.1 训练概况
+
+| Job | GPU | Dice | PQ | Early Stop | 耗时 | Checkpoint |
+|-----|-----|------|----|------------|------|------------|
+| 979158 | **L4** | **0.6099** | **0.2206** | ep39 (patience=15) | 2h45m | `E_phase2a_..._042102/` |
+| 979159 | A100 | 0.5972 | 0.2078 | ep35 | 0h55m | `E_phase2a_..._074819/` ^1^ |
+| 979161 | A100 | — | — | ep35 | 1h24m | 同上 (覆盖 979159) |
+
+^1^ 979159 本地无独立日志；数值来源为 SLURM `sacct` 输出与 979161 日志交叉推断（`logs/p2a_a100_979161.log`）。
+
+**Config**: `src/config/phase2a_neighbor_overlap.yaml`  
+**Enabled losses**: Dice, BCE, Boundary(1.5), AJI(0.2), Contour(0.3), **Neighbor(0.3)**, **Overlap(0.1)**  
+**Gradient gate**: 12/12 通过 (pre-flight)
+
+### 7.2 与 Phase 1 对比
+
+| 指标 | Phase 1 L4 | Phase 2A L4 | 变化 |
+|------|-----------|-------------|------|
+| **Best PQ** | 0.4750 (ep49) | 0.2206 (ep24) | **-53%** ❌ |
+| **Best Dice** | 0.6927 | 0.6099 | -12% |
+| Train Loss (final) | 0.2748 | 0.3418 | +24% 未收敛 |
+| Conflict count (范围) | 40,000-50,000 | 10,000-24,000 | **-50%~-75%** |
+| Sem Dice (best) | 0.758 | 0.658 | -13% |
+| Epochs | 50 (完整) | 39 (early stop) | - |
+
+### 7.3 退化根因分析
+
+#### 🔴 嫌疑 1 (首要): 未加载 P1 微调权重
+
+```yaml
+# P1 config            # P2A config
+model:                  model:
+  checkpoint: null        checkpoint: null   # ← 未加载 P1 best!
+```
+
+> **澄清**: `checkpoint: null` 不等于随机初始化。`train.py:104` 调用 `get_model()` 会加载 CellSAM 预训练权重（`cellSAM_source/cellSAM/model.py:50`）。  
+> 问题是：P2A 从 CellSAM 通用权重出发，**未继承 P1 已学习的心肌细胞特化能力**。模型需同时：
+
+1. 重新学习心肌细胞域适应（P1 已完成但此处丢失）
+2. 适应 Neighbor/Overlap 新 Loss
+
+**结果**: Train loss 从未降到 P1 水平 (0.34 vs 0.27)，分割质量天花板被拉低。
+
+> ⚠️ **尚需对照实验验证**: 要确认这是主因而非 loss 设计缺陷，需跑：`checkpoint=P1_best + 其余不变`。在此之前仅为**强怀疑**。
+
+#### 🟡 根因 2: Loss 权重归一化稀释
+
+**P1 权重分配** (`total_weight = 0.3 + 1.5 + 0.2 + 0.3 = 2.3`):
+
+| Loss | raw_weight | 归一化占比 |
+|------|------------|------------|
+| base (Dice+BCE) | 0.3 | 13.0% |
+| Boundary | 1.5 | 65.2% |
+| AJI | 0.2 | 8.7% |
+| Contour | 0.3 | 13.0% |
+
+**P2A 权重分配** (`total_weight = 2.3 + 0.3 + 0.1 = 2.7`, neighbor/overlap computable 时):
+
+| Loss | raw_weight | 归一化占比 | 相比 P1 |
+|------|------------|------------|--------|
+| base | 0.3 | 11.1% | ↓ -1.9pp |
+| Boundary | 1.5 | 55.6% | ↓ -9.6pp |
+| AJI | 0.2 | 7.4% | ↓ -1.3pp |
+| Contour | 0.3 | 11.1% | ↓ -1.9pp |
+| **Neighbor** | 0.3 | 11.1% | NEW |
+| **Overlap** | 0.1 | 3.7% | NEW |
+
+> ⚠️ Boundary 权重从 65% 降到 56%，分割核心梯度信号被削弱 ~15%。
+
+> ⚠️ **Computability gating 问题**: Neighbor/Overlap 权重仅在 `instance_mask` 和 `confidence_map` 可用时计入分母。Pre-flight 打印 `base=15%, boundary=75%` 是 N/O 不可计算时的值，**实际训练中权重在两种模式间切换**。
+
+#### 🟡 根因 3: 前 5 Epoch 冷启动
+
+```
+P2A: Epoch 1-5: BM-1to1=0.000, PQ=0.000, Sem=0.000, Conflict=0
+P1:  Epoch 1:   BM-1to1=0.425, PQ=0.089, Sem=0.693, Conflict=183,126
+```
+
+P2A 前 5 个 warmup epoch 模型输出全部低于阈值，没有产生任何有效分割。P1 第 1 epoch 就有可评估输出。
+
+#### 🟠 嫌疑 4: Conflict 数大幅下降（过于保守分割）
+
+P1 稳定在 40-50k conflicts，P2A 范围 10k-24k（低谷 ep17=10,434，高峰 ep18=23,997）。Neighbor/Overlap loss 推动模型回避重叠区域，但代价是**吞掉过多 true positive**——Conflict 减少并未转化为 PQ 提升。
+
+### 7.4 PQ 曲线对比
+
+```
+P1 L4:  ep4→0.30  ep11→0.43  ep20→0.43  ep27→0.45  ep39→0.46  ep49→0.475
+        (稳步上升，最后一个 epoch 刷新 best)
+
+P2A L4: ep6→0.12  ep18→0.21  ep24→0.22  ep25→0.08  ep31→0.11  ep36→0.05
+        (ep24 后剧烈震荡 0.05-0.11 → early stop@39)
+```
+
+> P2A 的 PQ 在达到 0.22 后**无法再提升**，在 0.05-0.11 间震荡 15 个 epoch。疑似 **loss 冲突** 导致的训练不稳定，需通过对照实验（`checkpoint=P1_best`，其余不变）验证后确认。
+
+### 7.5 修复方案
+
+| 修复 | 内容 | 优先级 |
+|------|------|--------|
+| **P2A-fix1: 从 P1 微调** | config 设 `checkpoint: checkpoints/E_phase1_.../best_model.pt` | ⭐⭐⭐ |
+| P2A-fix2: 降低新 loss 权重 | neighbor: 0.3→0.1, overlap: 0.1→0.05 | ⭐⭐ |
+| P2A-fix3: 延迟启用 | 前 10 epoch 只用 P1 losses，之后线性升温 | ⭐ |
+| P2A-fix4: 延长 warmup | warmup_epochs: 5→10 | ⭐ |
+
+### 7.6 结论
+
+训练过程本身正常（梯度门禁 12/12 pass，loss 在下降，early stop 逻辑正确）。  
+性能退化的**首要嫌疑是未加载 P1 微调权重** (`checkpoint: null`)，但 L_neighbor / L_overlap 的设计缺陷**尚未排除**，需对照实验确认。  
+**下一步**: 修复 config 后重新提交 P2A 训练（仅改 checkpoint，其余不变），**假设/目标** PQ ≥ 0.47 (至少 match P1)。若对照仍退化，则需追查 loss 设计。
+
+---
+
+## 8. P2-A Fix1 结果与 Fix2 计划 (2026-02-14)
+
+### 8.1 Fix1 (从 P1 微调) 实验结果
+
+**Job**: 980761 (L4), 980763 (A100)  
+**Config**: checkpoint = P1 Best, losses unchanged (Neighbor 0.3, Overlap 0.1)
+
+| 指标 | Phase 1 (基线) | P2-A Initial (从零) | P2-A Fix1 (从 P1) |
+|------|---------------|-------------------|-------------------|
+| **Best PQ** | **0.4750** | 0.2206 | **0.2322** (L4) |
+| **Best Dice** | 0.6927 | 0.6099 | 0.6382 |
+| **Conflict Count** | 40-50k | 12-15k | **11k-23k** (L4: 11035-22153, A100: 11272-23010) |
+| **状态** | Locked | Failed | **Failed** |
+
+**结论**:
+1. **P1 权重未能挽救退化**: 仅在最初几个 epoch 略有提升，随后 PQ 迅速坍塌至 ~0.10，表现出与 Initial 相同的"loss 冲突"特征。
+2. **冲突抑制波动大**: Conflict 在 11k-23k 间大幅波动 (P1 稳定在 40-50k), 整体偏低说明 exclusion 约束仍然过强, 但并非始终压制.
+3. **首要嫌疑加强** (非根因确认): Fix1 排除了冷启动假设, 将 Loss 权重过大 从嫌疑提升为首要嫌疑. 但仅凭 Fix1 不能排除其他因素 (lr/warmup). 需 Fix2/Fix3/Fix4 对照才能最终定性.
+
+### 8.2 Fix2 计划 (降低权重)
+
+根据 §7.5 计划，进入 **P2A-fix2**。
+
+**改动内容**:
+1. **L_neighbor**: 0.3 → **0.1** (降低 3 倍)
+2. **L_overlap**: 0.1 → **0.05** (降低 2 倍)
+3. **保持**: 继续加载 P1 Checkpoint (作为好的起点)
+
+**预期**:
+减轻对分割主干的干扰，寻求 exclusion 与 segmentation 的平衡点。
+
+**Experiment Name**: `E_phase2a_fix2_low_weight`
+
+> **复现口径** (Codex review #4): `phase2a_neighbor_overlap.yaml` 已覆盖为 Fix2 参数。Fix1 完整配置存档于 Alice `checkpoints/E_phase2a_fix1_from_p1_*/config.yaml`。后续若需复现 Fix1 应从存档恢复。
+
+### 8.3 Fix2 结果 (2026-02-15)
+
+**Job**: 981146 (L4), 981147 (A100)  
+**Config**: checkpoint = P1 Best, **Neighbor = 0.1** (↓3x), **Overlap = 0.05** (↓2x)
+
+| 指标 | Phase 1 (基线) | Fix1 (N=0.3, O=0.1) | **Fix2 (N=0.1, O=0.05)** | Fix2 vs P1 |
+|------|---------------|---------------------|--------------------------|-----------|
+| **Best PQ** | **0.4750** | 0.2322 | **0.3929** | **-17%** ❌ |
+| **Best Dice** | 0.6927 | 0.6382 | **0.6867** | **-0.9%** ✅ |
+| Gradient gate | — | — | **12/12** ✅ | — |
+
+**关键发现**:
+1. **权重过大是退化主因**: Fix1→Fix2 唯一变量是降权，PQ 恢复 **+69%**。证实 §7.3 "嫌疑 2 (Loss 权重归一化稀释)" 为主因。
+2. **PQ vs Dice 分离**: Dice 几乎恢复 (0.69→0.69) 但 PQ 差 17%。说明像素分割质量已恢复，**实例匹配退化** (IoU 阈值敏感)。
+3. **可能原因**: N/O 仍在抑制边界区域，导致边界 IoU 刚好跌破匹配阈值。
+
+**R1 审核**: ⚠️ 有条件通过 (见 `docs/temp_reviews/fix2_review.md`)
+
+### 8.4 Fix3 计划 (延迟启用)
+
+**思路**: 前 10 个 epoch 用纯 P1 losses (N/O weight = 0)，让模型先收敛到 P1 水平，然后线性升温 N/O。
+
+**代码改动**:
+- `CombinedLoss.set_epoch(epoch)`: 根据 `delay_epochs`/`ramp_epochs` 动态缩放 N/O 权重
+- `train.py`: 每 epoch 开头调用 `criterion.set_epoch(epoch)`
+- Config: `delay_epochs: 10`, `ramp_epochs: 10`
+
+**权重调度表**:
+
+| Epoch | N weight | O weight |
+|-------|----------|----------|
+| 0-9   | 0        | 0        |
+| 10    | 0.01     | 0.005    |
+| 15    | 0.05     | 0.025    |
+| 20+   | 0.1      | 0.05     |
+
+**Experiment Name**: `E_phase2a_fix3_delayed`
+
+**止损线** (R1 review): Fix3 PQ < 0.45 → 终止 P2-A 路线，论文定位为 "Preliminary Exploration"
+
+> **复现口径**: Fix2 配置存档于 Alice `checkpoints/E_phase2a_fix2_low_weight_*/config.yaml`。`phase2a_neighbor_overlap.yaml` 已更新为 Fix3 参数。
+

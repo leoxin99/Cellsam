@@ -515,6 +515,9 @@ def main():
         overlap_weight=config['loss'].get('overlap_weight', 0.1),
         neighbor_gamma=config['loss'].get('neighbor_gamma', 1.5),
         overlap_margin=config['loss'].get('overlap_margin', 0.05),
+        # Fix3: Delayed loss enable (phase2_design.md §8.4)
+        delay_epochs=config['loss'].get('delay_epochs', 0),
+        ramp_epochs=config['loss'].get('ramp_epochs', 10),
     )
     
     # Log enabled losses
@@ -556,6 +559,8 @@ def main():
     box_expand = config['loss'].get('box_expand', 0.1)
     
     for epoch in range(config['training']['epochs']):
+        # Fix3: Update N/O loss weights based on delay schedule
+        criterion.set_epoch(epoch)
         train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device, scaler=scaler, adapter=adapter, box_expand=box_expand)
         val_metrics = validate(model, val_loader, criterion, device, adapter=adapter, use_pq=use_pq_early_stop, box_expand=box_expand)
         val_dice = val_metrics['bm_1to1']
