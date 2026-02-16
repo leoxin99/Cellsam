@@ -30,11 +30,11 @@ ssh alice "hostname; whoami"
 ssh alice "squeue -u s3890074"
 ```
 
-### 3. 查看日志
+### 3. 查看训练日志
 // turbo
 ```bash
-ssh alice "tail -100 ~/CellSam/logs/cellsam_*.log"
-ssh alice "cat ~/CellSam/logs/cellsam_*.err"
+ssh alice "tail -100 ~/CellSam/logs/p2a_*.log"
+ssh alice "ls -lt ~/CellSam/logs/*.log | head -5"
 ```
 
 ### 4. 检查文件/目录
@@ -47,13 +47,24 @@ ssh alice "ls ~/CellSam/data/processed/images/ | wc -l"
 ### 5. 验证环境
 // turbo
 ```bash
-ssh alice "bash -l -c 'conda activate cellsam; python --version'"
-ssh alice "bash -l -c 'conda activate cellsam; python ~/CellSam/verify_env.py'"
+ssh alice "bash -l -c 'eval \"\$(conda shell.bash hook)\"; conda activate cellsam; python --version'"
 ```
 
-### 6. 本地文件查看
+### 6. 运行回归测试
 // turbo
 ```bash
+conda run -n cellsam python tools/test_unified_regression.py
+```
+
+### 7. 运行梯度门禁
+// turbo
+```bash
+conda run -n cellsam python tools/test_loss_gradients.py
+```
+
+### 8. 本地文件查看
+// turbo
+```powershell
 Get-ChildItem -Path "path" | Measure-Object
 Get-Content file.txt | Select-Object -First 10
 ```
@@ -62,14 +73,23 @@ Get-Content file.txt | Select-Object -First 10
 
 ## 需审批命令列表
 
-### ⚠️ 数据处理
-```bash
-python data/scripts/extract_expanded_pairs.py  # 修改 processed/ 目录
-```
-
 ### ⚠️ 训练提交
 ```bash
-ssh alice "sbatch scripts/train_semantic.sh"  # 消耗 GPU 资源
+ssh alice "sbatch scripts/train_phase2a.sh"
+ssh alice "sbatch scripts/train_phase2a_a100.sh"
+```
+
+### ⚠️ 评估运行
+```bash
+conda run -n cellsam python tools/standardized_inference.py --checkpoint <path>
+conda run -n cellsam python tools/evaluate_e2e.py
+conda run -n cellsam python tools/comprehensive_eval.py
+```
+
+### ⚠️ 检测消融
+```bash
+conda run -n cellsam python tools/ablation_detection_e34b.py
+conda run -n cellsam python tools/ablation_detection_lock.py
 ```
 
 ### ⚠️ 代码修改
@@ -85,7 +105,6 @@ ssh alice "rm -rf ~/CellSam/data/processed/*"
 ```bash
 ssh alice "conda install package"
 ssh alice "pip install package"
-ssh alice "conda remove --name cellsam --all"
 ```
 
 ### ⚠️ 配置修改
@@ -100,16 +119,8 @@ ssh alice "conda remove --name cellsam --all"
 | 读取/查看 | ✅ 安全 | 只读操作 |
 | 状态检查 | ✅ 安全 | 不修改任何内容 |
 | 日志查看 | ✅ 安全 | 只读操作 |
+| 回归测试 | ✅ 安全 | 只读检查 |
 | 代码编辑 | ⚠️ 审批 | 影响项目行为 |
-| 数据处理 | ⚠️ 审批 | 覆盖现有数据 |
 | 训练提交 | ⚠️ 审批 | 消耗计算资源 |
 | 文件删除 | ⚠️ 审批 | 不可逆操作 |
 | 环境安装 | ⚠️ 审批 | 可能破坏环境 |
-
----
-
-## 使用方法
-
-在对话中使用 `/cellsam-commands` 触发此工作流。
-
-标记为 `// turbo` 的命令将自动执行，无需用户确认。

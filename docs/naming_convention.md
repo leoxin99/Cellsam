@@ -75,7 +75,10 @@ E{编号}_{模型类型}_{阶段}_{日期}
 | **P1** | Phase 1 - 基础训练 | Dice + BCE + Boundary + AJI |
 | **P2-A** | Phase 2-A - 邻居约束 | P1 + L_neighbor(0.3) + L_overlap(0.1) |
 | **P2-B** | Phase 2-B - 边界精度 | P2-A + DiffContour + DiffTopology |
-| **P2-C** | Phase 2-C - 参数优化 | P2-A + lr=5e-5, epochs=80 |
+| **P2-D** | Phase 2-D - 学习率消融 | P2-A + lr=5e-5, epochs=50 |
+| **P2-E** | Phase 2-E - 轮次消融 | P2-A + lr=1e-4, epochs=80 |
+
+> 注：旧命名 `P2-C`（lr 与 epochs 同时变动）已废弃，拆分为 `P2-D/P2-E` 以保证单变量对比。
 
 ---
 

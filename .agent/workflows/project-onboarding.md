@@ -2,94 +2,75 @@
 description: AI 助手加入项目时的入门指南
 ---
 
-# AI 助手入门指南 (AI Assistant Onboarding)
+# AI 助手入门指南
 
-新 AI 助手加入本项目时，请按以下顺序阅读文档：
+新 AI 助手（无论是实施 Agent 还是审核 Agent）加入本项目时，按以下顺序阅读。
 
 ## 1. 阅读项目蓝图
 
-**文件**: `CLAUDE.md`
+// turbo
+读取 `CLAUDE.md`，重点关注：
+- 项目状态仪表板（当前阶段、关键指标）
+- 核心文档表（哪些文档是 Active）
+- 多 Agent 协作模式（你的角色和约束）
+- AI 工作规范（审查制度、禁止估算原则）
 
-重点关注：
-- Project Overview (项目目标)
-- Project Status Dashboard (当前状态)
-- Documentation Management Scheme (文档结构)
-- Key Decision Log (重要决策)
+## 2. 了解协作规则
 
-## 2. 了解实验历史
+// turbo
+读取 `docs/agent_management.md`，重点关注：
+- §1 你的 Agent ID 和角色（A1/A2/R1）
+- §2 层级结构与决策权
+- §3.2 产物提交格式（8 个必填字段）
+- §4.1 文件所有权（哪些文件你可以写）
+- §4.2 并发冲突防护（A 模式约束）
 
-**文件**: `anti_test/experiments_log.md`
+## 3. 查看通信信箱
 
-阅读顺序：
-1. 实验索引 - 快速了解所有实验
-2. 最近 3 个实验详情 - 了解当前进展
-3. 关键决策记录 - 了解为什么做出某些选择
+// turbo
+读取 `docs/agent_inbox.md`：
+- 查看是否有发给你的未处理消息
+- 了解消息格式（日期 + 发送方 → 接收方 + 必填字段）
 
-## 3. 查看当前结果
+## 4. 了解当前任务
 
-**文件**: `anti_test/results_summary.md`
+// turbo
+读取 `docs/task_backlog.md`：
+- 确认哪些任务分配给你
+- 了解每个任务的完成标准和产物要求
 
-获取：
-- 核心指标数值
-- 最新模型性能
-- 待完成任务
+## 5. 按角色读 SSOT 文档
 
-## 4. 了解方法论
-
-**文件**: `anti_test/methods_draft.md`
-
-了解：
-- 数据集信息
-- 检测方法
-- 分割方法
-- 评估指标
-
-## 5. 开始工作
-
-### 5.1 选择合适角色
-
-| 任务类型 | 推荐角色 |
+| 你的角色 | 额外必读 |
 |---------|---------|
-| 模型训练/优化 | Deep Learning Model Optimization Engineer |
-| 评估指标开发 | Bioimage Analysis Evaluation Architect |
-| 文档记录 | Research Documentation Architect |
-| 代码调试 | Python Developer |
+| **实施 Agent (A1/A2)** | `docs/inference_standard.md` (推理口径) + `docs/code_inventory.md` (代码入口) + `docs/error_log_and_checklist.md` (训练前检查) |
+| **审核 Agent (R1)** | `.agent/workflows/review-agent.md` (审核流程) + `docs/dapi_detection_design.md` (检测参数) |
 
-### 5.2 使用工作流
+## 6. 开始工作
 
-可用的工作流 (使用 `/workflow-name` 调用):
-- `/log-experiment` - 记录新实验
-- `/update-progress` - 更新项目进展
-- `/run-evaluation` - 运行模型评估
+### 6.1 任务完成后必做
 
-### 5.3 遵循规范
+1. 将产物摘要**追加**到 `docs/agent_inbox.md`（格式参考已有条目）
+2. 运行回归测试 `python tools/test_unified_regression.py`
+3. 确保修改已 commit
 
-1. 所有实验必须记录到 `experiments_log.md`
-2. 重要决策必须记录原因
-3. 代码修改后运行测试验证
-4. 保持文档一致性
+### 6.2 可用工作流
 
-## 6. 项目关键路径
-
-```
-数据 (Allen TIFF) 
-    ↓
-DAPI 核检测 (F1=0.75)
-    ↓
-CellSAM 分割 (Dice=0.82)
-    ↓
-评估指标 (PQ, AJI, RI)
-    ↓
-[待做] SarcGraph 集成
-```
-
-## 7. 关键文件位置
-
-| 类型 | 路径 |
+| 命令 | 用途 |
 |------|------|
-| 项目蓝图 | `CLAUDE.md` |
-| 实验记录 | `anti_test/experiments_log.md` |
-| 结果汇总 | `anti_test/results_summary.md` |
-| 评估代码 | `anti_test/eval_metrics.py` |
-| 训练代码 | `train_expanded.py`, `finetune_boundary_simple.py` |
-| 最佳模型 | `checkpoints/boundary_20260111_012636/best_model.pt` |
+| `/review-agent` | 审核 Agent 执行审核流程 |
+| `/cellsam-commands` | 常用命令速查 (含安全级别) |
+| `/daily-github-sync` | 每日提交到 GitHub |
+| `/project-onboarding` | 本入职指南 |
+
+## 7. 项目关键路径
+
+```
+DAPI 核检测         → F1=0.8033 (test73 封板)
+    ↓
+CellSAM 分割        → Oracle BM-Dice=0.6954, PQ=0.4641 (Phase 1 锁定)
+    ↓
+Phase 2 结构改进     → L_neighbor + L_overlap (P2-A 训练中)
+    ↓
+Phase 3 三通道适配   → Channel Adapter (待开始)
+```

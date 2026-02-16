@@ -11,6 +11,7 @@ Adaptive (Z-线) 检测方法参数消融实验
     python tools/ablation_adaptive_params.py
 """
 
+import argparse
 import sys
 import json
 import numpy as np
@@ -24,6 +25,12 @@ sys.path.insert(0, str(project_dir / "cellSAM_source"))
 sys.path.insert(0, str(project_dir / "src"))
 
 from detection.dapi import detect_with_adaptive_box
+
+# NOTE:
+# These defaults are explicit to avoid hidden mismatch when running this script
+# directly. Update intentionally with experiment protocol changes.
+DEFAULT_MIN_NUCLEUS_AREA = 3000
+DEFAULT_MAX_NUCLEUS_AREA = 20000
 
 
 def load_test_samples(data_dir: Path, split_file: Path, n_samples: int = 20):
@@ -55,15 +62,18 @@ def load_test_samples(data_dir: Path, split_file: Path, n_samples: int = 20):
 
 
 def get_gt_boxes_from_mask(mask: np.ndarray, min_area: int = 500):
-    """Extract GT bounding boxes from instance mask."""
+    """Extract GT bounding boxes from instance mask.
+
+    Note:
+        `min_area` is kept only for backward compatibility. GT boxes are not
+        area-filtered in this evaluation path.
+    """
     from skimage import measure
     
     boxes = []
     regions = measure.regionprops(mask)
     
     for region in regions:
-        if region.area < min_area:
-            continue
         minr, minc, maxr, maxc = region.bbox
         boxes.append((minr, minc, maxr, maxc))
     
@@ -128,9 +138,19 @@ def match_boxes(pred_boxes, gt_boxes, iou_threshold: float = 0.3):
     return tp, fp, fn
 
 
-def evaluate_adaptive_params(samples, search_radius, min_zlines, zline_threshold):
+def evaluate_adaptive_params(
+    samples,
+    search_radius,
+    min_zlines,
+    zline_threshold,
+    min_nucleus_area: int = 3000,
+    max_nucleus_area: int = 20000,
+):
     """Evaluate Adaptive detection with specific parameters."""
     all_tp, all_fp, all_fn = 0, 0, 0
+    adaptive_count = 0
+    fallback_count = 0
+    zline_total = 0
     
     for sample in samples:
         try:
@@ -138,13 +158,18 @@ def evaluate_adaptive_params(samples, search_radius, min_zlines, zline_threshold
             result = detect_with_adaptive_box(
                 sample['dapi'],
                 sample['actn2'],
-                min_nucleus_area=3000,
-                max_nucleus_area=20000,
+                min_nucleus_area=min_nucleus_area,
+                max_nucleus_area=max_nucleus_area,
                 search_radius=search_radius,
                 min_zlines=min_zlines,
                 zline_threshold=zline_threshold
             )
             pred_boxes = result[0] if isinstance(result, tuple) else result
+            debug_info = result[2] if isinstance(result, tuple) and len(result) > 2 else []
+            if debug_info:
+                adaptive_count += sum(1 for item in debug_info if item.get('adaptive', False))
+                fallback_count += sum(1 for item in debug_info if not item.get('adaptive', False))
+                zline_total += sum(int(item.get('num_zlines', 0)) for item in debug_info)
             
             # Get GT boxes
             gt_boxes = get_gt_boxes_from_mask(sample['mask'], min_area=500)
@@ -163,6 +188,9 @@ def evaluate_adaptive_params(samples, search_radius, min_zlines, zline_threshold
     precision = all_tp / (all_tp + all_fp) if (all_tp + all_fp) > 0 else 0
     recall = all_tp / (all_tp + all_fn) if (all_tp + all_fn) > 0 else 0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+    mode_total = adaptive_count + fallback_count
+    adaptive_ratio = adaptive_count / mode_total if mode_total > 0 else 0.0
+    mean_zlines = zline_total / mode_total if mode_total > 0 else 0.0
     
     return {
         'precision': round(precision, 4),
@@ -171,10 +199,31 @@ def evaluate_adaptive_params(samples, search_radius, min_zlines, zline_threshold
         'tp': all_tp,
         'fp': all_fp,
         'fn': all_fn,
+        'adaptive_count': adaptive_count,
+        'fallback_count': fallback_count,
+        'adaptive_ratio': round(adaptive_ratio, 4),
+        'mean_zlines': round(mean_zlines, 4),
     }
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Adaptive parameter ablation on test-20 (legacy exploratory script)"
+    )
+    parser.add_argument(
+        "--min-nucleus-area",
+        type=int,
+        default=DEFAULT_MIN_NUCLEUS_AREA,
+        help="min_nucleus_area passed to detect_with_adaptive_box",
+    )
+    parser.add_argument(
+        "--max-nucleus-area",
+        type=int,
+        default=DEFAULT_MAX_NUCLEUS_AREA,
+        help="max_nucleus_area passed to detect_with_adaptive_box",
+    )
+    args = parser.parse_args()
+
     print("=" * 70)
     print("Adaptive (Z-线) 检测参数消融实验 (Part B)")
     print("=" * 70)
@@ -193,8 +242,17 @@ def main():
     results = {
         'timestamp': datetime.now().isoformat(),
         'n_samples': len(samples),
+        'detector_params': {
+            'min_nucleus_area': args.min_nucleus_area,
+            'max_nucleus_area': args.max_nucleus_area,
+        },
         'experiments': {}
     }
+    print(
+        "    Detector params: min_nucleus_area={}, max_nucleus_area={}".format(
+            args.min_nucleus_area, args.max_nucleus_area
+        )
+    )
     
     # Default parameters
     default_search_radius = 400
@@ -210,11 +268,17 @@ def main():
             samples, 
             search_radius=value, 
             min_zlines=default_min_zlines, 
-            zline_threshold=default_zline_threshold
+            zline_threshold=default_zline_threshold,
+            min_nucleus_area=args.min_nucleus_area,
+            max_nucleus_area=args.max_nucleus_area,
         )
         metrics['value'] = value
         b1_results.append(metrics)
-        print(f"    search_radius={value}: F1={metrics['f1']:.3f}, P={metrics['precision']:.3f}, R={metrics['recall']:.3f}")
+        print(
+            f"    search_radius={value}: F1={metrics['f1']:.3f}, "
+            f"P={metrics['precision']:.3f}, R={metrics['recall']:.3f}, "
+            f"AR={metrics.get('adaptive_ratio', 0.0):.3f}, FB={metrics.get('fallback_count', 0)}"
+        )
     
     best_b1 = max(b1_results, key=lambda x: x['f1'])
     results['experiments']['B1_search_radius'] = {
@@ -233,11 +297,17 @@ def main():
             samples, 
             search_radius=default_search_radius, 
             min_zlines=value, 
-            zline_threshold=default_zline_threshold
+            zline_threshold=default_zline_threshold,
+            min_nucleus_area=args.min_nucleus_area,
+            max_nucleus_area=args.max_nucleus_area,
         )
         metrics['value'] = value
         b2_results.append(metrics)
-        print(f"    min_zlines={value}: F1={metrics['f1']:.3f}, P={metrics['precision']:.3f}, R={metrics['recall']:.3f}")
+        print(
+            f"    min_zlines={value}: F1={metrics['f1']:.3f}, "
+            f"P={metrics['precision']:.3f}, R={metrics['recall']:.3f}, "
+            f"AR={metrics.get('adaptive_ratio', 0.0):.3f}, FB={metrics.get('fallback_count', 0)}"
+        )
     
     best_b2 = max(b2_results, key=lambda x: x['f1'])
     results['experiments']['B2_min_zlines'] = {
@@ -256,11 +326,17 @@ def main():
             samples, 
             search_radius=default_search_radius, 
             min_zlines=default_min_zlines, 
-            zline_threshold=value
+            zline_threshold=value,
+            min_nucleus_area=args.min_nucleus_area,
+            max_nucleus_area=args.max_nucleus_area,
         )
         metrics['value'] = value
         b3_results.append(metrics)
-        print(f"    zline_threshold={value}: F1={metrics['f1']:.3f}, P={metrics['precision']:.3f}, R={metrics['recall']:.3f}")
+        print(
+            f"    zline_threshold={value}: F1={metrics['f1']:.3f}, "
+            f"P={metrics['precision']:.3f}, R={metrics['recall']:.3f}, "
+            f"AR={metrics.get('adaptive_ratio', 0.0):.3f}, FB={metrics.get('fallback_count', 0)}"
+        )
     
     best_b3 = max(b3_results, key=lambda x: x['f1'])
     results['experiments']['B3_zline_threshold'] = {
@@ -281,7 +357,14 @@ def main():
     
     # Baseline (default params)
     print("-" * 55)
-    baseline = evaluate_adaptive_params(samples, default_search_radius, default_min_zlines, default_zline_threshold)
+    baseline = evaluate_adaptive_params(
+        samples,
+        default_search_radius,
+        default_min_zlines,
+        default_zline_threshold,
+        min_nucleus_area=args.min_nucleus_area,
+        max_nucleus_area=args.max_nucleus_area,
+    )
     print(f"{'Baseline (current)':<25} {'400/15/0.03':>15} {baseline['f1']:>10.4f}")
     results['baseline'] = baseline
     

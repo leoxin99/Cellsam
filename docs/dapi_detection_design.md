@@ -189,7 +189,9 @@ else:  # 椭圆核
 
 ---
 
-## 三、当前最优参数 (更新 2026-02-05)
+## 三、当前默认运行参数 (更新 2026-02-05)
+
+> 说明: 本节是代码默认值 (runtime default)；用于统一评测/封板的参数以 **3.1 锁定进展** 为准。
 
 | 参数 | 值 | 分辨率 | 来源 |
 |------|-----|--------|------|
@@ -203,6 +205,21 @@ else:  # 椭圆核
 | expansion_short | 3.0 | - | E14 分析 |
 | search_radius | **256** | 1024px | ~P99 box/2 |
 | round_threshold | 1.3 | - | 经验值 |
+
+---
+
+### 3.1 锁定进展更新 (2026-02-14)
+
+> 为避免 test 泄漏，检测参数采用 `val(71) 调参 -> test(73) 单次封板` 协议。
+> 状态: ✅ E34b(val71) 与 test73 封板结果已回填到 SSOT 文档链路 (`CLAUDE.md`, `docs/task_backlog.md`, `docs/experiments_log.md`)。
+
+| 项目 | 当前状态 | 参数 | F1 | 说明 |
+|------|----------|------|----|------|
+| DAPI 默认运行参数 | 保留 | `min=200`, `max=10000`, `relative=True` | - | 运行时默认 (`src/detection/dapi.py`) |
+| DAPI val 锁定候选 | 已完成 | `min=1500`, `max=20000`, `relative_1.2x` | `0.7965` | `experiments/ablation_dapi_val/results.json` |
+| Adaptive val 锁定候选 | 已完成 | `radius=200`, `min_zlines=5`, `zline_threshold=0.01` | `0.7271` | `experiments/ablation_adaptive_val/results.json` |
+| 边缘/双核参数 val 重调 | 已完成 | `edge_margin=20`, `size_ratio_threshold=2.5`, `merge_coeff=1.4` | `0.8106` | E34b 联合消融最优 (`experiments/ablation_detection_e34b/results.json`) |
+| test 封板 | 已完成 | 固定候选参数，test 单次评估 | `0.8033` (DAPI) | DAPI > Adaptive，已封板 (`experiments/ablation_detection_lock/results.json`) |
 
 ---
 
@@ -304,6 +321,8 @@ def create_bounding_boxes(cell_groups, image_shape, ...):
 | E19 | 01-26 | 边缘/双核参数 | - | ❌ 无 |
 | E20 | 01-30 | DAPI vs Adaptive | 20 test | ✅ 有 (JSON) |
 | E22 | 01-30 | 参数消融 | 20 test | ✅ 有 (JSON) |
+| E34b | 02-14 | 边缘/双核联合消融 (`edge_margin/size_ratio/merge_coeff`) | 71 val | ✅ `experiments/ablation_detection_e34b/results.json` |
+| E34-lock | 02-14 | DAPI vs Adaptive 单次封板 | 73 test | ✅ `experiments/ablation_detection_lock/results.json` |
 
 ⚠️ **注意**: E03, E06, E14, E19 没有保存 results.json，参数来源为 experiments_log.md 和代码注释。
 
@@ -311,6 +330,29 @@ def create_bounding_boxes(cell_groups, image_shape, ...):
 
 ## 七、待改进
 
-1. **数据集不一致**: 消融实验应使用 val 集 (71样本)，而非 test 集
-2. **早期实验无结果文件**: E03 参数来源不可追溯
-3. **Adaptive 方案需迭代**: search_radius=200 后 F1=0.755，接近 DAPI Only
+1. **早期实验无结果文件**: E03 参数来源不可追溯（历史遗留）
+2. **Adaptive 方案需迭代**: 当前 test73 F1=0.7502，落后 DAPI 的 0.8033
+3. **参数治理需持续**: 保持 runtime default 与 locked eval 的双轨并避免混用
+
+---
+
+## 八、章节更新方案 (2026-02-14)
+
+> 目标: 解决“默认参数 / 锁定候选 / 最终封板”混写问题，避免新对话误读。
+
+| 章节 | 当前问题 | 更新动作 | 优先级 |
+|------|----------|----------|--------|
+| 一、方案概述 | 默认运行与评测锁定区分不够显式 | 增加“运行默认值 vs 评测锁定值”提示，并指向 3.1 | High |
+| 二、版本演进历史 | 缺 E34 的 val 锁定与 test 封板节点 | 新增 v5.1 (E34-val) 与 v5.2 (E34-test lock) | High |
+| 三、参数 | 已拆默认与锁定，但未写“最终封板后覆盖规则” | 增加 3.2: 参数优先级 (code default < val lock < test lock) | High |
+| 四、核心算法细节 | DAPI 与 Adaptive 共用参数面未集中说明 | 新增“共用参数表”: `min/max_nucleus_area`, `size_ratio_threshold`, `use_relative_distance`, `edge_margin` | High |
+| 五、评估指标 | 缺 E34 统一口径说明 | 明确 IoU=0.3, micro P/R/F1, val 调参 + test 单次锁定 | Medium |
+| 六、实验记录溯源 | 缺最新结果文件挂载 | 增补 `ablation_dapi_val` 与 `ablation_adaptive_val` 的结果路径 | High |
+| 七、待改进 | 条目偏旧，未覆盖当前已知风险 | 增加 E34b: `edge_margin`, `size_ratio_threshold`, `merge_coeff` 联合消融与 Adaptive 退化诊断 | High |
+
+### 8.1 术语澄清 (针对极小核争议)
+
+- “GT 极小核/碎片”是**核级统计口径**下的可疑目标，不能等价为“必须删除 GT 实例”。
+- 当前策略:
+  - 训练/实例评估中不对 GT 实例做静默面积过滤；
+  - 在“核检测参数推导”(边缘过滤、双核合并统计)中，可使用“有效核”定义，但必须显式标注分辨率与数据集口径。

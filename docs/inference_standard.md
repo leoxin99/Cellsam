@@ -21,8 +21,8 @@
 | `conflict_policy` | `"argmax_prob"` | 重叠像素归属策略 (argmax_prob/first_write/last_write) |
 | `apply_postprocess` | False | 是否启用面积过滤后处理 |
 | `validate_size` | False | 是否验证细胞面积范围 |
-| `min_cell_area` | 500 | 细胞最小面积 (像素) |
-| `max_cell_area` | 200000 | 细胞最大面积 (像素) |
+| `min_cell_area` | 13884 | 细胞最小面积 (GT P1, 1024px) |
+| `max_cell_area` | 174735 | 细胞最大面积 (GT P99, 1024px) |
 
 ```python
 from src.inference.core import InferenceConfig, segment_with_boxes
@@ -138,10 +138,13 @@ model, adapter, info = load_cellsam_checkpoint(
 
 ## 六、历史结果
 
+> 说明：前两行是历史 `val` 结果；`Phase 1 Test Locked` 为当前对外汇报与阶段结论口径。
+
 | 日期 | 模型 | Oracle Dice | Oracle PQ | 样本数 |
 |------|------|-------------|-----------|--------|
 | 2026-02-10 | Baseline (预训练) | 0.589 ± 0.237 | 0.337 ± 0.140 | 71 (val) |
 | 2026-02-10 | Phase 1 (L4 best) | 0.695 | 0.464 | 71 (val) |
+| 2026-02-11 | Phase 1 Test Locked | 0.6954 | 0.4641 | 73 (test) |
 | 2026-02-13 | Phase 2-A | 训练中... | — | — |
 
 ---

@@ -58,6 +58,8 @@ Phase 2 结构改进     [████████████░░░░░░
 
 `_mask_to_boxes_with_ids` 曾用 `max_area_ratio=0.15` 过滤 GT regions，面积 >15% 图像的大细胞被静默丢弃。已删除该过滤，验证 5,173/5,173 GT regions 全部生成框。后续训练自动使用修复代码 (`git pull` 即可)。
 
+2026-02-14 补充: 检测消融评估脚本 (`tools/ablation_dapi_val.py`, `tools/ablation_dapi_params.py`, `tools/ablation_adaptive_params.py`, `tools/ablation_adaptive_improved.py`) 已同步移除 GT `min_area=500` 过滤，避免评估分母被静默改变。
+
 ---
 
 ## ⚠️ 环境配置 (CRITICAL)
@@ -80,34 +82,58 @@ conda activate cellsam
 > 1. **CUDA Module 名称变化**: `cuda/11.8` → `CUDA/12.1.1`（大小写也变了）
 > 2. **Conda 路径变化**: `~/miniconda3` → 系统级 Miniforge3（用户 home 下不再有 conda）
 > 3. **Conda activate 脚本冲突**: MKL 环境变量未定义 + `set -u` = 脚本静默退出
->
 > **SLURM 脚本最佳实践**:
 > - 不要 `source ~/miniconda3/...`，用 `eval "$(conda shell.bash hook)"`
 > - `set -eo pipefail` 放在最前面，`set -u` 放在 `conda activate` **之后**
 > - Login 节点能跑通的命令不代表 SLURM 脚本也能跑通（初始化路径不同）
-### 核心文档状态 (2026-02-13)
+### 核心文档状态 (2026-02-15)
 
 | 文档 | 状态 | 用途 |
 |------|------|------|
 | `docs/inference_standard.md` | 🟢 Active | 推理口径 SSOT |
+| `docs/dapi_detection_design.md` | 🟢 Active | 检测参数 SSOT (DAPI/Adaptive) |
 | `docs/code_inventory.md` | 🟢 Active | 代码入口速查 |
 | `docs/experiments_log.md` | 🟢 Active | 实验流水账 |
 | `docs/dataset_parameters.md` | 🟢 Active | 数据集参数 |
 | `docs/naming_convention.md` | 🟢 Active | 命名规范 |
 | `docs/error_log_and_checklist.md` | 🟢 Active | 错误归纳 + 检查清单 |
 | `docs/alice_quick_reference.md` | 🟢 Active | Alice HPC 指南 |
+| `docs/task_backlog.md` | 🟢 Active | 短期/长期待办与完成标准 |
 | `docs/progress_timeline_2.13.md` | 🟢 Active | 导师汇报时间线 + 后续计划 |
 | `docs/phase2_design.md` | 🟢 Active | Phase 2 设计与执行计划 |
+| `docs/agent_management.md` | 🟢 Active | **多 Agent 协作管理规范 SSOT** |
+| `docs/agent_inbox.md` | 🟢 Active | **Agent 间异步通信信箱** |
+| `docs/temp_reviews/` | 🟠 Temp | 审核报告 (合并进 SSOT 后可删) |
+| `docs/codex_claude_seg.md` | 🟡 Historical | A1/A2 联合工作台 (Phase 0-2 全链路) |
+| `docs/codex_claude_arrange.md` | 🟡 Historical | 文件整理方案 (2026-02-10) |
 | `docs/phase1_design.md` | 🟡 Historical | Phase 1 实施记录 |
 | `docs/boundary_enhancement_design.md` | 🟡 Historical | 早期设计草案 |
 | `docs/claude_pipeline_analysis.md` | 🟡 Historical | pipeline 分析 |
 
-> 新对话定位执行任务：优先读 `CLAUDE.md` + `inference_standard.md` + `code_inventory.md`；若需汇报，补读 `progress_timeline_2.13.md`。
+> 新 Agent 必读: `CLAUDE.md` → `docs/agent_management.md` → `docs/task_backlog.md` → 按角色读对应 SSOT 文档。
 
----
+### 🔄 多 Agent 协作模式
 
-### AI 工作规范
+> 详细规范见 [`docs/agent_management.md`](docs/agent_management.md)（Agent 清单、职能边界、通信协议、文件所有权、并发防护）。
 
+| ID | 名称 | 角色 | 职责摘要 |
+|----|------|------|----------|
+| A1 | **Codex** | 实施 Agent | 代码实现、实验执行 |
+| A2 | **Claude** | 实施 Agent | 代码实现、设计方案 |
+| R1 | **Reviewer** | 审核 Agent | 第三方审核、SSOT 回填 |
+
+**核心约束**: 审核 Agent 回填文档前须确认实施 Agent 无未 commit 修改 (A 模式)。
+
+### 参数记录分工 (防重复)
+
+| 参数类型 | SSOT 文档 | 辅助文档 | 备注 |
+|------|------|------|------|
+| 推理参数 (`InferenceConfig`) | `docs/inference_standard.md` | `docs/codex_claude_seg.md` | 以代码 `src/inference/core.py` 为最终真值 |
+| 检测参数 (DAPI/Adaptive) | `docs/dapi_detection_design.md` | `docs/experiments_log.md` | 设计文档写“当前锁定值”，实验日志写“每次实验记录” |
+| 数据统计阈值来源 (P1/P99 等) | `docs/dataset_parameters.md` | `docs/experiments_log.md` | 只在一个地方维护统计表 |
+| 阶段进展/下一步 | `docs/task_backlog.md` | `CLAUDE.md`, `docs/progress_timeline_2.13.md` | Backlog 记录可执行待办，CLAUDE 仅保留摘要 |
+
+> 约束: 参数表只在 SSOT 文档维护；其余文档仅引用“值 + 链接”，不复制整表。
 #### 🔴 审查制度 (二次验证)
 
 **所有重大代码/方案变更必须经过三轮验证**:
@@ -182,10 +208,11 @@ conda activate cellsam
 ```
 src/
 ├── detection/           # ✅ 已完成
-│   └── dapi.py          # Hybrid DAPI+Actn2 检测 (v3)
-│                        # - detect_nuclei (min_area=3000)
+│   └── dapi.py          # Hybrid DAPI+Actn2 检测 (v4)
+│                        # - detect_nuclei (default: min/max=200/10000)
 │                        # - merge_close_nuclei (1.2x diameter)
-│                        # - detect_with_adaptive_box (Z-线引导)
+│                        # - detect_with_adaptive_box (default search_radius=256)
+│                        # - DAPI/Adaptive 参数待 val→test 统一锁定
 ├── inference/           # ✅ 已完成
 │   ├── core.py          # 统一推理核心 (segment_with_boxes)
 │   ├── postprocess.py   # 6步边界平滑
@@ -260,6 +287,10 @@ docs/
 - [x] Step 2: Loss 基础设施修复 (归一化 + 可微 Contour/Topology)
 - [x] Step 3: L_neighbor + L_overlap 实现 + Codex 审核通过
 - [/] **Step 4: P2-A 训练** (`phase2a_neighbor_overlap.yaml`)
+- [x] **Step 4.5: 检测参数锁定 (DAPI/Adaptive)**  
+      已完成: test(73) 单次封板完成，DAPI F1=0.8033 > Adaptive F1=0.7502
+- [x] **Step 4.6: E34b 边缘/双核参数联合消融 (val71)**  
+      已完成: 最优 `edge_margin=20`, `size_ratio_threshold=2.5`, `merge_coeff=1.4`, F1=0.8106
 - [ ] Step 5: 评估 + 决定是否 P2-B
 - [ ] 三通道 Adapter 对比实验 (Phase 3)
 
@@ -272,7 +303,9 @@ docs/
 | **检测方案** | Hybrid DAPI+Actn2 | 定位+形状 | `dapi.py` |
 | **边缘过滤** | 50px | 误删 1.3% | `analyze_stats_final.py` |
 | **双核合并** | 1.2x 直径 | 防止误合并邻居 | `dapi.py` |
-| **核面积阈值** | ≥3000px | 过滤碎屑 | Dev Set 统计 |
+| **核面积阈值 (DAPI)** | 默认 200/10000；评测锁定 1500/20000 + relative_1.2x | 默认用于运行；锁定参数用于统一评测（已封板） | `dapi.py`, `experiments/ablation_dapi_val/results.json`, `experiments/ablation_detection_lock/results.json` |
+| **Adaptive 锁定参数** | radius=200, min_zlines=5, zline_threshold=0.01 | test73 对比参数（已封板） | `experiments/ablation_adaptive_val/results.json`, `experiments/ablation_detection_lock/results.json` |
+| **检测参数最终锁定** | E34b(val71) + test73 单次封板 | 避免 test 泄漏，统一对比口径；当前 winner 为 DAPI | `experiments/ablation_detection_e34b/results.json`, `experiments/ablation_detection_lock/results.json` |
 | **三通道输入** | 语义映射+Adapter | 适配预训练 ViT | `claude_pipeline_analysis.md` |
 | 训练框 | GT 框 | 解耦训练 | `design_decisions.md` |
 | 冻结策略 | 仅训练 Decoder | 防过拟合 | `design_decisions.md` |

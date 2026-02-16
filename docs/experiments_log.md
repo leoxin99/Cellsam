@@ -1,7 +1,7 @@
 # CellSAM 实验记录 (Experiment Log)
 
 > **状态**: 🟢 Active — 实验流水账主文档
-> **最后更新**: 2026-02-13
+> **最后更新**: 2026-02-15
 > **事实来源**: 此文档为实验记录的 SSOT，按时间顺序记录所有实验
 > **维护者**: Research Documentation Architect
 
@@ -84,6 +84,7 @@
 | E32 | 2026-02-05 | Adapter Instance P2 (全部Loss) | 待训练 | ⏳ 待做 |
 
 | **E33** | **2026-02-06** | **GT Box + 预训练CellSAM (Baseline)** | **Instance Dice=0.35** | **✅ Baseline** |
+| **E34 (Completed)** | **2026-02-13~14** | **DAPI/Adaptive 参数统一锁定 (val→test)** | **E34b+test73 已完成并封板** | **✅ 完成** |
 | BugFix | 2026-02-13 | GT 框面积过滤移除 | 5173/5173 通过 | 🔧 已修复 |
 
 
@@ -91,6 +92,55 @@
 ---
 
 
+
+## E34 (Completed): DAPI/Adaptive 参数统一锁定实验 ⭐⭐⭐
+
+**日期**: 2026-02-13 ~ 2026-02-14 (已完成)
+
+**背景**:
+- 历史检测消融中存在 test-20 调参记录（探索有效但不用于最终锁定）。
+- 2026-02-05 已完成分辨率修正（1736×1776 → 1024 口径），并更新默认参数。
+- 需补齐“正确数据集 + 统一口径”的最终参数锁定，避免后续 E2E 结论受争议。
+
+**目标**:
+1. 对 DAPI 与 Adaptive 两条框生成方案，在同一协议下完成可复现调参。
+2. 仅在 val 集调参，test 集只做一次最终锁定评估。
+3. 输出可直接回填 `dapi_detection_design.md`、`dataset_parameters.md`、`CLAUDE.md` 的最终参数表。
+
+**统一协议**:
+- 数据集:
+  - 调参: `val_ids.txt` 全量 (71)
+  - 锁定: `test_ids.txt` 全量 (73), 单次执行
+- 指标:
+  - Detection: Precision/Recall/F1 (IoU=0.3)
+  - E2E: BM-1to1 / PQ / AJI (固定同一 segmentation checkpoint)
+- 约束:
+  - 不允许根据 test 结果反向调参
+  - 所有参数变更需记录脚本、配置、结果文件路径
+
+**实验拆分**:
+1. DAPI 参数锁定 (val71): `min_nucleus_area`, `max_nucleus_area`, `use_relative_distance`
+2. Adaptive 参数锁定 (val71): `search_radius`, `min_zlines`, `zline_threshold`
+3. 固定最优参数后，DAPI vs Adaptive 在 test73 单次对比并锁定
+
+**最终结果 (2026-02-14)**:
+- DAPI val(71) 锁定: 最优 `min=1500, max=20000, relative_1.2x`, F1=`0.7965`
+- Adaptive val(71) 锁定: 最优 `radius=200, min_zlines=5, zline_threshold=0.01`, F1=`0.7271`
+- E34b 联合消融 (val71): 最优 `edge_margin=20`, `size_ratio_threshold=2.5`, `merge_coeff=1.4`, F1=`0.8106`
+- test(73) 单次封板: DAPI F1=`0.8033`，Adaptive F1=`0.7502`，winner=`DAPI`
+- 文档同步: `CLAUDE.md`、`docs/task_backlog.md`、`docs/dapi_detection_design.md`
+
+**产物**:
+- `experiments/ablation_dapi_val/results.json`
+- `experiments/ablation_adaptive_val/results.json`
+- `experiments/ablation_detection_e34b/results.json`
+- `experiments/ablation_detection_lock/results.json`
+- 文档回填: `CLAUDE.md`, `docs/task_backlog.md`, `docs/dapi_detection_design.md`
+
+**SSOT 回填状态**:
+- ✅ `CLAUDE.md` Step4.5/4.6 已改为 completed
+- ✅ `docs/task_backlog.md` T1/T2 已改为 completed 并写入指标
+- ✅ `docs/dapi_detection_design.md` 已写入 E34b 与 test73 封板结果
 
 ## ⚠️ 关键发现: Semantic vs Instance Dice (2026-02-05) ⭐⭐⭐
 
@@ -335,6 +385,9 @@ Adaptive 方案使用 Z-线自适应框 (`detect_with_adaptive_box`)，理论上
 
 
 **日期**: 2026-01-26
+
+> ⚠️ 口径说明 (2026-02-14): 本节为早期历史分析记录，用于发现问题，不作为当前 E34 参数锁定依据。  
+> 当前锁定口径请以 `val(71) -> test(73)` 的 E34 章节为准。
 
 
 
@@ -1515,4 +1568,3 @@ CombinedLoss import OK
 | Semantic Dice | 0.6006 |
 
 **Conclusion**: Phase 1 locked. PQ +704% vs BF baseline. No hyperparameter tuning needed. Proceed to Phase 2.
-

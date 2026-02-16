@@ -71,7 +71,8 @@ def detect_nuclei(dapi_channel: np.ndarray,
 def merge_close_nuclei(regions: list, 
                        size_ratio_threshold: float = 3.0,
                        use_relative_distance: bool = True,
-                       fixed_merge_distance: int = 373) -> list:
+                       fixed_merge_distance: int = 373,
+                       merge_coeff: float = 1.2) -> list:
     """
     Merge nearby nuclei that belong to the same binucleated cell.
     
@@ -84,6 +85,7 @@ def merge_close_nuclei(regions: list,
         size_ratio_threshold: Max ratio between nucleus sizes (default 3.0)
         use_relative_distance: Use size-relative threshold vs fixed (default True)
         fixed_merge_distance: Fixed distance threshold if not using relative
+        merge_coeff: Relative-distance multiplier for nucleus diameter (default 1.2)
     
     Returns:
         List of cell groups, each group is a list of regions
@@ -120,7 +122,7 @@ def merge_close_nuclei(regions: list,
             # Distance threshold
             if use_relative_distance:
                 avg_diameter = (diameters[i] + diameters[j]) / 2
-                max_merge_dist = 1.2 * avg_diameter
+                max_merge_dist = merge_coeff * avg_diameter
             else:
                 max_merge_dist = fixed_merge_distance
             
@@ -229,6 +231,10 @@ def create_bounding_boxes(cell_groups: list,
 def detect_and_create_boxes(dapi_channel: np.ndarray,
                             min_nucleus_area: int = 200,    # Updated 2026-02-05: 1024px
                             max_nucleus_area: int = 10000,  # Updated 2026-02-05: 1024px
+                            size_ratio_threshold: float = 3.0,
+                            use_relative_distance: bool = True,
+                            fixed_merge_distance: int = 373,
+                            merge_coeff: float = 1.2,
                             **box_kwargs) -> tuple:
     """
     Complete pipeline: detect nuclei → merge → create boxes.
@@ -237,6 +243,10 @@ def detect_and_create_boxes(dapi_channel: np.ndarray,
         dapi_channel: DAPI fluorescence image
         min_nucleus_area: Min nucleus area for filtering
         max_nucleus_area: Max nucleus area for filtering
+        size_ratio_threshold: Max ratio between nucleus sizes for merging
+        use_relative_distance: Use size-relative merge threshold
+        fixed_merge_distance: Fixed merge distance when relative mode is disabled
+        merge_coeff: Relative merge multiplier for average nucleus diameter
         **box_kwargs: Additional arguments for create_bounding_boxes
     
     Returns:
@@ -246,7 +256,13 @@ def detect_and_create_boxes(dapi_channel: np.ndarray,
     regions = detect_nuclei(dapi_channel, min_nucleus_area, max_nucleus_area)
     
     # Step 2: Merge close nuclei
-    cell_groups = merge_close_nuclei(regions)
+    cell_groups = merge_close_nuclei(
+        regions,
+        size_ratio_threshold=size_ratio_threshold,
+        use_relative_distance=use_relative_distance,
+        fixed_merge_distance=fixed_merge_distance,
+        merge_coeff=merge_coeff,
+    )
     
     # Step 3: Create boxes
     image_shape = dapi_channel.shape
@@ -528,7 +544,11 @@ def detect_with_adaptive_box(dapi_channel: np.ndarray,
                              min_zlines: int = 15,
                              zline_threshold: float = 0.03,
                              exclude_edges: bool = True,
-                             margin: int = 32) -> tuple:    # Updated 2026-02-05: scaled
+                             margin: int = 32,              # Updated 2026-02-05: scaled
+                             size_ratio_threshold: float = 3.0,
+                             use_relative_distance: bool = True,
+                             fixed_merge_distance: int = 373,
+                             merge_coeff: float = 1.2) -> tuple:
     """
     DAPI + Actn2 hybrid detection with adaptive box sizing.
     
@@ -545,6 +565,10 @@ def detect_with_adaptive_box(dapi_channel: np.ndarray,
         zline_threshold: blob_log detection threshold
         exclude_edges: Skip nuclei on image edges
         margin: Edge margin in pixels
+        size_ratio_threshold: Max ratio between nucleus sizes for merging
+        use_relative_distance: Use size-relative merge threshold
+        fixed_merge_distance: Fixed merge distance when relative mode is disabled
+        merge_coeff: Relative merge multiplier for average nucleus diameter
     
     Returns:
         Tuple of (boxes, cell_groups, debug_info)
@@ -554,7 +578,13 @@ def detect_with_adaptive_box(dapi_channel: np.ndarray,
     regions = detect_nuclei(dapi_channel, min_nucleus_area, max_nucleus_area)
     
     # Step 2: Merge close nuclei
-    cell_groups = merge_close_nuclei(regions)
+    cell_groups = merge_close_nuclei(
+        regions,
+        size_ratio_threshold=size_ratio_threshold,
+        use_relative_distance=use_relative_distance,
+        fixed_merge_distance=fixed_merge_distance,
+        merge_coeff=merge_coeff,
+    )
     
     boxes = []
     debug_info = []

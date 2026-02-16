@@ -59,15 +59,18 @@ def load_samples(data_dir: Path, split_file: Path, n_samples: int = None):
 
 
 def get_gt_boxes_from_mask(mask: np.ndarray, min_area: int = 500):
-    """Extract GT bounding boxes from instance mask."""
+    """Extract GT bounding boxes from instance mask.
+
+    Note:
+        `min_area` is kept only for backward compatibility. GT boxes are not
+        area-filtered in this evaluation path.
+    """
     from skimage import measure
     
     boxes = []
     regions = measure.regionprops(mask)
     
     for region in regions:
-        if region.area < min_area:
-            continue
         minr, minc, maxr, maxc = region.bbox
         boxes.append((minr, minc, maxr, maxc))
     

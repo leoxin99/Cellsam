@@ -1344,3 +1344,101 @@ if overlap_computable:
 1. **调参集**: 仅使用 validation set (71 images)。
 2. **锁定**: dapi.py 的 min/max_nucleus_area 和 search_radius 等参数在 val 上确定后，**封板**。
 3. **评估**: 在 test set (73 images) 上仅做一次性最终评估 (Oracle/E2E)，禁止根据 test 结果反向调参。
+
+#### 17.11.4 [Codex复核 | 2026-02-13] 最小面积阈值已实际落地
+
+- **审核结论**: 17.11.1 的 GT 框过滤移除在代码中已成立（`src/augmented_dataset.py` 的 `_mask_to_boxes_with_ids` 不再按面积比过滤 GT）。
+- **发现问题**: 17.11.2 当时只写了文档，`src/inference/core.py` 默认值仍是旧值（`500/200000`），代码未同步。
+- **本次修复**:
+  - `src/inference/core.py`: `min_cell_area` 从 `500` 更新为 `13884`（GT P1, 1024px）。
+  - `src/inference/core.py`: `max_cell_area` 从 `200000` 更新为 `174735`（GT P99, 1024px）。
+  - `tools/test_unified_regression.py`: 同步更新 `InferenceConfig.default()` 的面积阈值断言。
+  - `docs/inference_standard.md`: 同步更新默认配置表，避免文档与代码再不一致。
+- **影响范围说明**:
+  - 训练主流程不受影响（训练使用 GT 框监督，不依赖该后处理阈值）。
+  - 推理仅在 `apply_postprocess=True` 或 `validate_size=True` 时使用该阈值。
+  - 当前统一推理默认仍是 `apply_postprocess=False`、`validate_size=False`，所以默认评估口径不变。
+
+### 17.12 [Codex | 2026-02-14] 文档口径与参数治理修订
+
+#### 17.12.1 针对 6 个问题的审核结论
+
+1. **GT 极小核/碎片**  
+   - 这是“核级统计口径”的可疑目标，不等价于“应删除 GT 实例”。  
+   - 训练/实例评估不应静默过滤 GT。  
+   - `experiments_log.md` 中“GT 极小核分析”属于历史记录，已补充口径警示（非当前 E34 锁定依据）。
+
+2. **`val 完成, test 待封板` 含义**  
+   - 已在 `val(71)` 选出候选参数。  
+   - `test(73)` 只允许一次最终评估并锁定，不允许根据 test 结果回调参数。
+
+3. **DAPI vs Z 线方案的关系**  
+   - 你的理解正确：两者都基于核检测；区别主要在框生成策略（固定扩展 vs Z-line 自适应）。  
+   - 两者都经过核面积过滤、双核合并、边缘过滤链路（Adaptive 也调用同一核检测+合并逻辑）。  
+   - 当前 E34 已完成的 val 调参主要是：
+     - DAPI: `min/max_nucleus_area`, `use_relative_distance`
+     - Adaptive: `search_radius`, `min_zlines`, `zline_threshold`
+   - `edge_margin`, `size_ratio_threshold`, `merge_coeff` 尚未在 val 上系统重调，纳入下一轮 E34b。
+
+4. **双核判定增加“核大小差距约束”**  
+   - 代码中已存在 `size_ratio_threshold=3.0`。  
+   - 但该阈值尚未在当前 val(71) 统一口径下重调，需纳入 E34b 联合消融。
+
+#### 17.12.2 本次已落地文档更新
+
+- `CLAUDE.md`  
+  - 补记：检测消融脚本已移除 GT `min_area=500` 过滤，避免评估分母漂移。
+- `docs/experiments_log.md`  
+  - 在历史“GT 极小核分析”处新增口径警示（历史分析，不作为 E34 当前锁定依据）。
+- `docs/dapi_detection_design.md`  
+  - 新增 3.1 行：`edge_margin/size_ratio_threshold/merge_coeff` 的 val 重调状态（待 E34b）。
+  - 新增第八章《章节更新方案 (2026-02-14)》。
+- `docs/dataset_parameters.md`  
+  - 新增 Active/Historical 划分口径并与当前 split 对齐（334/71/73）。
+  - 在边缘/双核参数章节增加历史口径警示。
+  - 新增第十二章《章节更新方案 (2026-02-14)》。
+
+#### 17.12.3 CLAUDE 文档体系更新方案 (供 Claude 审核)
+
+| 文档 | 当前角色 | 本轮后状态 | 下一步 |
+|------|----------|------------|--------|
+| `CLAUDE.md` | 总控入口 | 保留摘要 + SSOT 指针 + 状态看板 | 继续压缩长历史内容，避免重复参数表 |
+| `docs/inference_standard.md` | 推理参数 SSOT | 保持 | 与 `src/inference/core.py` 逐次对齐 |
+| `docs/dapi_detection_design.md` | 检测参数 SSOT | 已补默认值/锁定候选/待封板区分 | 完成 E34b 后回填 3.2 参数优先级与最终封板值 |
+| `docs/dataset_parameters.md` | 统计依据 SSOT | 已补 Active/Historical 与章节更新方案 | 增加 val(71) 统计分布小节，替代仅 Dev 的口径 |
+| `docs/experiments_log.md` | 实验流水 | 已补 E34 进行中 + 历史口径警示 | test(73) 封板后补最终结论与不可回调声明 |
+
+### 17.13 [Codex | 2026-02-14] Claude 审核意见落地与待办体系补全
+
+#### 17.13.1 对 Claude 两个“非阻塞问题”的处理
+
+1. `ablation_adaptive_val.py` 的 `--resume` 参数一致性  
+   - 已修复：恢复运行时若 `detector_params` 与当前 CLI 传参不一致，直接报错阻止混合结果。  
+   - 目的：防止 `b1` 与 `b2/b3` 来自不同 detector 参数却写进同一个 `results.json`。
+
+2. `ablation_adaptive_params.py` 默认 detector 参数不透明  
+   - 已修复：新增 CLI 参数 `--min-nucleus-area`、`--max-nucleus-area`，并将 detector 参数写入结果文件。  
+   - 目的：避免“脚本直接运行时用了旧默认值但用户无感知”。
+
+#### 17.13.2 关于“为何保留默认运行参数”的工程决策
+
+- 当前区分两类参数:
+  - **runtime default**: 代码默认值（用于通用运行）
+  - **locked_eval candidate**: val(71) 调出的候选值（用于封板评估）
+- 不立刻把候选值写成全局默认的原因:
+  1. test(73) 封板尚未完成，候选值仍可能在 E34b/E34 final 调整；
+  2. 默认值影响面更广（开发脚本/历史对比），应在“封板后”统一切换；
+  3. 先通过“显式参数 + 日志打印 + profile 化”降低误用风险，再做默认值切换更稳妥。
+
+#### 17.13.3 E34b 已纳入短期待办 (新文档)
+
+- 新增: `docs/task_backlog.md`
+  - 短期任务: E34 test 封板、E34b 边缘/双核联合消融、Adaptive 退化诊断、防呆 profile 化
+  - 中长期任务: Phase 2/3 路线
+- `CLAUDE.md` 已新增该文档入口，并将“阶段进展/下一步”的主记录切到 backlog。
+
+#### 17.13.4 文档回写状态确认
+
+- `docs/dapi_detection_design.md`: 已写入 val(71) 锁定候选（DAPI 与 Adaptive）与 test 封板状态。
+- `docs/experiments_log.md`: 已写入 E34 进行中状态、val(71) 最优参数、以及“已回写 dapi_detection_design/CLAUDE”说明。
+- `docs/dataset_parameters.md`: 已拆 Active/Historical 口径并补章节更新方案。
