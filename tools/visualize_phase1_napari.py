@@ -28,8 +28,8 @@ from detection.dapi import detect_and_create_boxes, detect_with_adaptive_box
 
 # ============== Configuration ==============
 CHECKPOINT = "checkpoints/E_phase1_rebalance_l4/best_model.pt"
-N_SAMPLES = 3
-SEED = 42
+N_SAMPLES = 5
+SPLIT = "test"  # use test set for supervisor demo
 
 # Colors for different box types (RGBA, 0-1)
 BOX_COLORS = {
@@ -145,19 +145,18 @@ def main():
     
     infer_cfg = InferenceConfig.default()
     
-    # Load validation data
-    val_ids = load_split_ids('val', str(PROJECT_ROOT / "data/splits"))
+    # Load test data (first N_SAMPLES, deterministic)
+    split_ids = load_split_ids(SPLIT, str(PROJECT_ROOT / "data/splits"))
+    selected_ids = split_ids[:N_SAMPLES]
+    print(f"Using {SPLIT} set, first {len(selected_ids)} samples: {selected_ids}")
+    
     dataset = AugmentedAllenDataset(
         data_dir=str(PROJECT_ROOT / "data/processed"),
         is_training=False,
-        sample_ids=val_ids,
+        sample_ids=selected_ids,
         use_bf_only=False,
     )
-    
-    # Select N_SAMPLES random samples
-    rng = np.random.RandomState(SEED)
-    indices = rng.choice(len(dataset), min(N_SAMPLES, len(dataset)), replace=False)
-    print(f"Selected indices: {indices}")
+    indices = list(range(len(dataset)))
     
     # Create napari viewer
     viewer = napari.Viewer()

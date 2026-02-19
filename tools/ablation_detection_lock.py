@@ -24,6 +24,12 @@ sys.path.insert(0, str(PROJECT_DIR / "cellSAM_source"))
 sys.path.insert(0, str(PROJECT_DIR / "src"))
 
 from detection.dapi import detect_nuclei, merge_close_nuclei, create_bounding_boxes, detect_with_adaptive_box
+from detection.profiles import (
+    available_detection_profiles,
+    get_detection_profile,
+    apply_overrides,
+    format_detection_profile_snapshot,
+)
 
 
 def load_samples(data_dir: Path, split_file: Path, n_samples: int = None):
@@ -129,25 +135,25 @@ def compute_metrics(tp: int, fp: int, fn: int):
     }
 
 
-def evaluate_dapi(samples, args):
+def evaluate_dapi(samples, params):
     all_tp, all_fp, all_fn = 0, 0, 0
     for sample in tqdm(samples, desc="DAPI lock eval"):
         regions = detect_nuclei(
             sample["dapi"],
-            min_area=args.dapi_min_nucleus_area,
-            max_area=args.dapi_max_nucleus_area,
+            min_area=params["min_nucleus_area"],
+            max_area=params["max_nucleus_area"],
         )
         groups = merge_close_nuclei(
             regions,
-            size_ratio_threshold=args.size_ratio_threshold,
-            use_relative_distance=args.use_relative_distance,
-            fixed_merge_distance=args.fixed_merge_distance,
-            merge_coeff=args.merge_coeff,
+            size_ratio_threshold=params["size_ratio_threshold"],
+            use_relative_distance=params["use_relative_distance"],
+            fixed_merge_distance=params["fixed_merge_distance"],
+            merge_coeff=params["merge_coeff"],
         )
         pred_boxes = create_bounding_boxes(
             groups,
             sample["image_shape"],
-            margin=args.edge_margin,
+            margin=params["edge_margin"],
         )
         gt_boxes = get_gt_boxes_from_mask(sample["mask"])
         tp, fp, fn = match_boxes(pred_boxes, gt_boxes, iou_threshold=0.3)
@@ -157,22 +163,22 @@ def evaluate_dapi(samples, args):
     return compute_metrics(all_tp, all_fp, all_fn)
 
 
-def evaluate_adaptive(samples, args):
+def evaluate_adaptive(samples, params):
     all_tp, all_fp, all_fn = 0, 0, 0
     for sample in tqdm(samples, desc="Adaptive lock eval"):
         result = detect_with_adaptive_box(
             sample["dapi"],
             sample["actn2"],
-            min_nucleus_area=args.adaptive_min_nucleus_area,
-            max_nucleus_area=args.adaptive_max_nucleus_area,
-            search_radius=args.adaptive_search_radius,
-            min_zlines=args.adaptive_min_zlines,
-            zline_threshold=args.adaptive_zline_threshold,
-            margin=args.edge_margin,
-            size_ratio_threshold=args.size_ratio_threshold,
-            use_relative_distance=args.use_relative_distance,
-            fixed_merge_distance=args.fixed_merge_distance,
-            merge_coeff=args.merge_coeff,
+            min_nucleus_area=params["min_nucleus_area"],
+            max_nucleus_area=params["max_nucleus_area"],
+            search_radius=params["search_radius"],
+            min_zlines=params["min_zlines"],
+            zline_threshold=params["zline_threshold"],
+            margin=params["edge_margin"],
+            size_ratio_threshold=params["size_ratio_threshold"],
+            use_relative_distance=params["use_relative_distance"],
+            fixed_merge_distance=params["fixed_merge_distance"],
+            merge_coeff=params["merge_coeff"],
         )
         pred_boxes = result[0] if isinstance(result, tuple) else result
         gt_boxes = get_gt_boxes_from_mask(sample["mask"])
@@ -193,23 +199,54 @@ def main():
         type=str,
         default=str(PROJECT_DIR / "experiments" / "ablation_detection_lock" / "results.json"),
     )
+    parser.add_argument(
+        "--profile",
+        type=str,
+        choices=available_detection_profiles(),
+        default="locked_eval",
+        help="Detection profile source for default values",
+    )
 
-    parser.add_argument("--dapi-min-nucleus-area", type=int, default=1500)
-    parser.add_argument("--dapi-max-nucleus-area", type=int, default=20000)
-    parser.add_argument("--edge-margin", type=int, default=32)
-    parser.add_argument("--size-ratio-threshold", type=float, default=3.0)
-    parser.add_argument("--merge-coeff", type=float, default=1.2)
-    parser.add_argument("--fixed-merge-distance", type=int, default=373)
+    parser.add_argument("--dapi-min-nucleus-area", type=int, default=None)
+    parser.add_argument("--dapi-max-nucleus-area", type=int, default=None)
+    parser.add_argument("--edge-margin", type=int, default=None)
+    parser.add_argument("--size-ratio-threshold", type=float, default=None)
+    parser.add_argument("--merge-coeff", type=float, default=None)
+    parser.add_argument("--fixed-merge-distance", type=int, default=None)
     parser.add_argument("--use-relative-distance", dest="use_relative_distance", action="store_true")
     parser.add_argument("--use-fixed-distance", dest="use_relative_distance", action="store_false")
-    parser.set_defaults(use_relative_distance=True)
+    parser.set_defaults(use_relative_distance=None)
 
-    parser.add_argument("--adaptive-min-nucleus-area", type=int, default=1500)
-    parser.add_argument("--adaptive-max-nucleus-area", type=int, default=20000)
-    parser.add_argument("--adaptive-search-radius", type=int, default=200)
-    parser.add_argument("--adaptive-min-zlines", type=int, default=5)
-    parser.add_argument("--adaptive-zline-threshold", type=float, default=0.01)
+    parser.add_argument("--adaptive-min-nucleus-area", type=int, default=None)
+    parser.add_argument("--adaptive-max-nucleus-area", type=int, default=None)
+    parser.add_argument("--adaptive-search-radius", type=int, default=None)
+    parser.add_argument("--adaptive-min-zlines", type=int, default=None)
+    parser.add_argument("--adaptive-zline-threshold", type=float, default=None)
     args = parser.parse_args()
+
+    profile_cfg = get_detection_profile(args.profile)
+    shared_overrides = {
+        "edge_margin": args.edge_margin,
+        "size_ratio_threshold": args.size_ratio_threshold,
+        "merge_coeff": args.merge_coeff,
+        "use_relative_distance": args.use_relative_distance,
+        "fixed_merge_distance": args.fixed_merge_distance,
+    }
+    dapi_overrides = {
+        "min_nucleus_area": args.dapi_min_nucleus_area,
+        "max_nucleus_area": args.dapi_max_nucleus_area,
+    }
+    dapi_overrides.update(shared_overrides)
+    adaptive_overrides = {
+        "min_nucleus_area": args.adaptive_min_nucleus_area,
+        "max_nucleus_area": args.adaptive_max_nucleus_area,
+        "search_radius": args.adaptive_search_radius,
+        "min_zlines": args.adaptive_min_zlines,
+        "zline_threshold": args.adaptive_zline_threshold,
+    }
+    adaptive_overrides.update(shared_overrides)
+    dapi_params = apply_overrides(profile_cfg["dapi"], dapi_overrides)
+    adaptive_params = apply_overrides(profile_cfg["adaptive"], adaptive_overrides)
 
     output_file = Path(args.output)
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -222,6 +259,8 @@ def main():
     print("E34 detection lock evaluation")
     print("=" * 72)
     print(f"split={args.split}, output={output_file}")
+    print("Detection profile snapshot:")
+    print(format_detection_profile_snapshot(args.profile, dapi_params, adaptive_params))
 
     data_dir = PROJECT_DIR / "data" / "processed"
     split_file = PROJECT_DIR / "data" / "splits" / f"{args.split}_ids.txt"
@@ -229,8 +268,8 @@ def main():
     samples = load_samples(data_dir, split_file, n_samples=n_samples)
     print(f"loaded_samples={len(samples)}")
 
-    dapi_metrics = evaluate_dapi(samples, args)
-    adaptive_metrics = evaluate_adaptive(samples, args)
+    dapi_metrics = evaluate_dapi(samples, dapi_params)
+    adaptive_metrics = evaluate_adaptive(samples, adaptive_params)
 
     delta_f1 = round(adaptive_metrics["f1"] - dapi_metrics["f1"], 4)
     winner = "adaptive" if delta_f1 > 0 else "dapi"
@@ -239,28 +278,10 @@ def main():
         "timestamp": datetime.now().isoformat(),
         "split": args.split,
         "n_samples": len(samples),
+        "detection_profile": args.profile,
         "policy": "single_run_lockdown_no_reverse_tuning",
-        "dapi_params": {
-            "min_nucleus_area": args.dapi_min_nucleus_area,
-            "max_nucleus_area": args.dapi_max_nucleus_area,
-            "edge_margin": args.edge_margin,
-            "size_ratio_threshold": args.size_ratio_threshold,
-            "merge_coeff": args.merge_coeff,
-            "use_relative_distance": args.use_relative_distance,
-            "fixed_merge_distance": args.fixed_merge_distance,
-        },
-        "adaptive_params": {
-            "min_nucleus_area": args.adaptive_min_nucleus_area,
-            "max_nucleus_area": args.adaptive_max_nucleus_area,
-            "search_radius": args.adaptive_search_radius,
-            "min_zlines": args.adaptive_min_zlines,
-            "zline_threshold": args.adaptive_zline_threshold,
-            "edge_margin": args.edge_margin,
-            "size_ratio_threshold": args.size_ratio_threshold,
-            "merge_coeff": args.merge_coeff,
-            "use_relative_distance": args.use_relative_distance,
-            "fixed_merge_distance": args.fixed_merge_distance,
-        },
+        "dapi_params": dapi_params,
+        "adaptive_params": adaptive_params,
         "dapi": dapi_metrics,
         "adaptive": adaptive_metrics,
         "delta_f1": delta_f1,

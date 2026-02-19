@@ -217,9 +217,30 @@ else:  # 椭圆核
 |------|----------|------|----|------|
 | DAPI 默认运行参数 | 保留 | `min=200`, `max=10000`, `relative=True` | - | 运行时默认 (`src/detection/dapi.py`) |
 | DAPI val 锁定候选 | 已完成 | `min=1500`, `max=20000`, `relative_1.2x` | `0.7965` | `experiments/ablation_dapi_val/results.json` |
-| Adaptive val 锁定候选 | 已完成 | `radius=200`, `min_zlines=5`, `zline_threshold=0.01` | `0.7271` | `experiments/ablation_adaptive_val/results.json` |
+| Adaptive val 锁定候选 | 已完成 | `radius=200`, `min_zlines=5`, `zline_threshold=0.01` | `0.7472` | `experiments/ablation_adaptive_val/results.json` |
+| Adaptive 半径重扫 (T3b) | 已完成 | `radius=[80,100,120,140,160,180]` -> best `160`, `min_zlines=5`, `zline_threshold=0.05` | `0.7800` | `experiments/ablation_adaptive_radius_val/results.json` |
 | 边缘/双核参数 val 重调 | 已完成 | `edge_margin=20`, `size_ratio_threshold=2.5`, `merge_coeff=1.4` | `0.8106` | E34b 联合消融最优 (`experiments/ablation_detection_e34b/results.json`) |
 | test 封板 | 已完成 | 固定候选参数，test 单次评估 | `0.8033` (DAPI) | DAPI > Adaptive，已封板 (`experiments/ablation_detection_lock/results.json`) |
+
+> T4 更新 (2026-02-16): 检测评估脚本已接入 profile 防呆机制 (`runtime_default` / `locked_eval`)，并在运行时打印参数快照。实现见 `src/detection/profiles.py`。
+> T3b 更新 (2026-02-19): 半径重扫后 Adaptive 在 `val(71)` 上提升到 F1=0.7800，但该结果属于封板后诊断回合，`test(73)` 锁定结果不回写。
+
+### 3.2 Adaptive 退化诊断补充 (T3, 2026-02-16)
+
+> 目标: 判断 B2/B3 不敏感是“参数本身不敏感”还是“fallback 掩盖差异”。
+
+- 数据与口径:
+  - 数据集: `val(71)`
+  - 结果文件: `experiments/ablation_adaptive_val/results.json`
+  - 诊断快照: `experiments/ablation_adaptive_val/diagnosis_t3.json`
+- 关键观测:
+  - B2 (`min_zlines`) F1 区间: `0.7472 -> 0.7472`，range=`0.0000`
+  - B3 (`zline_threshold`) F1 区间: `0.7459 -> 0.7472`，range=`0.0013`
+  - `adaptive_ratio=1.0`, `fallback_count=0`（所有组合均无 fallback）
+  - `mean_zlines` 仍较高（B2 均值约 `1425.4`，B3 区间约 `1070.0-1571.2`）
+- 诊断结论:
+  - `cause_code = zline_saturated`
+  - 当前 `search_radius=200` 下，Adaptive 始终走自适应分支，B2/B3 的阈值变化无法有效改变框生成，故表现为“近似平坦”。
 
 ---
 

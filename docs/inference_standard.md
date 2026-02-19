@@ -1,7 +1,7 @@
 # CellSAM 推理标准文档
 
 > **状态**: 🟢 Active — 推理与评估的唯一口径文档
-> **最后更新**: 2026-02-13
+> **最后更新**: 2026-02-16
 > **事实来源**: `src/inference/core.py` (InferenceConfig + segment_with_boxes)
 > **规则**: 所有推理/评估脚本必须调用 `core.py` 的函数，不允许硬编码参数
 
@@ -101,6 +101,29 @@ RQ (Recognition Quality) = TP / (TP + 0.5*FP + 0.5*FN)
 | `tools/test_unified_regression.py` | **回归测试** | GT boxes | 防止退化 |
 | `tools/smoke_test_e2e.py` | **冒烟测试** | GT boxes | 默认 30 样本 |
 
+### 4.1 检测参数 Profile 机制 (T4, 2026-02-16)
+
+为降低“误用默认检测参数”风险，检测评估脚本统一支持两类 profile：
+
+| Profile | 用途 | 参数来源 |
+|---------|------|----------|
+| `runtime_default` | 日常运行/开发 | `src/detection/dapi.py` 默认参数 |
+| `locked_eval` | 统一评估/封板 | E34/E34b 锁定参数 |
+
+实现位置:
+- `src/detection/profiles.py`
+
+执行规则:
+1. 最终汇报、阶段结论、test 封板必须用 `locked_eval`。
+2. 仅在探索性实验中使用 `runtime_default`，且结果必须显式标注 profile。
+3. 关键脚本启动时会打印参数快照 (`profile + dapi/adaptive params`)。
+
+已接入脚本:
+- `tools/evaluate_e2e.py` (`--detection-profile`, 默认 `locked_eval`)
+- `tools/ablation_detection_lock.py` (`--profile`, 默认 `locked_eval`)
+- `tools/ablation_detection_e34b.py` (`--profile`, 默认 `locked_eval`)
+- `tools/ablation_adaptive_val.py` (`--profile`, 默认 `locked_eval`)
+
 ### 使用方式
 
 ```bash
@@ -110,6 +133,11 @@ python tools/comprehensive_eval.py
 # E2E 评估
 python tools/evaluate_e2e.py \
   --checkpoint checkpoints/E_phase1_rebalance_l4/best_model.pt
+
+# E2E 评估 (显式指定 profile，推荐)
+python tools/evaluate_e2e.py \
+  --checkpoint checkpoints/E_phase1_rebalance_l4/best_model.pt \
+  --detection-profile locked_eval
 
 # 回归测试 (训练前必跑)
 python tools/test_unified_regression.py

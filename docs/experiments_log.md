@@ -1,15 +1,27 @@
 # CellSAM 实验记录 (Experiment Log)
 
-> **状态**: 🟢 Active — 实验流水账主文档
-> **最后更新**: 2026-02-15
-> **事实来源**: 此文档为实验记录的 SSOT，按时间顺序记录所有实验
-> **维护者**: Research Documentation Architect
-
-
+> **状态**: 🟢 Active — 实验流水账主文档  
+> **最后更新**: 2026-02-19  
+> **事实来源**: 此文档为实验记录的 SSOT，按时间顺序记录所有实验  
+> **完整历史存档**: [`experiments_log_archive.md`](experiments_log_archive.md)
 
 ---
 
+## 📋 目录
 
+- [实验索引](#实验索引-experiment-index)
+- [Phase 1: Loss 重平衡 + PQ 早停](#phase-1-loss-重平衡--pq-早停-)
+- [P2-A: 邻居侵占/重叠互斥损失](#p2-a-邻居侵占重叠互斥损失-fix1-3)
+- [E34: DAPI/Adaptive 参数锁定](#e34-completed-dapiadaptive-参数统一锁定实验-)
+- [T3b: Adaptive search_radius 半径重扫](#t3b-adaptive-search_radius-重扫-2026-02-19)
+- [Semantic vs Instance Dice 关键发现](#-关键发现-semantic-vs-instance-dice-2026-02-05-)
+- [E22: Box Clipping 修复](#e22-推理-box-clipping-修复--边界精度分析-)
+- [E20: DAPI vs Adaptive 消融](#e20-dapi-only-vs-adaptive-检测消融-)
+- [E19: 边缘/双核参数微调](#e19-边缘双核参数微调)
+- [早期实验归档 (E01-E18)](#早期实验归档-e01-e18)
+- [待实验](#待实验-planned)
+
+---
 
 ## 实验索引 (Experiment Index)
 
@@ -75,17 +87,18 @@
 
 | **⚠️** | **2026-02-05** | **发现: Semantic Dice 无意义** | **Instance Dice=0.03** | **⚠️ 关键** |
 
-| E29 | 2026-02-05 | BF Instance P1 (快速验证) | 待训练 | ⏳ 待做 |
-
-| E30 | 2026-02-05 | Adapter Instance P1 (快速验证) | 待训练 | ⏳ 待做 |
-
-| E31 | 2026-02-05 | BF Instance P2 (全部Loss) | 待训练 | ⏳ 待做 |
-
-| E32 | 2026-02-05 | Adapter Instance P2 (全部Loss) | 待训练 | ⏳ 待做 |
-
-| **E33** | **2026-02-06** | **GT Box + 预训练CellSAM (Baseline)** | **Instance Dice=0.35** | **✅ Baseline** |
-| **E34 (Completed)** | **2026-02-13~14** | **DAPI/Adaptive 参数统一锁定 (val→test)** | **E34b+test73 已完成并封板** | **✅ 完成** |
+| E29 | 2026-02-05 | BF Instance P1 | PQ=0.33→P1调参后0.475 | ✅ 已训练 (A1) |
+| E30 | 2026-02-05 | Adapter Instance P1 | 有 checkpoint 未评估 | ⚠️ 待评估 |
+| E31 | 2026-02-05 | BF Instance P2 (全部Loss) | 未训练 | ❌ P2-A 终止 |
+| E32 | 2026-02-05 | Adapter Instance P2 | 有 checkpoint 未评估 | ⚠️ 待评估 |
+| **E33** | **2026-02-06** | **GT Box + 预训练CellSAM (Baseline)** | **BM-Dice=0.111, PQ=0.000** | **✅ Baseline** |
+| **E34** | **2026-02-13~14** | **DAPI/Adaptive 参数统一锁定 (val→test)** | **E34b+test73 已完成并封板** | **✅ 完成** |
 | BugFix | 2026-02-13 | GT 框面积过滤移除 | 5173/5173 通过 | 🔧 已修复 |
+| **Phase 1** | **2026-02-10** | **Loss 重平衡 + PQ 早停** | **Oracle PQ=0.464, BM=0.695** | **✅ 当前最佳** |
+| P2-A Fix1 | 2026-02-15 | N/O Loss (N=0.3, O=0.1) | PQ=0.232 | ❌ 失败 |
+| P2-A Fix2 | 2026-02-15 | N/O Loss (N=0.1, O=0.05) | PQ=0.393 | ⚠️ 改善但差 |
+| P2-A Fix3 | 2026-02-16 | N/O Loss 延迟启用 | PQ=0.466 (N/O OFF时) | ⚠️ P2-A 终止 |
+| T3b | 2026-02-19 | Adaptive search_radius 重扫 | F1=0.780 (radius=160) | ✅ 完成 |
 
 
 
@@ -129,10 +142,12 @@
 - E34b 联合消融 (val71): 最优 `edge_margin=20`, `size_ratio_threshold=2.5`, `merge_coeff=1.4`, F1=`0.8106`
 - test(73) 单次封板: DAPI F1=`0.8033`，Adaptive F1=`0.7502`，winner=`DAPI`
 - 文档同步: `CLAUDE.md`、`docs/task_backlog.md`、`docs/dapi_detection_design.md`
+- T3b 半径重扫补充 (2026-02-19, val71): `search_radius=160`, `min_zlines=5`, `zline_threshold=0.05`, F1=`0.7800` (`experiments/ablation_adaptive_radius_val/results.json`)
 
 **产物**:
 - `experiments/ablation_dapi_val/results.json`
 - `experiments/ablation_adaptive_val/results.json`
+- `experiments/ablation_adaptive_radius_val/results.json` (T3b follow-up, post-lock diagnostic)
 - `experiments/ablation_detection_e34b/results.json`
 - `experiments/ablation_detection_lock/results.json`
 - 文档回填: `CLAUDE.md`, `docs/task_backlog.md`, `docs/dapi_detection_design.md`
@@ -141,6 +156,94 @@
 - ✅ `CLAUDE.md` Step4.5/4.6 已改为 completed
 - ✅ `docs/task_backlog.md` T1/T2 已改为 completed 并写入指标
 - ✅ `docs/dapi_detection_design.md` 已写入 E34b 与 test73 封板结果
+
+---
+
+## Phase 1: Loss 重平衡 + PQ 早停 ⭐⭐⭐
+
+**日期**: 2026-02-10 ~ 2026-02-12
+
+**配置**: `src/config/phase1_rebalance_l4.yaml`
+- 改动: `boundary_weight` 0.5→1.5, `contour_weight` 0.1→0.3, `pos_weight` 10→2, `use_pq_early_stop: true`
+- 训练: ALICE L4 (Job 974531), 50 epochs
+- Checkpoint: `checkpoints/E_phase1_rebalance_l4/best_model.pt` (Best Epoch 49)
+
+**结果 (test73, Oracle GT boxes, n=73)**:
+
+| 指标 | Phase 1 | E29 基线 | vs E29 |
+|------|:-------:|:-------:|:------:|
+| **BM-1to1 Dice** | **0.695** | 0.593 | **+0.102** |
+| **PQ@0.5** | **0.464** | 0.326 | **+0.138** |
+| **SQ** | **0.616** | 0.586 | +0.030 |
+| **RQ** | **0.753** | 0.557 | **+0.196** |
+| **AJI** | **0.519** | 0.410 | **+0.109** |
+
+**E2E 结果 (test73, DAPI 检测)**:
+
+| 指标 | 值 |
+|------|:---:|
+| BM-1to1 Dice | 0.545 |
+| PQ@0.5 | 0.172 |
+| Oracle→E2E Gap | -0.292 PQ |
+
+**结论**: Phase 1 是当前最佳模型。边界增强 + PQ 早停 = PQ +42% vs E29。E2E 瓶颈在检测端 (FP=8.5/图)。
+
+**产物**: `experiments/comprehensive_eval/results.json`, `experiments/e2e_evaluation/results.json`
+
+---
+
+## P2-A: 邻居侵占/重叠互斥损失 Fix1-3
+
+**日期**: 2026-02-15 ~ 2026-02-16 | **结论**: ❌ **P2-A 终止**
+
+**目标**: 在 Phase 1 基础上添加 `L_neighbor` (侵占惩罚) + `L_overlap` (重叠互斥)，减少实例间冲突。
+
+**三轮修复与汇总 (val71)**:
+
+| 方案 | neighbor | overlap | delay | PQ | Dice | vs P1 PQ | 决策 |
+|------|:-------:|:-------:|:-----:|:---:|:----:|:--------:|------|
+| **P1 基线** | — | — | — | **0.475** | 0.695 | — | ✅ 基线 |
+| Fix1 | 0.3 | 0.1 | 0 | 0.232 | — | **-51%** | ❌ 失败 |
+| Fix2 | 0.1 | 0.05 | 0 | 0.393 | 0.687 | **-17%** | ⚠️ 改善 |
+| Fix3 | 0.1 | 0.05 | delay=10 | 0.466* | 0.712 | **-2%** | ⚠️ 终止 |
+
+\*Fix3 的 best PQ=0.466 发生在 **epoch 3 (N/O 尚未激活)**。N/O 升温后 PQ 单调下降至 0.341。
+
+**关键发现**:
+1. N/O loss 过度抑制: 模型变"保守"，边界区域不敢预测 → IoU 下降 → PQ 下降
+2. 冲突像素减少 (50k→29k) 但 PQ 更差 — argmax_prob 已合理处理冲突
+3. 实现缺陷 (detach + 顺序依赖) 加剧问题，但 loss 设计本身也有负面影响
+
+**决策**: P2-A 终止，论文定位为 "Preliminary Exploration: N/O Exclusion Loss"
+
+**产物**: `checkpoints/E_phase2a_fix*/`, `docs/phase2_design.md` §7-8, `docs/temp_reviews/fix2_review.md`, `docs/temp_reviews/fix3_review.md`
+
+---
+
+## T3b: Adaptive search_radius 重扫 (2026-02-19)
+
+**背景**: T3 诊断发现 Adaptive 检测 `zline_saturated` (search_radius=200 过大)。T3b 缩小搜索范围。
+
+**方法**: `python tools/ablation_adaptive_val.py --b1-values 80,100,120,140,160,180 --profile locked_eval`
+
+**结果 (val71)**:
+
+| search_radius | F1 | vs 原始(200) |
+|:---:|:---:|:---:|
+| 80 | 0.723 | -2.7% |
+| 100 | 0.750 | +0.0% |
+| 120 | 0.762 | +1.2% |
+| 140 | 0.771 | +2.1% |
+| **160** | **0.779** | **+2.9%** |
+| 180 | 0.775 | +2.5% |
+
+**最终最优**: `search_radius=160, min_zlines=5, zline_threshold=0.05`, F1=**0.780**
+
+**结论**: 缩小 radius 使 Z-line 筛选生效，F1 从 0.750→0.780。但仍低于 DAPI (0.811)。
+
+**产物**: `experiments/ablation_adaptive_radius_val/results.json`
+
+---
 
 ## ⚠️ 关键发现: Semantic vs Instance Dice (2026-02-05) ⭐⭐⭐
 
@@ -445,1126 +548,50 @@ E18 发现 Adaptive 方法 Precision 较低 (0.672)，怀疑边缘过滤过松�
 
 
 
-## E01: 类别不平衡修复
+## 早期实验归档 (E01-E18)
 
+> 完整详情见 [`experiments_log_archive.md`](experiments_log_archive.md)
 
+| ID | 日期 | 实验 | 关键结果 | 结论 |
+|----|------|------|---------|------|
+| **E01** | 01-08 | 类别不平衡修复 | Dice 0→0.52 | ✅ pos_weight + box-local loss 解决零预测 |
+| **E02** | 01-08 | CellFinder 检测 | F1=0.012 | ❌ CellSAM 自带检测器对心肌无效 |
+| **E03** | 01-08 | DAPI 核检测 | F1=0.750 | ✅ Otsu+形态学+边缘过滤，成为默认方案 |
+| **E04** | 01-09 | 全管线 (像素级) | Dice=0.58 | ⚠️ 像素合并丢失实例信息 |
+| **E05** | 01-09 | 全管线 (实例级) | Dice=0.71 | ✅ 每框分配 cell_id，实例级输出 |
+| **E06** | 01-11 | 分水岭核分离 | F1=0.34 | ❌ 过度分割，不适用 |
+| **E09** | 01-11 | 验证指标实现 | PQ=0, AJI=0.10 | ⚠️ Mean Max IoU=0.05-0.22，揭示 mask 质量差 |
+| **E12** | 01-11 | 边界损失微调 | PQ↑265%, Dice↑8% | ✅ boundary_weight=0.5 + contour_weight=0.1，当时最佳 |
+| **E13** | 01-11 | 数据集标准化 | 固定 train/val/test | ✅ 统一训练入口 `train.py` |
+| **E14** | 01-14 | 核-细胞轴向对齐 | 50%对齐@30°, Dice+3.3% | ✅ 智能扩展验证 |
+| **E15a/b** | 01-15 | 多通道融合 | BF+DAPI+Actn2 Dice=0.745 | ❌ 劣于 BF-only E12 (Dice=0.772) |
+| **E16** | 01-16 | E12 vs E15b 对比 | E12 优 2.6% | ✅ 确认 BF-only 最佳 |
+| **E17** | 01-21 | GT 细胞面积统计 | 阈值 40K-450K | ✅ 数据驱动过滤参数 |
+| **E18** | 01-23 | SarcGraph 检测对比 | F1↑7.4% | ✅ Adaptive F1=0.801 > DAPI 0.727 (当时口径) |
 
-**日期**: 2026-01-08
+### 关键决策记录
 
-
-
-**背景/假设**: 
-
-训练时 Val Dice 始终为 0，怀疑是类别不平衡导致模型预测"全背景"。
-
-
-
-**方法**:
-
-1. 损失仅在扩展边界框内计算 (非全图)
-
-2. 动态 pos_weight = min(n_neg/n_pos, 10.0)
-
-3. 组合损失 = 0.5×Dice + 0.5×BCE
-
-
-
-**参数**:
-
-- Learning Rate: 1e-4
-
-- Epochs: 50
-
-- Batch Size: 4
-
-- 训练样本: 50
-
-
-
-**结果**:
-
-| 指标 | 修复前 | 修复后 | 提升 |
-
-|------|--------|--------|------|
-
-| Val Dice | 0.00 | 0.52 | +0.52 |
-
-| 单样本 Dice | - | 0.78 | - |
-
-
-
-**结论**: 类别不平衡是主要问题，组合损失有效。
-
-
-
-**代码位置**: `train_expanded.py`
-
-
+| 日期 | 决策 | 选择 | 理由 |
+|------|------|------|------|
+| 01-08 | 检测方案 | DAPI 核检测 | F1=0.750 >> CellFinder 0.012 |
+| 01-11 | 分割方案 | 边界增强微调 | PQ↑265% |
+| 01-15 | 通道选择 | BF-only | 三通道融合劣于 BF-only |
+| 01-26 | 边缘过滤 | edge_margin=100px | 排除 5.6% 换 Precision |
+| 01-30 | 检测默认 | DAPI Only | Adaptive F1=0.313 << DAPI 0.765 (当时参数) |
+| 02-14 | 检测锁定 | DAPI F1=0.803 | E34b test73 封板 |
 
 ---
-
-
-
-## E02: CellFinder 检测测试
-
-
-
-**日期**: 2026-01-08
-
-
-
-**背景/假设**: 
-
-CellSAM 原始的 CellFinder 检测器能否用于心肌细胞定位。
-
-
-
-**方法**: 
-
-直接调用 CellFinder 模块检测心肌细胞。
-
-
-
-**结果**:
-
-| 指标 | 值 |
-
-|------|-----|
-
-| Precision | 0.009 |
-
-| Recall | 0.016 |
-
-| **F1** | **0.012** |
-
-
-
-**分析**:
-
-- CellFinder 使用 AnchorDETR，可能主要在小型圆形细胞上训练
-
-- 心肌细胞特征：大尺寸 (100-200μm)、不规则形状
-
-- 模型域不匹配
-
-
-
-**结论**: ❌ CellFinder 完全失效，需替代方案。
-
-
-
----
-
-
-
-## E03: DAPI 核检测方案
-
-
-
-**日期**: 2026-01-08
-
-
-
-**背景/假设**: 
-
-利用 DAPI 核染色通道进行传统图像处理检测，替代 CellFinder。
-
-
-
-**方法**:
-
-1. DAPI 通道 Otsu 阈值分割
-
-2. 形态学清理 (opening, fill_holes)
-
-3. 面积过滤 (min=500, max=15000)
-
-4. 相对大小过滤 (小于中位数 20% 排除)
-
-5. 双核合并 (merge_distance=100px)
-
-6. 边缘细胞排除 (margin=30px)
-
-
-
-**参数**:
-
-| 参数 | 值 |
-
-|------|-----|
-
-| min_nucleus_area | 500 |
-
-| max_nucleus_area | 15000 |
-
-| merge_distance | 100 |
-
-| relative_size_threshold | 0.2 |
-
-| edge_margin | 30 |
-
-
-
-**结果**:
-
-| 指标 | CellFinder | DAPI 检测 | 提升 |
-
-|------|------------|-----------|------|
-
-| Precision | 0.009 | 0.708 | +77× |
-
-| Recall | 0.016 | 0.797 | +50× |
-
-| **F1** | 0.012 | **0.750** | +62× |
-
-
-
-**结论**: ✅ DAPI 检测方案有效，可替代 CellFinder。
-
-
-
-**代码位置**: `anti_test/test_dapi_detection.py`
-
-
-
----
-
-
-
-## E04: 全管线测试 (像素级)
-
-
-
-**日期**: 2026-01-09
-
-
-
-**背景/假设**: 
-
-测试 DAPI 检测 + SAM 分割的完整管线效果。
-
-
-
-**方法**:
-
-1. DAPI 检测生成边界框
-
-2. SAM 对每个框进行分割
-
-3. `np.maximum()` 合并所有预测 mask
-
-
-
-**测试集**: 10 个未见样本 (从 428 个未训练样本中随机选取)
-
-
-
-**结果**:
-
-| 指标 | 值 |
-
-|------|-----|
-
-| Mean Overall Dice | 0.5757 |
-
-| Mean Cell Dice | 0.7623 |
-
-
-
-**问题**: 像素级合并丢失实例信息，无法区分个体细胞。
-
-
-
-**代码位置**: `anti_test/test_full_pipeline.py`
-
-
-
----
-
-
-
-## E05: 全管线测试 (实例级)
-
-
-
-**日期**: 2026-01-09
-
-
-
-**背景/假设**: 
-
-改进分割输出为实例级 mask，每个细胞有唯一 ID。
-
-
-
-**方法**:
-
-1. 每个检测框分配唯一 cell_id
-
-2. 后处理: binary_closing + fill_holes + largest_component
-
-3. 实例 mask 输出
-
-
-
-**结果**:
-
-| 指标 | 像素级 | 实例级 | 提升 |
-
-|------|--------|--------|------|
-
-| Overall Dice | 0.5757 | 0.7066 | +0.13 |
-
-| 可区分细胞 | ❌ | ✅ | - |
-
-
-
-**结论**: ✅ 实例级分割 + 后处理提升效果。
-
-
-
-**代码位置**: `anti_test/visualize_test_results.py`
-
-**实验存档**: `experiments/exp_20260109_204227/`
-
-
-
----
-
-
-
-## E06: 分水岭核分离
-
-
-
-**日期**: 2026-01-11
-
-
-
-**背景/假设**: 
-
-参考 Allen CellProfiler 方案，使用分水岭分离粘连核。
-
-
-
-**方法**:
-
-1. 距离变换 `distance_transform_edt()`
-
-2. 局部极值检测 `peak_local_max()`
-
-3. 分水岭分割 `watershed()`
-
-4. Circularity 过滤 (min=0.2)
-
-
-
-**参数测试**:
-
-| min_distance | Precision | Recall | F1 |
-
-|--------------|-----------|--------|-----|
-
-| 20 | 0.225 | 0.483 | 0.304 |
-
-| 40 | 0.277 | 0.461 | 0.344 |
-
-
-
-**对比**:
-
-| 方法 | F1 | Δ |
-
-|------|-----|-----|
-
-| 原始 DAPI | 0.750 | 基线 |
-
-| + Watershed | 0.344 | **-0.41** |
-
-
-
-**分析**:
-
-- 心肌细胞核形态不规则
-
-- 距离变换产生多个局部极值
-
-- 单个核被过度分割为 2-3 块
-
-
-
-**结论**: ❌ 分水岭导致过度分割，不适用于当前数据。
-
-
-
-**代码位置**: `anti_test/test_dapi_improved.py`
-
-
-
----
-
-
 
 ## 待实验 (Planned)
 
-
-
 | ID | 实验名称 | 优先级 | 状态 |
-
 |----|---------|--------|------|
+| P2-D | lr=5e-5, epochs=50 (LR消融) | P1 | ⏳ 待做 |
+| P2-E | lr=1e-4, epochs=80 (Epoch消融) | P1 | ⏳ 待做 |
+| E-B1 | Cellpose baseline | P1 | ⏳ 待做 (A2 执行) |
+| E-B2 | StarDist baseline | P1 | ⏳ 待做 (A2 执行) |
+| E-B4 | CellSAM Original (test73 重跑) | P0 | ⏳ 待做 |
+| E-B5 | MedSAM baseline | P2 | ⏳ 待做 |
+| E-B6 | SAMCell baseline | P2 | ⏳ 待做 |
+| T7 | Adapter Instance 评估 (E30/E32) | P1 | ⏳ 待做 |
 
-| E07 | 单独测试 Circularity 过滤 | P1 | 待做 |
-
-| E08 | 单独测试光照校正 | P2 | 待做 |
-
-| E10 | Rand Index 实现 | P1 | ✅ 完成 (见E09) |
-
-| E11 | SarcGraph 集成 | P2 | 待做 |
-
-| **E12** | **边界损失微调** | **P0** | **✅ 完成** |
-
-
-
----
-
-
-
-## E09: 验证指标实现与评估 ⭐
-
-
-
-**日期**: 2026-01-11
-
-
-
-**背景/假设**: 
-
-实现 index optimization.docx 中定义的四层验证体系，对当前分割结果进行全面评估。
-
-
-
-**实现内容**:
-
-
-
-| 指标 | 实现函数 | 状态 |
-
-|------|---------|------|
-
-| PQ (SQ × RQ) | `compute_panoptic_quality()` | ✅ |
-
-| AJI | `compute_aji()` | ✅ |
-
-| Rand Index / ARI | `compute_rand_index()` | ✅ |
-
-| Boundary IoU | `compute_boundary_iou()` | ✅ |
-
-| HD95 | `compute_hd95()` | ✅ |
-
-
-
-**测试集**: 5 个样本 (来自 exp_20260109_204227)
-
-
-
-**结果**:
-
-
-
-| 指标 | 值 | 说明 |
-
-|------|-----|------|
-
-| PQ@0.5 | **0.000** | ❌ 无匹配 (IoU都<0.5) |
-
-| PQ@0.3 | 0.014 | 少量匹配 |
-
-| AJI | **0.102** | 低 |
-
-| RI | 0.616 | 中等 |
-
-| ARI | 0.063 | 低 |
-
-| Boundary IoU | 0.439 | 中等 |
-
-| HD95 | 403 px | 高 (差) |
-
-| Dice | 0.655 | 中等 |
-
-
-
-**关键发现**:
-
-
-
-⚠️ **严重问题**: Mean Max IoU 仅 0.05-0.22
-
-
-
-| 现象 | 原因分析 |
-
-|------|---------|
-
-| 预测实例与 GT 实例的最佳 IoU 仅 0.1-0.3 | 预测 mask 位置/形状与 GT 有较大偏差 |
-
-| 即使 Dice=0.65，PQ=0 | Dice 是像素级，PQ 是实例级 |
-
-| 预测细胞数量正确，但位置不对 | 检测框正确，但 SAM 分割边界偏移 |
-
-
-
-**诊断**:
-
-```
-
-高 Dice + 低 PQ = "像素总体对，但每个细胞边界都有偏差"
-
-```
-
-
-
-这表明 SAM 模型需要进一步微调，特别是边界精度。
-
-
-
-**结论**: 
-
-- ✅ 指标实现成功
-
-- ⚠️ 发现分割质量问题：实例级 IoU 过低
-
-- 建议：增加边界损失 (Boundary Loss) 进行微调
-
-
-
-**代码位置**: `anti_test/eval_metrics.py`
-
-
-
----
-
-
-
-## E12: 边界损失微调 ⭐⭐⭐
-
-
-
-**日期**: 2026-01-11
-
-
-
-**背景/假设**: 
-
-E09 发现旧模型实例级 IoU 过低 (Max IoU 仅 0.1-0.3)，导致 PQ=0。
-
-假设增加 Boundary Loss 可以提升边界精度。
-
-
-
-**方法**:
-
-1. 加载预训练模型 `expanded_20260108_034352/best_model.pt`
-
-2. 添加 BoundaryLoss 组件 (提取边缘像素单独计算损失)
-
-3. 新损失 = 0.7×(Dice+BCE) + 0.3×BoundaryLoss
-
-4. 冻结 Image Encoder，仅训练 Decoder
-
-5. 学习率降低至 1e-5
-
-6. 训练 20 Epochs
-
-
-
-**参数**:
-
-| 参数 | 值 |
-
-|------|-----|
-
-| Epochs | 20 |
-
-| Learning Rate | 1e-5 |
-
-| Boundary Weight | 0.3 |
-
-| Batch Size | 2 |
-
-| Train Samples | 40 |
-
-| Val Samples | 8 |
-
-
-
-**结果** (10 测试样本):
-
-
-
-| 指标 | 旧模型 | 新模型 | 变化 |
-
-|------|--------|--------|------|
-
-| **PQ@0.5** | 0.024 | **0.087** | ↑ **+265%** |
-
-| **PQ@0.3** | 0.176 | **0.249** | ↑ +42% |
-
-| **AJI** | 0.251 | **0.314** | ↑ +25% |
-
-| **Dice** | 0.758 | **0.822** | ↑ +8% |
-
-| **RI** | 0.815 | **0.829** | ↑ +2% |
-
-| **Max_IoU** | 0.489 | **0.548** | ↑ +12% |
-
-| Boundary_IoU | 0.447 | 0.425 | ↓ -5% |
-
-
-
-**分析**:
-
-- Max_IoU 突破 0.5 阈值 → PQ@0.5 有效提升
-
-- 边界损失有效引导模型学习更精确的细胞轮廓
-
-- Boundary_IoU 略降是因为评估方式不同
-
-
-
-**结论**: ✅ 边界损失微调成功，显著提升实例级分割质量
-
-
-
-**模型位置**: `checkpoints/boundary_20260111_012636/best_model.pt`
-
-**代码位置**: `finetune_boundary_simple.py`, `train_expanded.py`
-
-
-
----
-
-
-
-## 关键决策记录 (Decision Log)
-
-
-
-| 日期 | 决策 | 原因 |
-
-|------|------|------|
-
-| 2026-01-08 | 使用 DAPI 替代 CellFinder | CellFinder F1=0.012 完全失效 |
-
-| 2026-01-09 | 使用实例级而非像素级分割 | 像素级无法区分个体细胞 |
-
-| 2026-01-11 | 放弃全局 Watershed | 过度分割 (F1 降 0.41) |
-
-| 2026-01-11 | 采用边界损失微调 | 提升 PQ@0.5 从 0.02 到 0.09 |
-
-
-
----
-
-
-
-## 参考方法：Allen 实验室方案
-
-
-
-> 来源: `CellProfiler_deeplab.docx` 文档分析
-
-
-
-### Allen 分割策略
-
-
-
-| 任务 | Allen 方法 | 准确率 | 我们对应方法 |
-
-|------|-----------|--------|-------------|
-
-| 细胞边界 (大规模) | DeepLabV3 | Dice > 0.85 | CellSAM (Dice 0.71) |
-
-| 细胞边界 (FISH) | 手工分割 | ~99% | N/A |
-
-| 细胞核 | CellProfiler | Rand > 0.92 | DAPI 检测 (F1 0.75) |
-
-| 肌节分析 | SarcGraph | - | **待整合** |
-
-
-
-### 可借鉴方案
-
-
-
-| 方案 | 状态 | 说明 |
-
-|------|------|------|
-
-| **SarcGraph** | 待整合 | 肌节结构分析，生成 Organization Score |
-
-| **DeepLabV3** | 待对比 | 作为 SAM baseline |
-
-| 分水岭分离 | ❌ 失败 | 见 E06 |
-
-| Circularity 过滤 | ✅ 已实现 | 可选启用 |
-
-| 光照校正 | ✅ 已实现 | 可选启用 |
-
-
-
-### SarcGraph 信息
-
-
-
-- **来源**: [PLOS Comp Bio 2024](https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1013436)
-
-- **功能**: 自动检测 α-actinin-2 标记的 Z-线，构建肌原纤维网络图
-
-- **应用**: 分割完成后，在 Actn2 通道 (Ch1) 上运行
-
-
-
----
-
-
-
-## 验证指标优化方案
-
-
-
-> 来源: `index optimization.docx` 文档分析
-
-
-
-### 四层验证体系
-
-
-
-| Tier | 指标 | 目的 | 状态 |
-
-|------|------|------|------|
-
-| 1 | AP@0.5, AP@0.75 | 实例检测能力 | 待实现 (E09) |
-
-| 2 | **PQ** (SQ + RQ), **AJI** | 综合质量评估 | 待实现 (E09) |
-
-| 3 | Boundary IoU, HD95 | 边界精度 | 待实现 |
-
-| 4 | SarcGraph OOP/SPD | 生物学功能 | 待整合 (E11) |
-
-
-
-### 核心指标说明
-
-
-
-| 指标 | 公式/说明 | 诊断用途 |
-
-|------|-----------|---------|
-
-| **PQ** | SQ × RQ | 检测+分割综合 |
-
-| **SQ** | TP 平均 IoU | 分割精度 |
-
-| **RQ** | F1 分数 | 检测精度 |
-
-| **AJI** | 聚合 Jaccard | 惩罚过/欠分割 |
-
-| **Rand Index** | (TP+TN)/(All) | Allen 使用, >0.92 |
-
-
-
-### 诊断逻辑
-
-
-
-```
-
-PQ 分解:
-
-├─ RQ高 + SQ低 → "检测好，分割粗糙" → 需要边界损失微调
-
-└─ SQ高 + RQ低 → "分割好，检测差" → 调整置信度阈值
-
-```
-
-
-
-### 实现优先级
-
-
-
-| 优先级 | 任务 | 工作量 |
-
-|--------|------|--------|
-
-| **P0** | PQ + AJI 实现 | 1天 |
-
-| P1 | Rand Index | 0.5天 |
-
-| P1 | Boundary IoU | 0.5天 |
-
-| P2 | SarcGraph OOP | 1天 |
-
-
-
----
-
-
-
-## E13: 数据集标准化 + 代码简化
-
-
-
-**日期**: 2026-01-11
-
-
-
-**背景/假设**: 
-
-之前实验使用随机划分，不同实验间的可比性受限。同时存在多个冗余的训练脚本。
-
-
-
-**方法**:
-
-1. 固定 Train/Val/Test 划分 (70/15/15)，使用 seed=42 确保可复现
-
-2. 创建统一的 `src/train.py` 支持 YAML 配置
-
-3. 提取损失函数到 `src/losses/` 模块
-
-
-
-**交付物**:
-
-| 文件 | 内容 |
-
-|------|------|
-
-| `data/splits/train_ids.txt` | 334 样本 |
-
-| `data/splits/val_ids.txt` | 71 样本 |
-
-| `data/splits/test_ids.txt` | 73 样本 |
-
-| `src/train.py` | 统一训练入口 |
-
-| `src/config/base.yaml` | 基础配置 |
-
-| `src/config/boundary.yaml` | 边界损失微调配置 |
-
-| `src/losses/combined.py` | DiceLoss, BoundaryLoss, CombinedLoss |
-
-
-
-**验证**:
-
-```
-
-Loaded 334 samples from train split
-
-Loaded 71 samples from val split
-
-Loaded 73 samples from test split
-
-CombinedLoss import OK
-
-```
-
-
-
-**结论**: ✅ 数据划分已固化，代码结构已简化，为后续消融实验奠定基础。
-
-
-
----
-
-
-
-## E17: GT 细胞面积统计分析 (完整数据集)
-
-
-
-**日期**: 2026-01-21
-
-
-
-**背景/假设**: 
-
-需要确定合理的细胞大小阈值，用于训练时的 SizeLoss 和推理时的过滤。
-
-
-
-**方法**:
-
-分析 **全部 478 张图片** 中所有 GT 细胞的面积分布。
-
-
-
-**数据源**: 
-
-- `data/raw/allen_segmented_fields_full/*.tiff`
-
-- 通道 9 为 GT 分割 mask
-
-
-
-**统计结果**:
-
-
-
-| 指标 | 值 (像素) | 等效边长 |
-
-|------|----------|----------|
-
-| 样本数 | **5173 个细胞** | **478 张图片** |
-
-| **最小** | **6,240** | ~79×79 |
-
-| P1 | 40,836 | ~202×202 |
-
-| P5 | 59,966 | ~245×245 |
-
-| P10 | 72,443 | ~269×269 |
-
-| P25 | 99,916 | ~316×316 |
-
-| **中位数** | **142,316** | **~377×377** |
-
-| P75 | 198,024 | ~445×445 |
-
-| P90 | 275,367 | ~525×525 |
-
-| P95 | 338,190 | ~582×582 |
-
-| P99 | 513,928 | ~717×717 |
-
-| **最大** | **1,026,328** | ~1013×1013 |
-
-| 均值 | 162,688.5 | ~403×403 |
-
-| 标准差 | 95,797.0 | - |
-
-
-
-**阈值设定 (使用 P1/P99)**:
-
-
-
-| 阈值 | 值 | 理由 |
-
-|------|-----|------|
-
-| MIN_CELL_AREA | **40,836** | P1, 排除最小1%异常 (含标注空洞) |
-
-| MAX_CELL_AREA | **513,928** | P99, 排除最大1%异常 |
-
-
-
-> **发现**: 最小值 6240 是细胞间隙被误标为细胞，不是真正的心肌细胞。
-
-> GT 可能存在标注错误，使用 P1/P99 更稳健。
-
-
-
-**代码位置**:
-
-- `src/inference/postprocess.py`: MIN_CELL_AREA, MAX_CELL_AREA
-
-- `src/losses/combined.py`: SizeLoss 类
-
-
-
-**结论**: ✅ 使用 P1/P99 [40836, 513928] 覆盖 98% 正常细胞，排除标注异常。
-
-
-
----
-
-
-
-## E18: SarcGraph 检测对比实验
-
-
-
-**日期**: 2026-01-23
-
-
-
-**背景/假设**: 
-
-当前 DAPI 核检测方案存在局限性（检测非心肌细胞核）。SarcGraph 方案利用 α-actinin 通道的 Z-线检测，理论上具有 100% 心肌细胞特异性。
-
-
-
-**方法**:
-
-基于 Claude Pipeline 的 SarcGraph 检测实现：
-
-1. **Z-线检测**: 使用 `blob_log` (LoG 算法) 检测肌节 Z-线
-
-2. **空间聚类**: 使用 DBSCAN 将 Z-线点聚类为细胞簇
-
-3. **边界框生成**: 从簇的凸包生成 Padding 后的边界框
-
-
-
-**参数** (经调优后):
-
-| 参数 | 值 | 说明 |
-
-|------|-----|------|
-
-| pixel_size_um | 0.108 | 63X 物镜估算 |
-
-| sarcomere_length_um | 2.0 | 标准肌节长度 |
-
-| threshold (blob_log) | **0.05** | 优于默认 0.1 |
-
-| eps_factor | **2.0** | DBSCAN eps 系数 |
-
-| min_samples | **30** | 最小 Z-线数 (优于默认 15) |
-
-| padding_pixels | 20 | 边界框外扩 |
-
-
-
-**数据**:
-
-- Allen 数据源通道: **Ch1 = Actn2** (用户 Napari 确认)
-
-- 测试样本: 5 张
-
-
-
-**结果**:
-
-
-
-| 方法 | Mean F1 | Precision | Recall |
-
-|------|---------|-----------|--------|
-
-| **SarcGraph** | **0.351** | 0.229 | 0.843 |
-
-| DAPI | 0.277 | 0.180 | 0.971 |
-
-| **差异** | **+7.4%** | +4.9% | -12.8% |
-
-
-
-**分析**:
-
-- SarcGraph **精确率更高** (0.229 vs 0.180): 检测到的更可能是心肌细胞
-
-- DAPI **召回率更高** (0.971 vs 0.843): 能检测到更多细胞（包括非心肌）
-
-- SarcGraph 检测到 ~2000+ Z-lines/样本，聚类后生成 1-5 个框
-
-
-
-**代码位置**:
-
-- SarcGraph Pipeline: `src/comparison/sarcgraph_pipeline/`
-
-- 测试脚本: `tools/test_sarcgraph_detection.py`
-
-- 结果可视化: `experiments/e18_sarcgraph/sample_*_comparison.png`
-
-
-
-**结论**: ✅ SarcGraph 检测 F1 优于 DAPI +7.4%。
-
-后续可考虑：
-
-1. 将 SarcGraph 与 DAPI 检测**融合**（提高召回率）
-
-2. 使用 SarcGraph 边界框进行 SAM 分割训练
-
-3. 调整 min_samples 参数优化召回率
-
-
-
-
----
-
-## E33: GT Box + 预训练 CellSAM Baseline (2026-02-06) 
-
-**目的**: 建立**不微调**的基线指标，用于论文对比
-
-**实验配置**:
-- **输入**: data/processed/images/*.npy (10241024, 3通道 [BF, DAPI, Actn2])
-- **Prompt**: GT Box (从 GT mask 用 regionprops 提取)
-- **模型**: 预训练 CellSAM (无微调)
-- **样本数**: 5
-- **评估细胞数**: 60
-
-**结果**:
-
-| 指标 | 值 | 说明 |
-|------|-----|------|
-| **Instance Dice** | **0.350** | 单细胞边界精度 |
-| Instance Dice Std | 0.145 | 变异较大 |
-| Semantic Dice | 0.789 | 像素级重叠 |
-| Semantic Dice Std | 0.034 | - |
-| GT Cells/Image | 12.0 | - |
-| Pred Cells/Image | 12.0 | 框数=细胞数 (因为用GT框) |
-
-**分析**:
-- Semantic Dice 0.79 看起来不错，但 Instance Dice 只有 0.35
-- 说明预训练模型缺乏心肌细胞边界学习
-- **微调的价值**: 如果微调后 Instance Dice > 0.35，证明微调有效
-
-**结论**:  Baseline 已建立。Instance Dice 0.35 为微调目标提供参考。
-
----
-
-
----
-
-## Phase 1: Loss Weight Rebalancing + PQ Early Stopping
-
-**Date**: 2026-02-10 ~ 2026-02-11
-**Config**: `src/config/phase1_rebalance_l4.yaml`
-**Cluster**: ALICE (L4 gpu-l4-24g, A100 gpu-a100-80g)
-
-### Key Changes (vs E29 baseline)
-| Parameter | E29 | Phase 1 | Change |
-|-----------|-----|---------|--------|
-| boundary_weight | 0.5 | 1.5 | x3 |
-| contour_weight | OFF | 0.3 | New |
-| pos_weight | 10.0 | 2.0 | /5 |
-| use_pq_early_stop | false | true | New |
-| use_topology | true | false | Off |
-| use_size | true | false | Off |
-
-### Training Results
-| | L4 (Job 974531) | A100 (Job 974530) |
-|---|---|---|
-| Epochs | 50/50 | ~47/50 (PQ early stop) |
-| Best epoch | 49 | 32 |
-| Time | 4h26m | 2h44m |
-| Val Dice | 0.6927 | 0.6828 |
-| Val PQ | 0.4750 | 0.4533 |
-
-### Test Set Lockdown (Phase 1 L4 best_model.pt)
-
-**Oracle(test, 73 samples)**:
-| Metric | Value |
-|--------|-------|
-| BM-1to1 Dice | 0.6954 |
-| PQ | 0.4641 |
-| AJI | 0.5195 |
-| Semantic Dice | 0.7566 |
-
-**E2E(test, 73 samples, DAPI detection)**:
-| Metric | Value |
-|--------|-------|
-| BM-1to1 Dice | 0.5446 |
-| PQ | 0.1719 |
-| AJI | 0.3181 |
-| Semantic Dice | 0.6006 |
-
-**Conclusion**: Phase 1 locked. PQ +704% vs BF baseline. No hyperparameter tuning needed. Proceed to Phase 2.

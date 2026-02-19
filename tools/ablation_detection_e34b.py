@@ -29,6 +29,12 @@ sys.path.insert(0, str(PROJECT_DIR / "cellSAM_source"))
 sys.path.insert(0, str(PROJECT_DIR / "src"))
 
 from detection.dapi import detect_nuclei, merge_close_nuclei, create_bounding_boxes
+from detection.profiles import (
+    available_detection_profiles,
+    get_detection_profile,
+    apply_overrides,
+    format_detection_profile_snapshot,
+)
 
 
 def parse_int_list(raw: str):
@@ -188,17 +194,35 @@ def main():
     )
     parser.add_argument("--split", choices=["val", "test"], default="val")
     parser.add_argument("--n-samples", type=int, default=0)
-    parser.add_argument("--min-nucleus-area", type=int, default=1500)
-    parser.add_argument("--max-nucleus-area", type=int, default=20000)
-    parser.add_argument("--fixed-merge-distance", type=int, default=373)
+    parser.add_argument(
+        "--profile",
+        type=str,
+        choices=available_detection_profiles(),
+        default="locked_eval",
+        help="Detection profile source for detector core defaults",
+    )
+    parser.add_argument("--min-nucleus-area", type=int, default=None)
+    parser.add_argument("--max-nucleus-area", type=int, default=None)
+    parser.add_argument("--fixed-merge-distance", type=int, default=None)
     parser.add_argument("--use-relative-distance", dest="use_relative_distance", action="store_true")
     parser.add_argument("--use-fixed-distance", dest="use_relative_distance", action="store_false")
-    parser.set_defaults(use_relative_distance=True)
+    parser.set_defaults(use_relative_distance=None)
     parser.add_argument("--edge-margins", type=str, default="20,32,50")
     parser.add_argument("--size-ratios", type=str, default="2.0,2.5,3.0,3.5")
     parser.add_argument("--merge-coeffs", type=str, default="1.0,1.2,1.4,1.5")
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
+
+    profile_cfg = get_detection_profile(args.profile)
+    detector_core = apply_overrides(
+        profile_cfg["dapi"],
+        {
+            "min_nucleus_area": args.min_nucleus_area,
+            "max_nucleus_area": args.max_nucleus_area,
+            "use_relative_distance": args.use_relative_distance,
+            "fixed_merge_distance": args.fixed_merge_distance,
+        },
+    )
 
     edge_margins = parse_int_list(args.edge_margins)
     size_ratios = parse_float_list(args.size_ratios)
@@ -209,14 +233,8 @@ def main():
     print("E34b joint ablation (edge_margin, size_ratio_threshold, merge_coeff)")
     print("=" * 72)
     print(f"split={args.split}, combos={len(all_combos)}")
-    print(
-        "detector_core: min={}, max={}, mode={}, fixed_dist={}".format(
-            args.min_nucleus_area,
-            args.max_nucleus_area,
-            "relative" if args.use_relative_distance else "fixed",
-            args.fixed_merge_distance,
-        )
-    )
+    print("Detector profile snapshot:")
+    print(format_detection_profile_snapshot(args.profile, detector_core))
 
     data_dir = PROJECT_DIR / "data" / "processed"
     split_file = PROJECT_DIR / "data" / "splits" / f"{args.split}_ids.txt"
@@ -232,17 +250,35 @@ def main():
         with open(output_file, "r", encoding="utf-8") as f:
             results = json.load(f)
         print(f"resume_from={output_file}")
+        existing_profile = results.get("detection_profile")
+        if existing_profile and existing_profile != args.profile:
+            raise RuntimeError(
+                "detection_profile mismatch under --resume. "
+                f"Existing={existing_profile} Requested={args.profile}"
+            )
+        existing_core = results.get("detector_core")
+        if existing_core:
+            core_keys = [
+                "min_nucleus_area",
+                "max_nucleus_area",
+                "use_relative_distance",
+                "fixed_merge_distance",
+            ]
+            for key in core_keys:
+                if key in existing_core and existing_core[key] != detector_core[key]:
+                    raise RuntimeError(
+                        "detector_core mismatch under --resume. "
+                        f"key={key}, Existing={existing_core[key]} Requested={detector_core[key]}"
+                    )
+        results["detection_profile"] = args.profile
+        results["detector_core"] = detector_core
     else:
         results = {
             "timestamp": datetime.now().isoformat(),
             "split": args.split,
             "n_samples": len(samples),
-            "detector_core": {
-                "min_nucleus_area": args.min_nucleus_area,
-                "max_nucleus_area": args.max_nucleus_area,
-                "use_relative_distance": args.use_relative_distance,
-                "fixed_merge_distance": args.fixed_merge_distance,
-            },
+            "detection_profile": args.profile,
+            "detector_core": detector_core,
             "search_space": {
                 "edge_margins": edge_margins,
                 "size_ratios": size_ratios,
@@ -267,10 +303,10 @@ def main():
 
         metrics = evaluate_combo(
             samples=samples,
-            min_nucleus_area=args.min_nucleus_area,
-            max_nucleus_area=args.max_nucleus_area,
-            use_relative_distance=args.use_relative_distance,
-            fixed_merge_distance=args.fixed_merge_distance,
+            min_nucleus_area=detector_core["min_nucleus_area"],
+            max_nucleus_area=detector_core["max_nucleus_area"],
+            use_relative_distance=detector_core["use_relative_distance"],
+            fixed_merge_distance=detector_core["fixed_merge_distance"],
             edge_margin=edge_margin,
             size_ratio_threshold=size_ratio,
             merge_coeff=merge_coeff,

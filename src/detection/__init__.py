@@ -11,6 +11,12 @@ from .dapi import (
     detect_and_create_boxes,
     is_on_edge,
 )
+from .profiles import (
+    available_detection_profiles,
+    get_detection_profile,
+    apply_overrides,
+    format_detection_profile_snapshot,
+)
 
 __all__ = [
     'detect_nuclei',
@@ -18,4 +24,8 @@ __all__ = [
     'create_bounding_boxes',
     'detect_and_create_boxes',
     'is_on_edge',
+    'available_detection_profiles',
+    'get_detection_profile',
+    'apply_overrides',
+    'format_detection_profile_snapshot',
 ]

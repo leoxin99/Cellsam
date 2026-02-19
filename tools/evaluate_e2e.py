@@ -24,9 +24,14 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent.parent / "cellSAM_source"))
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from cellSAM import get_model
 from augmented_dataset import AugmentedAllenDataset
 from detection.dapi import detect_and_create_boxes
+from detection.profiles import (
+    available_detection_profiles,
+    get_detection_profile,
+    apply_overrides,
+    format_detection_profile_snapshot,
+)
 from inference.core import (
     segment_with_boxes, InferenceConfig, load_cellsam_checkpoint
 )
@@ -39,7 +44,9 @@ from metrics.instance_metrics import compute_all_metrics
 
 
 def evaluate_e2e(checkpoint_path="checkpoints/bf_baseline_full_best.pt",
-                 adapter_cls=None, adapter_kwargs=None):
+                 adapter_cls=None, adapter_kwargs=None,
+                 detection_profile="locked_eval",
+                 detection_overrides=None):
     """End-to-end evaluation: DAPI detection -> SAM segmentation."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
@@ -54,6 +61,13 @@ def evaluate_e2e(checkpoint_path="checkpoints/bf_baseline_full_best.pt",
     
     # 统一推理配置 (单一来源)
     infer_cfg = InferenceConfig.default()
+
+    profile_cfg = get_detection_profile(detection_profile)
+    dapi_params = apply_overrides(profile_cfg["dapi"], detection_overrides or {})
+    print("Detection profile snapshot:")
+    print(format_detection_profile_snapshot(detection_profile, dapi_params))
+    if detection_profile == "runtime_default":
+        print("Warning: runtime_default is for daily runtime, not final locked evaluation.")
     
     # Load test data
     test_ids = Path("data/splits/test_ids.txt").read_text().strip().split('\n')
@@ -74,7 +88,16 @@ def evaluate_e2e(checkpoint_path="checkpoints/bf_baseline_full_best.pt",
         
         # Step 1: DAPI detection
         dapi = image[1].numpy() if image.shape[0] > 1 else image[0].numpy()
-        result = detect_and_create_boxes(dapi)
+        result = detect_and_create_boxes(
+            dapi,
+            min_nucleus_area=dapi_params["min_nucleus_area"],
+            max_nucleus_area=dapi_params["max_nucleus_area"],
+            size_ratio_threshold=dapi_params["size_ratio_threshold"],
+            use_relative_distance=dapi_params["use_relative_distance"],
+            fixed_merge_distance=dapi_params["fixed_merge_distance"],
+            merge_coeff=dapi_params["merge_coeff"],
+            margin=dapi_params["edge_margin"],
+        )
         boxes = result[0] if isinstance(result, tuple) else result
         
         if not boxes or len(boxes) == 0:
@@ -149,7 +172,11 @@ def evaluate_e2e(checkpoint_path="checkpoints/bf_baseline_full_best.pt",
             'task': 'E2E (DAPI detection -> SAM segmentation)',
             'config': {
                 'model': checkpoint_path,
-                'detection': 'DAPI detect_and_create_boxes',
+                'detection': {
+                    'name': 'DAPI detect_and_create_boxes',
+                    'profile': detection_profile,
+                    'params': dapi_params,
+                },
                 'inference': {
                     'mask_threshold': infer_cfg.mask_threshold,
                     'box_expand': infer_cfg.box_expand,
@@ -177,5 +204,42 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='E2E Evaluation (DAPI detection → SAM segmentation)')
     parser.add_argument('--checkpoint', type=str, default="checkpoints/bf_baseline_full_best.pt",
                         help='Path to model checkpoint')
+    parser.add_argument(
+        '--detection-profile',
+        type=str,
+        choices=available_detection_profiles(),
+        default='locked_eval',
+        help='Detection parameter profile'
+    )
+    parser.add_argument('--min-nucleus-area', type=int, default=None)
+    parser.add_argument('--max-nucleus-area', type=int, default=None)
+    parser.add_argument('--edge-margin', type=int, default=None)
+    parser.add_argument('--size-ratio-threshold', type=float, default=None)
+    parser.add_argument('--merge-coeff', type=float, default=None)
+    parser.add_argument('--fixed-merge-distance', type=int, default=None)
+    parser.add_argument(
+        '--use-relative-distance',
+        dest='use_relative_distance',
+        action='store_true',
+    )
+    parser.add_argument(
+        '--use-fixed-distance',
+        dest='use_relative_distance',
+        action='store_false',
+    )
+    parser.set_defaults(use_relative_distance=None)
     args = parser.parse_args()
-    evaluate_e2e(checkpoint_path=args.checkpoint)
+    detection_overrides = {
+        'min_nucleus_area': args.min_nucleus_area,
+        'max_nucleus_area': args.max_nucleus_area,
+        'edge_margin': args.edge_margin,
+        'size_ratio_threshold': args.size_ratio_threshold,
+        'merge_coeff': args.merge_coeff,
+        'fixed_merge_distance': args.fixed_merge_distance,
+        'use_relative_distance': args.use_relative_distance,
+    }
+    evaluate_e2e(
+        checkpoint_path=args.checkpoint,
+        detection_profile=args.detection_profile,
+        detection_overrides=detection_overrides,
+    )

@@ -2,7 +2,7 @@
 
 > 状态: 🟢 Active  
 > 维护原则: 只记录“可执行任务”，每项必须有口径/产物/完成标准。  
-> 更新时间: 2026-02-14
+> 更新时间: 2026-02-19
 
 ---
 
@@ -43,28 +43,124 @@
   - 输出 micro P/R/F1（IoU=0.3）
   - 记录最优参数和二优参数，避免偶然点
 
-### T3. Adaptive 退化诊断补充
+### T3. Adaptive 退化诊断补充 ✅ Completed (2026-02-16)
 - 优先级: P1
 - 目标: 用 `adaptive_ratio/fallback_count/mean_zlines` 判断 B2/B3 不敏感原因。
 - 产物:
   - `experiments/ablation_adaptive_val/results.json` 中诊断字段
   - 诊断摘要写入 `docs/dapi_detection_design.md`
 - 完成标准:
-  - 明确是“参数确实不敏感”还是“大量 fallback 导致”
+  - [x] 明确是“参数确实不敏感”还是“大量 fallback 导致”
+- 结果:
+  - B2 (`min_zlines`) F1 区间: `0.7472 -> 0.7472` (range=`0.0000`)
+  - B3 (`zline_threshold`) F1 区间: `0.7459 -> 0.7472` (range=`0.0013`)
+  - `adaptive_ratio=1.0`, `fallback_count=0`（全程无 fallback）
+  - 诊断结论: `cause_code=zline_saturated`（当前半径下 Z-line 信号饱和，不是 fallback 退化）
+- 结果文件:
+  - `experiments/ablation_adaptive_val/results.json` (`diagnosis_t3`)
+  - `experiments/ablation_adaptive_val/diagnosis_t3.json`
 
-### T4. 默认参数与锁定参数的执行防呆
+### T4. 默认参数与锁定参数的执行防呆 ✅ Completed (2026-02-16)
 - 优先级: P1
 - 目标: 降低“误用默认参数”风险。
 - 方案:
   - 推理/评估脚本显式打印当前 detection 参数
   - 引入 `profile` 机制（`runtime_default` / `locked_eval`）
 - 完成标准:
-  - 关键脚本输出参数快照
-  - 文档写清 profile 选择规则
+  - [x] 关键脚本输出参数快照
+  - [x] 文档写清 profile 选择规则
+- 结果:
+  - 新增统一 profile 模块: `src/detection/profiles.py`
+  - `evaluate_e2e.py` 接入 `--detection-profile`（默认 `locked_eval`）
+  - `ablation_detection_lock.py` / `ablation_detection_e34b.py` / `ablation_adaptive_val.py` 接入 `--profile`
+  - `docs/inference_standard.md` 新增 profile 执行规则（4.1）
+
+### T3b. Adaptive `search_radius` 重扫 (80-180) ✅ Completed (2026-02-19)
+- 优先级: P1
+- 背景:
+  - T3 已确认 `zline_saturated`（非 fallback）；
+  - R1 在 2026-02-18 修正优先级：该任务不应降级到 backlog。
+- 目标:
+  - 在 `val(71)` 下验证缩小半径后是否恢复 B2/B3 敏感性并提升 Adaptive 检测质量。
+- 协议:
+  - 固定 `locked_eval` 口径：`min/max_nucleus_area=1500/20000`
+  - B1 半径候选: `[80, 100, 120, 140, 160, 180]`
+  - B2/B3 仅在新最优半径上执行（避免全量无效搜索）
+- 产物:
+  - `experiments/ablation_adaptive_radius_val/results.json`（新目录，避免覆盖已封板历史）
+  - 文档回填: `docs/dapi_detection_design.md`, `docs/experiments_log.md`
+- 完成标准:
+  - 明确 `mean_zlines` 是否脱离饱和区间
+  - 明确 `adaptive_ratio/fallback_count` 是否进入可调区间
+  - 结论写明: 保留 Adaptive 路线 / 仅作为对照路线
+- 结果:
+  - B1 最优半径: `search_radius=160`, F1=`0.7788`（`80-180` 区间内最佳）
+  - B2 (`min_zlines`) 仍近似不敏感: F1 区间 `0.7788 -> 0.7788`（range=`0.0000`）
+  - B3 (`zline_threshold`) 出现轻微敏感: 最优 `0.05`, F1=`0.7800`
+  - 诊断: `adaptive_ratio` 持续接近 `1.0`、`fallback_count` 接近 `0`，仍以自适应分支为主
+- 结果文件:
+  - `experiments/ablation_adaptive_radius_val/results.json`
+  - `tools/ablation_adaptive_val.py` 已补 `--b1-values` + `--output-dir`，并修复 profile 参数未实际传入的 bug
 
 ---
 
-## 2. Mid-Term (Phase 2)
+## 2. Short-Term (本周优先 — 新增)
+
+### T11. Encoder LoRA 微调探索 🆕
+- 优先级: **P1** (短期)
+- 背景: 当前只微调 Decoder (~4M 参数)，Encoder (86M) 完全冻结。SAC 论文证明 LoRA 在 Encoder attention 层有效。如果 PQ 卡在 0.50 以下，LoRA 是最自然的下一步
+- 目标: 在 SAM ViT-B 的 Q/V attention 层插入 LoRA (rank=4~8)，验证是否提升 PQ/Dice
+- 方案:
+  - 创建 `src/config/phase2f_lora.yaml` (基于 Phase 1 config + LoRA 开关)
+  - 修改 `src/train.py` 支持 LoRA 注入 (使用 `peft` 库或手动插入低秩矩阵)
+  - 训练参数: lr=5e-5 (LoRA 部分用更小 lr), epochs=50
+- 产物:
+  - `checkpoints/E_phase2f_lora/best_model.pt`
+  - Oracle(test) + E2E(test) 评估结果
+- 完成标准:
+  - [ ] LoRA 实现 + 训练完成
+  - [ ] PQ 是否超过 Phase 1 (0.475)
+  - [ ] 决定是否纳入论文消融表
+
+### T12. P2-D (lr=5e-5) + P2-E (epochs=80) 消融 🆕
+- 优先级: P1
+- 目标: 论文消融表需要的 lr/epochs 对比
+- 方案:
+  - P2-D: `phase1_rebalance` + `lr: 5e-5` (其余不变)
+  - P2-E: `phase1_rebalance` + `epochs: 80` (其余不变)
+- 完成标准:
+  - [ ] P2-D 训练 + test(73) 评估
+  - [ ] P2-E 训练 + test(73) 评估
+
+### T13. T7 Adapter Instance 评估 🆕
+- 优先级: P1
+- 目标: 评估 E30/E32 现有 checkpoint 的 Instance 指标
+- 方案 A (先做): 直接用 `comprehensive_eval.py` 评估 E30/E32 checkpoint
+- 方案 B (后做): 如果 A 有潜力，用 Instance loss 重训 Adapter
+- 完成标准:
+  - [ ] E30 Oracle(test) PQ/BM-Dice
+  - [ ] E32 Oracle(test) PQ/BM-Dice
+  - [ ] 与 Phase 1 (PQ=0.475) 对比
+
+### T14. P2-B 诊断实验 A: P1 冲突量化 🆕
+- 优先级: P1
+- 目标: 量化 Phase 1 模型的 conflict_rate 和 intrusion_rate
+- 方案: 在 test(73) 跑 `comprehensive_eval.py`，已有 `conflict_pixels` 字段，补充 `intrusion_rate` 计算
+- 完成标准:
+  - [ ] conflict_rate = conflict_pixels / total_fg_pixels
+  - [ ] intrusion_rate = 被错误分配的像素 / 总 instance 像素
+  - [ ] 明确冲突的实际影响大小
+
+### T15. P2-B 诊断实验 B: Oracle 冲突消解 🆕
+- 优先级: P1
+- 目标: 如果用 GT mask 强制消解冲突区域，PQ 变化多少？
+- 方案: 在冲突像素上用 GT 归属替换 argmax_prob → 重算 PQ
+- 完成标准:
+  - [ ] PQ(oracle conflict) vs PQ(argmax_prob) delta
+  - [ ] 如果 delta ≈ 0 → 冲突不是瓶颈，P2-B 无必要
+  - [ ] 如果 delta > 0.02 → 冲突有改善空间，P2-B 全局版值得尝试
+
+## 2.5. Mid-Term (Phase 2)
 
 ### T5. P2-A 训练与评估闭环
 - 优先级: P1
@@ -150,5 +246,11 @@
   - DAPI: F1=0.8033
   - Adaptive: F1=0.7502
   - winner: DAPI
+- ✅ T3 Adaptive 退化诊断完成:
+  - 结论: B2/B3 不敏感的主因是 `zline_saturated`，非 fallback 导致
+- ✅ T4 默认参数与锁定参数防呆完成:
+  - profile 机制已上线，关键检测评估脚本默认 `locked_eval`
+- ✅ T3b 半径重扫完成:
+  - 最优 `search_radius=160`, `min_zlines=5`, `zline_threshold=0.05`, F1=`0.7800`
 - ✅ 检测消融脚本 GT 面积过滤移除（不再静默修改 GT 分母）
 - ✅ `ablation_adaptive_val.py` 支持 `--stage` + `--resume` + detector 参数一致性校验

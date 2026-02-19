@@ -11,21 +11,42 @@ Protocol:
 
 import argparse
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
+
+project_dir = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(project_dir / "src"))
 
 from ablation_adaptive_params import (
     evaluate_adaptive_params,
     load_test_samples,
-    DEFAULT_MIN_NUCLEUS_AREA,
-    DEFAULT_MAX_NUCLEUS_AREA,
+)
+from detection.profiles import (
+    available_detection_profiles,
+    get_detection_profile,
+    apply_overrides,
+    format_detection_profile_snapshot,
 )
 
 
-project_dir = Path(__file__).resolve().parent.parent
-
-
 def main():
+    def parse_int_csv(raw: str, arg_name: str):
+        values = []
+        for token in raw.split(","):
+            token = token.strip()
+            if not token:
+                continue
+            try:
+                values.append(int(token))
+            except ValueError as exc:
+                raise ValueError(
+                    "Invalid integer '{}' in {}={}".format(token, arg_name, raw)
+                ) from exc
+        if not values:
+            raise ValueError("{} cannot be empty".format(arg_name))
+        return values
+
     parser = argparse.ArgumentParser(description="Adaptive val ablation with checkpointable stages")
     parser.add_argument(
         "--stage",
@@ -39,25 +60,48 @@ def main():
         help="Resume from existing experiments/ablation_adaptive_val/results.json",
     )
     parser.add_argument(
+        "--profile",
+        choices=available_detection_profiles(),
+        default="locked_eval",
+        help="Detection profile source for min/max nucleus defaults.",
+    )
+    parser.add_argument(
         "--min-nucleus-area",
         type=int,
-        default=DEFAULT_MIN_NUCLEUS_AREA,
-        help="min_nucleus_area passed to detect_with_adaptive_box (default: {})".format(
-            DEFAULT_MIN_NUCLEUS_AREA
-        ),
+        default=None,
+        help="Override min_nucleus_area passed to detect_with_adaptive_box.",
     )
     parser.add_argument(
         "--max-nucleus-area",
         type=int,
-        default=DEFAULT_MAX_NUCLEUS_AREA,
-        help="max_nucleus_area passed to detect_with_adaptive_box (default: {})".format(
-            DEFAULT_MAX_NUCLEUS_AREA
-        ),
+        default=None,
+        help="Override max_nucleus_area passed to detect_with_adaptive_box.",
+    )
+    parser.add_argument(
+        "--b1-values",
+        type=str,
+        default="200,300,400,500,600",
+        help="Comma-separated search_radius candidates for B1.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="experiments/ablation_adaptive_val",
+        help="Output directory for results.json.",
     )
     args = parser.parse_args()
+    b1_values = parse_int_csv(args.b1_values, "--b1-values")
+    profile_cfg = get_detection_profile(args.profile)
+    adaptive_params = apply_overrides(
+        profile_cfg["adaptive"],
+        {
+            "min_nucleus_area": args.min_nucleus_area,
+            "max_nucleus_area": args.max_nucleus_area,
+        },
+    )
     requested_detector_params = {
-        "min_nucleus_area": args.min_nucleus_area,
-        "max_nucleus_area": args.max_nucleus_area,
+        "min_nucleus_area": adaptive_params["min_nucleus_area"],
+        "max_nucleus_area": adaptive_params["max_nucleus_area"],
     }
 
     print("=" * 70)
@@ -66,7 +110,8 @@ def main():
 
     data_dir = project_dir / "data" / "processed"
     split_file = project_dir / "data" / "splits" / "val_ids.txt"
-    output_dir = project_dir / "experiments" / "ablation_adaptive_val"
+    output_dir_arg = Path(args.output_dir)
+    output_dir = output_dir_arg if output_dir_arg.is_absolute() else project_dir / output_dir_arg
     output_dir.mkdir(parents=True, exist_ok=True)
 
     output_file = output_dir / "results.json"
@@ -74,11 +119,19 @@ def main():
     print("\n[1] Loading VAL samples...")
     samples = load_test_samples(data_dir, split_file, n_samples=71)
     print("    Loaded {} samples".format(len(samples)))
+    print("    Detection profile snapshot:")
+    print(format_detection_profile_snapshot(args.profile, profile_cfg["dapi"], adaptive_params))
 
     if args.resume and output_file.exists():
         with open(output_file, "r", encoding="utf-8") as f:
             results = json.load(f)
         print("    Resume from {}".format(output_file))
+        existing_profile = results.get("detection_profile")
+        if existing_profile and existing_profile != args.profile:
+            raise RuntimeError(
+                "detection_profile mismatch under --resume. "
+                "Existing={} Requested={}.".format(existing_profile, args.profile)
+            )
         existing_detector_params = results.get("detector_params")
         if existing_detector_params and existing_detector_params != requested_detector_params:
             raise RuntimeError(
@@ -93,16 +146,17 @@ def main():
         results = {
             "timestamp": datetime.now().isoformat(),
             "n_samples": len(samples),
+            "detection_profile": args.profile,
             "detector_params": requested_detector_params,
             "experiments": {},
         }
+    results["detection_profile"] = args.profile
     print("    Detector params:", results["detector_params"])
 
     default_min_zlines = 15
     default_zline_threshold = 0.03
 
     # Sweep value lists — change here to update the search space
-    b1_values = [200, 300, 400, 500, 600]
     b2_values = [5, 10, 15, 20, 30]
     b3_values = [0.01, 0.02, 0.03, 0.05, 0.1]
 
@@ -137,8 +191,8 @@ def main():
                 search_radius=value,
                 min_zlines=default_min_zlines,
                 zline_threshold=default_zline_threshold,
-                min_nucleus_area=args.min_nucleus_area,
-                max_nucleus_area=args.max_nucleus_area,
+                min_nucleus_area=requested_detector_params["min_nucleus_area"],
+                max_nucleus_area=requested_detector_params["max_nucleus_area"],
             )
             metrics["value"] = value
             b1_results.append(metrics)
@@ -176,8 +230,8 @@ def main():
                 search_radius=best_b1_value,
                 min_zlines=value,
                 zline_threshold=default_zline_threshold,
-                min_nucleus_area=args.min_nucleus_area,
-                max_nucleus_area=args.max_nucleus_area,
+                min_nucleus_area=requested_detector_params["min_nucleus_area"],
+                max_nucleus_area=requested_detector_params["max_nucleus_area"],
             )
             metrics["value"] = value
             b2_results.append(metrics)
@@ -223,8 +277,8 @@ def main():
                 search_radius=best_b1_value,
                 min_zlines=best_b2_value,
                 zline_threshold=value,
-                min_nucleus_area=args.min_nucleus_area,
-                max_nucleus_area=args.max_nucleus_area,
+                min_nucleus_area=requested_detector_params["min_nucleus_area"],
+                max_nucleus_area=requested_detector_params["max_nucleus_area"],
             )
             metrics["value"] = value
             b3_results.append(metrics)

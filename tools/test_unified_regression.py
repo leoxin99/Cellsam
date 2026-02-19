@@ -83,6 +83,40 @@ def test_config_consistency():
     print("  PASS\n")
 
 
+def test_detection_profile_guardrails():
+    """Verify detection profile mechanism is available in key eval scripts."""
+    from detection.profiles import available_detection_profiles, get_detection_profile
+
+    print("=== Test 2b: Detection Profile Guardrails ===")
+
+    profiles = set(available_detection_profiles())
+    assert "runtime_default" in profiles, "Missing runtime_default profile"
+    assert "locked_eval" in profiles, "Missing locked_eval profile"
+
+    runtime = get_detection_profile("runtime_default")
+    locked = get_detection_profile("locked_eval")
+    assert runtime["dapi"]["min_nucleus_area"] == 200
+    assert locked["dapi"]["min_nucleus_area"] == 1500
+    assert locked["adaptive"]["search_radius"] == 200
+
+    project_root = Path(__file__).parent.parent
+    required_scripts = [
+        "tools/evaluate_e2e.py",
+        "tools/ablation_detection_lock.py",
+        "tools/ablation_detection_e34b.py",
+        "tools/ablation_adaptive_val.py",
+    ]
+    for rel_path in required_scripts:
+        source = (project_root / rel_path).read_text(encoding="utf-8")
+        assert "--profile" in source or "--detection-profile" in source, (
+            f"{rel_path} missing profile CLI guardrail"
+        )
+
+    print("  [OK] Profiles: runtime_default + locked_eval")
+    print("  [OK] Key scripts expose profile CLI")
+    print("  PASS\n")
+
+
 def test_imports():
     """Verify all unified imports work without errors."""
     print("=== Test 3: Import Verification ===")
@@ -326,6 +360,7 @@ if __name__ == "__main__":
     tests = [
         test_imports,
         test_config_consistency,
+        test_detection_profile_guardrails,
         test_synthetic_metrics,
         test_lazy_pipeline_import,
         test_validate_returns_dict,

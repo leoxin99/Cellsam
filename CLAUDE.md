@@ -1,8 +1,24 @@
 # CellSAM 项目方案 (Project Blueprint)
 
-> **文档类型**: 项目总览 (AI 必读)
-> **最后更新**: 2026-02-13
-> **当前阶段**: Phase 2 Step 3 完成 → Step 4 P2-A 训练
+> **文档类型**: 项目总览 (AI 必读)  
+> **最后更新**: 2026-02-19  
+> **当前阶段**: P2-A 终止 → Baseline 对比 + LR 消融 (P2-D/E)
+
+---
+
+## 📋 目录
+
+- [项目状态仪表板](#项目状态仪表板)
+- [环境配置](#️-环境配置-critical)
+- [多 Agent 协作模式](#-多-agent-协作模式)
+- [关键文档链接](#关键文档链接-)
+- [代码架构](#代码架构)
+- [阶段性任务清单](#阶段性任务清单)
+- [关键决策速查](#关键决策速查)
+- [新 AI 必读清单](#-新-ai-必读清单-required-reading)
+- [关键实验历史](#-关键实验历史-experiment-summary)
+- [训练前必须执行](#-训练前必须执行-critical)
+- [常见问题](#常见问题)
 
 ---
 
@@ -14,8 +30,8 @@
 阶段2 检测优化       [████████████████████] 100%  ✅ 完成 (Hybrid DAPI+Actn2)
 阶段2.5 三通道适配   [████████░░░░░░░░░░░░]  40%  🔄 Semantic Mapper + Adapter 已完成
 Phase 1 Loss优化     [████████████████████] 100%  ✅ 完成 + Test锁定
-Phase 2 结构改进     [████████████░░░░░░░░]  60%  🔄 Step 3 完成, Step 4 训练中
-阶段4 论文结果       [░░░░░░░░░░░░░░░░░░░░]   0%  ⏳ 待开始
+Phase 2 结构改进     [███████████████░░░░░]  75%  ⚠️ P2-A 终止, 待 P2-D/E 消融
+阶段4 论文结果       [████░░░░░░░░░░░░░░░░]  20%  🔄 Baseline 实验准备中
 ```
 
 ### 关键指标 (Phase 1 Test 锁定, 2026-02-11)
@@ -26,7 +42,7 @@ Phase 2 结构改进     [████████████░░░░░░
 | **AJI** | **0.5195** | 0.3181 | ✅ vs BF_Baseline +82% |
 | **Semantic Dice** | 0.7566 | 0.6006 | ✅ 稳定 |
 
-> **历史检测里程碑**: DAPI 检测 F1≈78% (E23 修复后，非本轮 test 同步测得)
+> **检测锁定**: DAPI F1=**0.8033** (test73 封板), Adaptive F1=0.7502 | T3b 重扫: radius=160, F1=0.780
 
 ### 当前最优模型
 | 项目 | 值 |
@@ -36,23 +52,18 @@ Phase 2 结构改进     [████████████░░░░░░
 | 训练平台 | ALICE L4 (Job 974531) |
 | Best Epoch | 49/50 |
 
-### 下一步: Phase 2 Step 4 — P2-A 训练
-- **Step 3 已完成**: L_neighbor + L_overlap 实现 + Codex 审核通过
-- **当前**: 在 Alice 提交 P2-A 训练 (`scripts/train_phase2a.sh`)
-- **配置**: `src/config/phase2a_neighbor_overlap.yaml`
-- **验证**: 梯度 12/12 + 回归 10/10 通过
-- **Alice 操作**: 依次执行 `git pull`，再执行 `sbatch scripts/train_phase2a.sh`
+### 当前状态: P2-A 终止, 进入 Baseline + 消融实验
 
-### 未来优化方向 (备忘)
+**P2-A (N/O Loss) 已终止**: Fix1-3 均证明 N/O loss 导致 PQ 退化 (详见 `experiments_log.md`)
 
-| 方向 | 说明 | 优先级 |
-|------|------|--------|
-| **Soft boundary averaging** | 冲突区域不做硬裁决，用概率加权平均边界 | P3+ |
-| **Watershed 冲突区域** | 冲突像素用 watershed 按距离分配 | P3+ |
-| **CRF/MRF 后处理** | 马尔可夫随机场，考虑空间连续性 | P3+ |
-| **三通道 Adapter 对比** | Channel Adapter vs BF-only 效果对比 | Phase 3 |
+**当前工作重点**:
 
-> ⚠️ 推理端优化的前提是 Phase 2 训练端 (L_overlap) 先验证效果。
+| 任务 | 执行者 | 状态 |
+|------|---------|------|
+| Baseline 对比 (Cellpose/StarDist/MedSAM/SAMCell) | A2 | 🔄 方案审核通过, 执行中 |
+| P2-D/E LR+Epoch 消融 | A2 | ⏳ 待执行 |
+| T7 Adapter Instance 评估 (E30/E32) | A2 | ⏳ 待执行 |
+| T9 dataset_parameters.md 深度更新 | A1 | 🔄 执行中 |
 
 ### ⚠️ 已修复: GT 框面积过滤 Bug (2026-02-13)
 
@@ -282,17 +293,17 @@ docs/
 - [x] Oracle(val,n=30) + Oracle(test,73) + E2E(test,73) 评估
 - [x] **Phase 1 已锁定** — 不再调参
 
-### Phase 2: 结构性改进 🔄
+### Phase 2: 结构性改进 ⚠️ (P2-A 终止)
 - [x] Step 1: SQ/RQ 评估工具补全
 - [x] Step 2: Loss 基础设施修复 (归一化 + 可微 Contour/Topology)
 - [x] Step 3: L_neighbor + L_overlap 实现 + Codex 审核通过
-- [/] **Step 4: P2-A 训练** (`phase2a_neighbor_overlap.yaml`)
-- [x] **Step 4.5: 检测参数锁定 (DAPI/Adaptive)**  
-      已完成: test(73) 单次封板完成，DAPI F1=0.8033 > Adaptive F1=0.7502
-- [x] **Step 4.6: E34b 边缘/双核参数联合消融 (val71)**  
-      已完成: 最优 `edge_margin=20`, `size_ratio_threshold=2.5`, `merge_coeff=1.4`, F1=0.8106
-- [ ] Step 5: 评估 + 决定是否 P2-B
-- [ ] 三通道 Adapter 对比实验 (Phase 3)
+- [x] **Step 4: P2-A 训练 — ❗ 终止** (Fix1-3 均 PQ 退化)
+- [x] **Step 4.5: 检测参数锁定** — DAPI F1=0.8033, Adaptive F1=0.7502 (test73 封板)
+- [x] **Step 4.6: E34b 联合消融** — edge=20, ratio=2.5, merge=1.4, F1=0.8106
+- [x] **T3b: Adaptive radius 重扫** — radius=160, F1=0.780 (val71)
+- [ ] P2-D/E: LR+Epoch 消融 (论文需要)
+- [ ] T7: Adapter Instance 评估
+- [ ] Baseline 对比实验 (Cellpose/StarDist/MedSAM/SAMCell)
 
 ---
 
@@ -337,10 +348,15 @@ docs/
 | **E01** | 01-08 | 类别不平衡修复 | Dice 0→0.52 ✅ |
 | **E03** | 01-08 | DAPI 核检测方案 | F1=0.750 ✅ |
 | **E12** | 01-11 | 边界损失微调 | PQ↑265% |
+| **E23** | 02-02 | uint8 截断 Bug 修复 | DAPI F1: 0→78% ✅ |
 | **E29** | 02-05 | Instance-level 基线 | BM-1to1=0.593, PQ=0.326 |
 | **Phase 1** | 02-10 | Loss 重平衡 + PQ 早停 | **Oracle PQ=0.464, BM=0.695** ⭐ |
+| **E33** | 02-06 | 预训练 CellSAM Baseline | BM-Dice=0.111, PQ=0.000 |
+| **E34** | 02-13~14 | 检测参数锁定 | DAPI F1=0.803 (test73 封板) |
+| **P2-A** | 02-15~16 | N/O Loss Fix1-3 | ❌ **终止** (均退化) |
+| **T3b** | 02-19 | Adaptive radius 重扫 | F1=0.780 (radius=160) |
 
-> 完整记录: [experiments_log.md](docs/experiments_log.md), [codex_claude_seg.md](docs/codex_claude_seg.md)
+> 完整记录: [experiments_log.md](docs/experiments_log.md)
 
 ---
 
@@ -370,13 +386,13 @@ python tools/verify_training_config.py
 
 | 日期 | 内容 |
 |------|------|
-| 2026-02-13 | Fix: CUDA module cuda/11.8 → CUDA/12.1.1 (Alice 系统更新) |
-| 2026-02-13 | P2-A 双 GPU 训练提交: L4 (979114) + A100 (979115) |
-| 2026-02-13 | Phase 2 Step 3 完成: L_neighbor + L_overlap + computability gating |
-| 2026-02-13 | P2-A SLURM 脚本 + 梯度门禁 12/12 + 回归 10/10 |
-| 2026-02-11 | Phase 1 完成 + test 锁定评估 + 文档全量更新 |
-| 2026-02-10 | ALICE 训练提交 (L4+A100)，统一推理核心 |
-| 2026-02-05 | Instance-level 训练修复，E29 基线 |
+| 2026-02-19 | T3b Adaptive radius 重扫完成; 文档优化 (TOC + 早期实验归档) |
+| 2026-02-16 | P2-A Fix3 审核完成, **P2-A 终止** |
+| 2026-02-15 | P2-A Fix1-2 失败; Fix3 延迟启用方案 |
+| 2026-02-14 | E34 检测参数锁定 (test73 封板) |
+| 2026-02-13 | Phase 2 Step 3 完成; GT 框面积过滤 Bug 修复; CUDA 模块更新 |
+| 2026-02-11 | Phase 1 完成 + test 锁定评估 |
+| 2026-02-05 | Instance-level 训练修复; Semantic Dice 无意义发现 |
 
 ---
 
