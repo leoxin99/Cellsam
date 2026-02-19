@@ -1,12 +1,16 @@
 """
 Detection parameter profiles.
 
-This module centralizes the two execution profiles used in this project:
-1) runtime_default: follow detection function defaults in src/detection/dapi.py
-2) locked_eval: frozen parameters for standardized val/test evaluation
+This module centralizes the locked detection parameters for this project.
+Only the `locked_eval` profile is active — it contains the best parameters
+from E34/E34b (DAPI) and T3b (Adaptive) ablation experiments.
+
+Historical runtime_default values are documented in CLAUDE.md for reference:
+  DAPI: min_area=200, max_area=10000, edge=32, ratio=3.0, merge=1.2
+  Adaptive: radius=256, min_zlines=15, zline_threshold=0.03
 
 Goal:
-- Reduce accidental use of runtime defaults in final evaluation
+- Single source of truth for all detection parameters
 - Make active detection parameters explicit and auditable
 """
 
@@ -15,32 +19,8 @@ import json
 
 
 DETECTION_PROFILES = {
-    "runtime_default": {
-        "description": "Code defaults in src/detection/dapi.py (for daily runtime).",
-        "dapi": {
-            "min_nucleus_area": 200,
-            "max_nucleus_area": 10000,
-            "edge_margin": 32,
-            "size_ratio_threshold": 3.0,
-            "merge_coeff": 1.2,
-            "use_relative_distance": True,
-            "fixed_merge_distance": 373,
-        },
-        "adaptive": {
-            "min_nucleus_area": 200,
-            "max_nucleus_area": 10000,
-            "search_radius": 256,
-            "min_zlines": 15,
-            "zline_threshold": 0.03,
-            "edge_margin": 32,
-            "size_ratio_threshold": 3.0,
-            "merge_coeff": 1.2,
-            "use_relative_distance": True,
-            "fixed_merge_distance": 373,
-        },
-    },
     "locked_eval": {
-        "description": "Frozen E34/E34b eval parameters (for standardized reporting).",
+        "description": "Frozen E34/E34b (DAPI) + T3b (Adaptive) parameters.",
         "dapi": {
             "min_nucleus_area": 1500,
             "max_nucleus_area": 20000,
@@ -53,9 +33,9 @@ DETECTION_PROFILES = {
         "adaptive": {
             "min_nucleus_area": 1500,
             "max_nucleus_area": 20000,
-            "search_radius": 200,
+            "search_radius": 160,        # T3b best (was 200 in E34)
             "min_zlines": 5,
-            "zline_threshold": 0.01,
+            "zline_threshold": 0.05,     # T3b best (was 0.01 in E34)
             "edge_margin": 20,
             "size_ratio_threshold": 2.5,
             "merge_coeff": 1.4,

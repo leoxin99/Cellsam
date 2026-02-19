@@ -122,25 +122,101 @@
   - [ ] PQ 是否超过 Phase 1 (0.475)
   - [ ] 决定是否纳入论文消融表
 
-### T12. P2-D (lr=5e-5) + P2-E (epochs=80) 消融 🆕
-- 优先级: P1
-- 目标: 论文消融表需要的 lr/epochs 对比
-- 方案:
-  - P2-D: `phase1_rebalance` + `lr: 5e-5` (其余不变)
-  - P2-E: `phase1_rebalance` + `epochs: 80` (其余不变)
-- 完成标准:
-  - [ ] P2-D 训练 + test(73) 评估
-  - [ ] P2-E 训练 + test(73) 评估
+### T12. Phase 1 Loss 消融实验 (论文 Ablation Table) 🆕🔴 HIGH PRIORITY
+- **执行者**: A2
+- **优先级**: **P0** (论文 Table 必需)
+- **背景**: Phase 1 同时改了 4 个变量 (pos_weight/boundary_weight/contour_weight/pq_early_stop)，无法归因各自贡献。论文需要逐变量消融表。
+- **目标**: 建立完整的 loss 消融表，证明每个组件的贡献
 
-### T13. T7 Adapter Instance 评估 🆕
+#### 基准配置 (Baseline = Phase 1)
+```yaml
+# 文件: src/config/phase1_rebalance_l4.yaml — 所有消融实验的基准
+# 以下参数在所有消融中保持不变 (除被消融的变量外):
+data:
+  target_size: [1024, 1024]
+  use_bf_only: true
+model:
+  freeze_encoder: true
+  use_adapter: false
+training:
+  epochs: 50
+  batch_size: 4
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  warmup_epochs: 5
+  early_stop_patience: 15
+  use_pq_early_stop: true
+optimizer:
+  type: "adamw"
+  scheduler: "cosine_warmup"
+# === 以下为被消融的 loss 参数 (Phase 1 最优值) ===
+loss:
+  pos_weight: 2.0
+  boundary_weight: 1.5
+  use_boundary: true
+  use_aji: true
+  aji_weight: 0.2
+  use_contour: true
+  contour_weight: 0.3
+```
+
+#### 控制变量规则
+> **每个消融实验只改一个变量**，其余完全复用 Phase 1 基准。
+> 评估指标: Oracle(test, 73) BM-1to1 Dice + PQ + AJI。
+
+#### 第一层: 开/关消融 (必做, 5 个实验)
+
+| ID | 实验 | 改动 | 配置文件 | 目的 |
+|----|------|------|---------|------|
+| Ab-1 | 关 BoundaryLoss | `use_boundary: false` | `ablation_no_boundary.yaml` | Boundary 的贡献 |
+| Ab-2 | 关 ContourLoss | `use_contour: false` | `ablation_no_contour.yaml` | Contour 的贡献 |
+| Ab-3 | 关 AJI Loss | `use_aji: false` | `ablation_no_aji.yaml` | AJI 的贡献 |
+| Ab-4 | 关 PQ 早停 | `use_pq_early_stop: false` | `ablation_no_pqstop.yaml` | PQ 早停的贡献 |
+| Ab-5 | 恢复 pos_weight=10 | `pos_weight: 10.0` | `ablation_posw10.yaml` | pos_weight 降低的贡献 |
+
+#### 第二层: 权重级消融 (建议做, 5 个实验)
+
+| ID | 实验 | 改动 | 目的 |
+|----|------|------|------|
+| Ab-6 | boundary_weight=0.5 (E29 值) | 恢复旧值 | 确认 1.5 vs 0.5 |
+| Ab-7 | boundary_weight=3.0 | 进一步提高 | 是否越高越好 |
+| Ab-8 | contour_weight=0.1 (原值) | 恢复旧值 | 0.3 vs 0.1 |
+| Ab-9 | aji_weight=0.5 | 提高 | AJI 是否被低估 |
+| Ab-10 | pos_weight=5.0 | 中间值 | 10→5→2 最优点 |
+
+#### 第三层: 超参数消融 (已有 P2-D/E)
+
+| ID | 实验 | 改动 |
+|----|------|------|
+| P2-D | lr=5e-5 | 其余不变 |
+| P2-E | epochs=80 | 其余不变 |
+
+#### ⚠️ 已知待审计参数
+以下参数为**硬编码默认值**, 无文档化理由, 需在消融中标注:
+- `BoundaryLoss(boundary_width=3)` — 3px 侵蚀核, 来源未记录
+- `raw_base = 0.3` — base loss 权重地板, 来源: `max(0.3, 1 - total_extra)`
+- `AJILoss(smooth=1.0)` — Jaccard 平滑项
+
+#### 完成标准
+- [ ] Ab-1~5 (第一层) 训练 + Oracle(test73) 评估完成
+- [ ] Ab-6~10 (第二层) 至少完成 Ab-6, Ab-8
+- [ ] P2-D, P2-E 训练 + 评估完成
+- [ ] 汇总为论文 Ablation Table (每行一个实验, 列: PQ / BM-Dice / AJI)
+- [ ] 结果写入 `experiments_log.md`
+
+#### GPU 时间估算
+- 第一层: 5 × 4.5h = **22.5h**
+- 第二层: 5 × 4.5h = **22.5h** (按需)
+- 第三层: 2 × 4.5h = **9h**
+
+### T13. Adapter vs BF 公平对比 (原 T7, 已重定义) 🆕
 - 优先级: P1
-- 目标: 评估 E30/E32 现有 checkpoint 的 Instance 指标
-- 方案 A (先做): 直接用 `comprehensive_eval.py` 评估 E30/E32 checkpoint
-- 方案 B (后做): 如果 A 有潜力，用 Instance loss 重训 Adapter
+- 背景: E30/E32 旧 checkpoint 仅用 10% 数据 + 旧 loss 配置 (pos_weight=10, boundary=0.5, 无 PQ 早停)，与 Phase 1 配置差距极大，直接评估无意义
+- **正确方案**: 用 Phase 1 最优配置 (`phase1_rebalance_l4.yaml`)，仅改 `use_adapter=true` + `use_bf_only=false`，重新训练 Adapter 版本
 - 完成标准:
-  - [ ] E30 Oracle(test) PQ/BM-Dice
-  - [ ] E32 Oracle(test) PQ/BM-Dice
-  - [ ] 与 Phase 1 (PQ=0.475) 对比
+  - [ ] 创建 `adapter_phase1_fair.yaml` (基于 phase1_rebalance_l4，改 adapter=true, bf_only=false)
+  - [ ] 全量训练 + test(73) 评估 (Oracle PQ/BM-Dice)
+  - [ ] 与 Phase 1 BF (PQ=0.4641) 公平对比
 
 ### T14. P2-B 诊断实验 A: P1 冲突量化 🆕
 - 优先级: P1

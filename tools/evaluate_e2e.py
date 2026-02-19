@@ -66,8 +66,6 @@ def evaluate_e2e(checkpoint_path="checkpoints/bf_baseline_full_best.pt",
     dapi_params = apply_overrides(profile_cfg["dapi"], detection_overrides or {})
     print("Detection profile snapshot:")
     print(format_detection_profile_snapshot(detection_profile, dapi_params))
-    if detection_profile == "runtime_default":
-        print("Warning: runtime_default is for daily runtime, not final locked evaluation.")
     
     # Load test data
     test_ids = Path("data/splits/test_ids.txt").read_text().strip().split('\n')

@@ -44,6 +44,29 @@ from metrics.instance_metrics import (
 # - compute_pq_unified      (PQ with Hungarian matching)
 
 
+def set_seed(seed: int):
+    """Set random seed for reproducibility across all randomness sources.
+    
+    Covers:
+      1. torch.manual_seed — PyTorch CPU ops
+      2. torch.cuda.manual_seed_all — PyTorch GPU ops
+      3. numpy.random.seed — NumPy (used by Albumentations)
+      4. random.seed — Python stdlib (box shuffle, box augmentation)
+      5. cuDNN deterministic — disable nondeterministic algorithms
+      6. DataLoader reproducibility via worker_init_fn (handled separately)
+    """
+    import random
+    import numpy as np
+    
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    print(f"Random seed set to {seed} (deterministic mode)")
+
+
 def load_config(config_path: str) -> dict:
     """Load YAML configuration file."""
     with open(config_path, 'r') as f:
@@ -476,6 +499,11 @@ def main():
     # Setup device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
+    
+    # Set random seed if specified (for reproducibility in ablation experiments)
+    seed = config['training'].get('seed', None)
+    if seed is not None:
+        set_seed(seed)
     
     # Create output directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

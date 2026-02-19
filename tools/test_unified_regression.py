@@ -90,14 +90,12 @@ def test_detection_profile_guardrails():
     print("=== Test 2b: Detection Profile Guardrails ===")
 
     profiles = set(available_detection_profiles())
-    assert "runtime_default" in profiles, "Missing runtime_default profile"
     assert "locked_eval" in profiles, "Missing locked_eval profile"
 
-    runtime = get_detection_profile("runtime_default")
     locked = get_detection_profile("locked_eval")
-    assert runtime["dapi"]["min_nucleus_area"] == 200
     assert locked["dapi"]["min_nucleus_area"] == 1500
-    assert locked["adaptive"]["search_radius"] == 200
+    assert locked["adaptive"]["search_radius"] == 160  # T3b best
+    assert locked["adaptive"]["zline_threshold"] == 0.05  # T3b best
 
     project_root = Path(__file__).parent.parent
     required_scripts = [
@@ -112,7 +110,7 @@ def test_detection_profile_guardrails():
             f"{rel_path} missing profile CLI guardrail"
         )
 
-    print("  [OK] Profiles: runtime_default + locked_eval")
+    print("  [OK] Profile: locked_eval (DAPI E34b + Adaptive T3b)")
     print("  [OK] Key scripts expose profile CLI")
     print("  PASS\n")
 

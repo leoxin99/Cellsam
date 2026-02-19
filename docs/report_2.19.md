@@ -88,8 +88,8 @@ CellFinder F1=0.012 → DAPI v1 F1=0.75 → Bug修复 F1=0.78 → E34b F1=0.81 �
 | **集群训练** | E24-E28 | 02-03~04 | 在 ALICE HPC 跑 5 组: E24 BF(A100), E25 Boundary(L4), E26 3ch NoAdapter(L4), E27 3ch Adapter(A100), E28 BF Adapter(A100) | 全部 Semantic Dice ~0.75 (实际 Instance Dice=0.03) | ⚠️ 指标假象 |
 | **⚠️ 关键发现** | — | 02-05 | **所有 E01-E28 的训练 target 是 `mask > 0` (Semantic)**，将全部细胞合并为一个 blob。E25 实例分析: Pred area=105129 vs GT=41477, Instance IoU=0.033 | Instance Dice=**0.03** | 🔴 关键转折点 |
 | **Instance 修复** | E29 | 02-05 | 修复: ① target = `mask == cell_id` (Instance-level) ② Box clipping ③ Instance Dice 验证. 新增 ContourLoss + GridDistortion. 设计 Phase 1/2 分阶段方案 | PQ=**0.33**, BM-Dice=0.59 | ✅ Instance 训练有效 |
-| **Phase 1** 🔑 | P1 | 02-10~11 | Loss 权重重平衡: boundary 0.5→**1.5**, contour OFF→**0.3**, pos_weight 10→**2**. PQ 早停 (patience=15). ALICE L4+A100 双卡训练 | **PQ=0.4641, BM-Dice=0.6954** (Oracle test) | ✅ PQ 较 E29 +44% |
-| **Phase 2-A** | P2-A | 02-12+ | 添加 Non-Overlap Loss: L_neighbor (邻居入侵惩罚) + L_overlap (重叠互斥惩罚). 含 computability gating + 归一化 | PQ **退化** | ⚠️ Loss 设计过保守 |
+| **Phase 1** 🔑 | P1 | 02-10~11 | Loss 权重重平衡: boundary 0.5→**1.5**, contour OFF→**0.3** (❓训练时为旧版 scipy, 零梯度; 02-12 已重构为 GPU 版), pos_weight 10→**2**, AJI(0.2). PQ 早停 (patience=15). ALICE L4+A100 双卡训练 | **PQ=0.4641, BM-Dice=0.6954** (Oracle test) | ✅ PQ 较 E29 +41% |
+| **Phase 2-A** | P2-A | 02-12+ | 添加 Non-Overlap Loss: L_neighbor(0.3) + L_overlap(0.1), warmup=5 epochs. 含 computability gating + Loss 归一化 | PQ **退化** | ⚠️ Loss 设计过保守 |
 | **P2-A Fix1-3** | — | 02-15~17 | Fix1: 从 P1 微调 (非从头训), Fix2: 延迟介入 (5 epoch 后开始), Fix3: 权重递减 (0.5→0.1) | 均持续退化 | ❌ N/O Loss 过度惩罚正常边界 |
 
 **分割方向总结**:
@@ -98,20 +98,24 @@ CellFinder F1=0.012 → DAPI v1 F1=0.75 → Bug修复 F1=0.78 → E34b F1=0.81 �
 Pretrained PQ=0   →  E01 Dice=0.52  →  E09 发现PQ=0  →  E12 PQ=0.087  →  [E01-E28 Semantic假象]
                                           (指标体系)       (+265%)          2026-02-05 发现
                                                                                     ↓
-Phase 1 PQ=0.475  ←  E29 PQ=0.33  ←←←←←←←←←←←←←←←←←←←←←←←←←←←  Instance修复
-(+44%, 当前最佳)        (Instance训练)
+Phase 1 PQ=0.464  ←  E29 PQ=0.33  ←←←←←←←←←←←←←←←←←←←←←←←←←←←  Instance修复
+(+41%, 当前最佳)        (Instance训练)
 ```
 
-**Phase 1 最终指标 (test 73 锁定)**:
+**Phase 1 最终指标 (test 73 锁定, 无后处理)**:
 
 | 指标 | Oracle (GT boxes) | E2E (DAPI 检测框) | Gap |
 |------|:--:|:--:|:--:|
 | **BM-1to1 Dice** | **0.6954** | 0.5446 | -0.151 |
 | **PQ@0.5** | **0.4641** | 0.1719 | -0.292 |
+| **SQ** | **0.616** | 0.544 | -0.072 |
+| **RQ** | **0.753** | 0.290 | **-0.463** |
 | **AJI** | **0.5195** | 0.3181 | -0.201 |
 | Semantic Dice | 0.7566 | 0.6006 | -0.156 |
 
-> Oracle-E2E Gap 主要来自检测质量 (DAPI F1=0.80 不完美)，不是分割能力不足。
+> **PQ = SQ × RQ**. Oracle→E2E 的 RQ 降 61% (0.753→0.290)，说明 gap 主因是检测阶段的 FP/FN (DAPI F1=0.80 不完美)，而非分割质量 (SQ)。
+>
+> ⚠️ ContourLoss(0.3) 在 Phase 1 训练时 (02-10~11) 为旧版 scipy 实现，零梯度。已于 02-12 (P2 Step 2) 重构为 GPU `F.max_pool2d` 版，当前代码有梯度。P1 实际有效 loss: Dice+BCE+Boundary(1.5)+AJI(0.2)+ContourLoss(0.3, 零梯度)。后续消融实验 (T12) 将使用修复后的版本。
 
 ### 2.3 关键教训与决策
 
@@ -125,7 +129,7 @@ Phase 1 PQ=0.475  ←  E29 PQ=0.33  ←←←←←←←←←←←←←←�
 | 01-11 | 采用边界损失 (E12) | PQ +265% |
 | **02-05** | **发现 Semantic Dice 假象**，E01-E28 全部失效 | 🔴 重新定义训练 target |
 | **02-05** | 发现图像分辨率记录错误 | 所有参数重算 |
-| 02-10 | Phase 1 Loss 重平衡 | 当前最优 PQ=0.475 |
+| 02-10 | Phase 1 Loss 重平衡 | 当前最优 PQ=0.464 (test) |
 | 02-15~17 | P2-A (N/O Loss) 退化，3 轮修复均失败 | N/O Loss 方向暂停 |
 
 ---
@@ -143,7 +147,7 @@ src/
 │   └── phase2a_neighbor_overlap.yaml  # Phase 2-A 配置
 ├── detection/
 │   ├── dapi.py                        # DAPI 核检测 + Adaptive Z-线检测
-│   └── profiles.py                    # 参数 profile (runtime_default / locked_eval)
+│   └── profiles.py                    # 检测参数 profile (locked_eval, E34b+T3b 封板)
 ├── inference/
 │   ├── core.py                        # 统一推理核心 (InferenceConfig + segment_with_boxes)
 │   └── postprocess.py                 # 后处理 (面积过滤/形态学)
@@ -207,8 +211,10 @@ python tools/visualize_phase1_napari.py
 **脚本自动完成**:
 1. 加载 Phase 1 最优模型 (`checkpoints/E_phase1_rebalance_l4/best_model.pt`)
 2. 取 **test 集前 5 个样本** (确定性，非随机)
-3. 对每个样本分别用 **GT 框 / DAPI 核框 / Z-line Adaptive 框** 推理
-4. 在 napari 中展示:
+3. 使用 **locked_eval 封板参数** (E34b DAPI + T3b Adaptive) 进行检测
+4. 对每个样本分别用 **GT 框 / DAPI 核框 / Z-line Adaptive 框** 推理
+5. **无后处理** (apply_postprocess=False, 与正式评估一致)
+6. 在 napari 中展示:
    - 3 个图像通道 (BF, DAPI, Actn2)
    - GT 分割 mask (ground truth)
    - 3 种框来源的分割结果 (Seg(GT) / Seg(DAPI) / Seg(Z-line))
@@ -239,7 +245,7 @@ python tools/visualize_phase1_napari.py
 | 任务 | 内容 | 执行者 | 状态 |
 |------|------|--------|------|
 | **T11 LoRA** | Encoder 加 LoRA (rank=4~8), 尝试突破 PQ=0.50 | A2 | ⏳ |
-| **T13** | 评估 E30/E32 Adapter Instance checkpoint | A1/A2 | ⏳ |
+| **T13** | Adapter vs BF 公平对比 (用 P1 配置重训 Adapter，E30/E32 旧 checkpoint 因 10% 数据+旧 loss 已无意义) | A1/A2 | ⏳ |
 | **T14** 🆕 | P2-B 诊断 A: 量化 P1 的 conflict_rate + intrusion_rate | A1/A2 | ⏳ |
 | **T15** 🆕 | P2-B 诊断 B: Oracle 冲突消解 → PQ delta 判断冲突是否是瓶颈 | A1/A2 | ⏳ |
 
@@ -261,8 +267,11 @@ python tools/visualize_phase1_napari.py
 |---|------|------|
 | 1 | LoRA vs baseline 哪个先做 | **顺序灵活**，哪个方便先做哪个 |
 | 2 | P2-B (N/O Loss) 是否继续 | **暂停**，先做诊断实验 T14+T15 再决定；如果做，用全局计算版本 |
-| 3 | napari 展示数据 | 使用 **test 集前 5 个样本** (已修改脚本) |
+| 3 | napari 展示数据 | 使用 **test 集前 5 个样本** (已修改脚本)，使用 locked_eval 封板参数 |
 | 4 | 本地 conda 环境 | ✅ `conda activate cellsam` 可用 |
+| 5 | E30/E32 旧 Adapter checkpoint | **无意义** (10% 数据 + 旧 loss), T13 已改为用 P1 配置重训 |
+| 6 | 推理后处理 | 当前所有评估和展示均**无后处理** (apply_postprocess=False) |
+| 7 | 检测参数 profile | 已移除 runtime_default, 仅保留 **locked_eval** (E34b DAPI + T3b Adaptive) |
 
 ---
 

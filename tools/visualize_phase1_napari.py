@@ -24,12 +24,18 @@ from inference.core import (
     segment_with_boxes, InferenceConfig, load_cellsam_checkpoint
 )
 from detection.dapi import detect_and_create_boxes, detect_with_adaptive_box
+from detection.profiles import get_detection_profile
 
 
 # ============== Configuration ==============
 CHECKPOINT = "checkpoints/E_phase1_rebalance_l4/best_model.pt"
 N_SAMPLES = 5
 SPLIT = "test"  # use test set for supervisor demo
+
+# Load locked_eval profile parameters
+_PROFILE = get_detection_profile("locked_eval")
+_DAPI_PARAMS = _PROFILE["dapi"]
+_ADAPTIVE_PARAMS = _PROFILE["adaptive"]
 
 # Colors for different box types (RGBA, 0-1)
 BOX_COLORS = {
@@ -99,7 +105,16 @@ def detect_dapi_boxes(raw_image):
     else:
         dapi_u8 = dapi_channel.astype(np.uint8)
     
-    boxes, _, _ = detect_and_create_boxes(dapi_u8)
+    boxes, _, _ = detect_and_create_boxes(
+        dapi_u8,
+        min_nucleus_area=_DAPI_PARAMS["min_nucleus_area"],
+        max_nucleus_area=_DAPI_PARAMS["max_nucleus_area"],
+        size_ratio_threshold=_DAPI_PARAMS["size_ratio_threshold"],
+        use_relative_distance=_DAPI_PARAMS["use_relative_distance"],
+        fixed_merge_distance=_DAPI_PARAMS["fixed_merge_distance"],
+        merge_coeff=_DAPI_PARAMS["merge_coeff"],
+        edge_margin=_DAPI_PARAMS["edge_margin"],
+    )
     return boxes if boxes else []
 
 
@@ -124,6 +139,16 @@ def detect_zline_boxes(raw_image):
     boxes, _, _ = detect_with_adaptive_box(
         dapi_channel=dapi_u8,
         actn2_channel=actn2_u8,
+        min_nucleus_area=_ADAPTIVE_PARAMS["min_nucleus_area"],
+        max_nucleus_area=_ADAPTIVE_PARAMS["max_nucleus_area"],
+        search_radius=_ADAPTIVE_PARAMS["search_radius"],
+        min_zlines=_ADAPTIVE_PARAMS["min_zlines"],
+        zline_threshold=_ADAPTIVE_PARAMS["zline_threshold"],
+        margin=_ADAPTIVE_PARAMS["edge_margin"],
+        size_ratio_threshold=_ADAPTIVE_PARAMS["size_ratio_threshold"],
+        use_relative_distance=_ADAPTIVE_PARAMS["use_relative_distance"],
+        fixed_merge_distance=_ADAPTIVE_PARAMS["fixed_merge_distance"],
+        merge_coeff=_ADAPTIVE_PARAMS["merge_coeff"],
     )
     return boxes if boxes else []
 
