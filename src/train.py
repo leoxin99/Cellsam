@@ -490,11 +490,17 @@ def validate(model, dataloader, criterion, device, adapter=None, use_pq=False, b
 def main():
     parser = argparse.ArgumentParser(description='CellSAM Training')
     parser.add_argument('--config', type=str, required=True, help='Path to config YAML')
+    parser.add_argument('--seed', type=int, default=None, help='Override seed in config (for multi-seed ablation)')
     args = parser.parse_args()
     
     # Load config
     config = load_config(args.config)
     print(f"Loaded config: {args.config}")
+    
+    # CLI seed override (for running same config with different seeds)
+    if args.seed is not None:
+        config['training']['seed'] = args.seed
+        print(f"Seed overridden by CLI: {args.seed}")
     
     # Setup device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

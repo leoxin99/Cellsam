@@ -1,18 +1,18 @@
 #!/bin/bash -l
-#SBATCH --job-name=abl_l4
-#SBATCH --partition=gpu-l4-24g
+#SBATCH --job-name=abl_a100
+#SBATCH --partition=gpu-a100-80g
 #SBATCH --gres=gpu:1
-#SBATCH --time=180:00:00
+#SBATCH --time=72:00:00
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=8
-#SBATCH --output=logs/abl_l4_%j.log
-#SBATCH --error=logs/abl_l4_%j.err
+#SBATCH --output=logs/abl_a100_%j.log
+#SBATCH --error=logs/abl_a100_%j.err
 
 # ============================================
-# T12 Loss Ablation — L4 (Round 2, seed=123)
+# T12 Loss Ablation — A100 (Round 1, seed=42)
 # 7 runs: Phase1 baseline + 6 ablations
 # + auto Oracle eval after each run
-# Estimated: 7 × (~20h train + ~1h eval) = ~147h
+# Estimated: 7 × (~8h train + ~0.5h eval) = ~60h
 # ============================================
 
 set -o pipefail  # no -e: allow individual runs to fail without killing the whole job
@@ -22,10 +22,10 @@ eval "$(conda shell.bash hook)"
 conda activate cellsam
 set -u
 
-SEED=123
+SEED=42
 
 echo "============================================"
-echo "T12 Loss Ablation — L4 (seed=$SEED)"
+echo "T12 Loss Ablation — A100 (seed=$SEED)"
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $(hostname)"
 echo "GPU: $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader)"
@@ -71,7 +71,7 @@ train_and_eval() {
   fi
 }
 
-# ---- Phase1 Baseline (seed=123, Round 2) ----
+# ---- Phase1 Baseline (seed=42) ----
 train_and_eval "phase1_rebalance_l4" "1/7 Phase1-Baseline" || true
 
 # ---- 6 Ablation Groups ----
