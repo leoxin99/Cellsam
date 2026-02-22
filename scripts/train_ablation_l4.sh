@@ -2,7 +2,7 @@
 #SBATCH --job-name=abl_l4
 #SBATCH --partition=gpu-l4-24g
 #SBATCH --gres=gpu:1
-#SBATCH --time=180:00:00
+#SBATCH --time=167:00:00
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=8
 #SBATCH --output=logs/abl_l4_%j.log
