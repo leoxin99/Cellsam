@@ -20,7 +20,7 @@ model:
   use_adapter: false
 
 training:
-  epochs: 50
+  epochs: 80                       # R1: Ab-5 s123 best_ep=40 hit ceiling at 50; need room
   batch_size: 4
   learning_rate: 0.0001
   weight_decay: 0.0001
