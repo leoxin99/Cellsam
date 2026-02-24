@@ -26,19 +26,21 @@ class SemanticChannelMapper:
     """
     语义通道映射器: 将 (BF, DAPI, Actn2) 映射为 SAM 友好的伪 RGB
     
-    通道映射:
-        R ← Actn2 (Ch2): 肌节纹理, P0.5-P99.5 百分位截断
-        G ← BF (Ch0): 细胞边界, CLAHE 增强
-        B ← DAPI (Ch1): 细胞核, 高斯平滑
+    通道映射 (生物学一致):
+        R ← BF (Ch0): 细胞边界, CLAHE 增强
+        G ← Actn2 (Ch2): 肌节纹理 (绿色荧光), P1-P99 百分位截断
+        B ← DAPI (Ch1): 细胞核 (蓝色荧光), 高斯平滑
     """
     
     def __init__(self, 
                  actn2_percentile: Tuple[float, float] = (1.0, 99.0),  # Data-driven: P1-P99
                  clahe_clip: float = 2.0,
                  clahe_grid: Tuple[int, int] = (8, 8),
-                 dapi_sigma: float = 1.5):  # Data-driven: mild smoothing
+                 dapi_sigma: float = 1.5,  # Data-driven: mild smoothing
+                 use_2ch: bool = False):    # 2ch mode: B channel = BF copy instead of DAPI
         self.actn2_percentile = actn2_percentile
         self.dapi_sigma = dapi_sigma
+        self.use_2ch = use_2ch
         self.clahe = cv2.createCLAHE(clipLimit=clahe_clip, tileGridSize=clahe_grid)
     
     def __call__(self, image: np.ndarray) -> np.ndarray:
@@ -46,15 +48,18 @@ class SemanticChannelMapper:
         Args:
             image: (H, W, 3) with channels [BF, DAPI, Actn2]
         Returns:
-            mapped: (H, W, 3) with channels [R=Actn2, G=BF, B=DAPI], float32 [0, 1]
+            mapped: (H, W, 3) with channels [R=BF, G=Actn2, B=DAPI], float32 [0, 1]
         """
         bf = image[..., 0]      # Ch0
         dapi = image[..., 1]    # Ch1
         actn2 = image[..., 2]   # Ch2
         
-        r = self._process_actn2(actn2)
-        g = self._process_bf(bf)
-        b = self._process_dapi(dapi)
+        r = self._process_bf(bf)         # R ← BF (灰度, CLAHE 增强)
+        g = self._process_actn2(actn2)    # G ← Actn2 (绿色荧光)
+        if self.use_2ch:
+            b = self._process_bf(bf)      # B ← BF copy (2ch mode: no DAPI)
+        else:
+            b = self._process_dapi(dapi)  # B ← DAPI (蓝色荧光)
         
         return np.stack([r, g, b], axis=-1).astype(np.float32)
     
@@ -184,18 +189,21 @@ class AugmentedAllenDataset(Dataset):
         max_boxes_per_image: int = 50,
         sample_ids: List[str] = None,
         use_bf_only: bool = False,
-        use_semantic_mapping: bool = False  # NEW: Semantic channel mapping (R=Actn2, G=BF, B=DAPI)
+        use_semantic_mapping: bool = False,  # Semantic channel mapping (R=BF, G=Actn2, B=DAPI)
+        use_2ch: bool = False  # 2ch mode: B channel = BF copy (only with semantic_mapping)
     ):
         self.target_size = target_size
         self.max_boxes = max_boxes_per_image
         self.is_training = is_training
         self.use_bf_only = use_bf_only
         self.use_semantic_mapping = use_semantic_mapping
+        self.use_2ch = use_2ch
         
         # Initialize semantic mapper if enabled
         if use_semantic_mapping:
-            self.mapper = SemanticChannelMapper()
-            print("✅ Semantic Channel Mapping enabled: R=Actn2, G=BF, B=DAPI")
+            self.mapper = SemanticChannelMapper(use_2ch=use_2ch)
+            mode_str = "R=BF, G=Actn2, B=BF(copy)" if use_2ch else "R=BF, G=Actn2, B=DAPI"
+            print(f"✅ Semantic Channel Mapping enabled: {mode_str}")
 
         # Setup transforms
         if is_training:
@@ -374,7 +382,7 @@ class AugmentedAllenDataset(Dataset):
         # Normalize each channel (or apply semantic mapping)
         if image.ndim == 3 and image.shape[-1] == 3:
             if self.use_semantic_mapping:
-                # Semantic mapping: R=Actn2, G=BF, B=DAPI (already normalized by mapper)
+                # Semantic mapping: R=BF, G=Actn2, B=DAPI (already normalized by mapper)
                 image = self.mapper(image)  # Returns (H, W, 3) float32 [0, 1]
                 image = image.transpose(2, 0, 1)  # (H, W, 3) -> (3, H, W)
             elif self.use_bf_only:

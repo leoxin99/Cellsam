@@ -2,7 +2,7 @@
 # Usage: python src/train.py --config src/config/semantic_adapter.yaml
 # 
 # 新特性:
-#   - use_semantic_mapping: 启用语义通道映射 (R=Actn2, G=BF, B=DAPI)
+#   - use_semantic_mapping: 启用语义通道映射 (R=BF, G=Actn2, B=DAPI)
 #   - use_adapter: 启用 IndependentChannelAdapter (可学习)
 
 data:

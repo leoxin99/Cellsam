@@ -82,6 +82,7 @@ def create_dataloaders(config: dict):
     # Get flags from config
     use_bf_only = config['data'].get('use_bf_only', False)
     use_semantic_mapping = config['data'].get('use_semantic_mapping', False)
+    use_2ch = config['data'].get('use_2ch', False)
     
     train_dataset = AugmentedAllenDataset(
         data_dir=config['data']['processed_data_dir'],
@@ -90,7 +91,8 @@ def create_dataloaders(config: dict):
         max_boxes_per_image=config['data']['max_boxes_per_image'],
         sample_ids=train_ids,
         use_bf_only=use_bf_only,
-        use_semantic_mapping=use_semantic_mapping
+        use_semantic_mapping=use_semantic_mapping,
+        use_2ch=use_2ch
     )
     
     val_dataset = AugmentedAllenDataset(
@@ -100,7 +102,8 @@ def create_dataloaders(config: dict):
         max_boxes_per_image=config['data']['max_boxes_per_image'],
         sample_ids=val_ids,
         use_bf_only=use_bf_only,
-        use_semantic_mapping=use_semantic_mapping
+        use_semantic_mapping=use_semantic_mapping,
+        use_2ch=use_2ch
     )
     
     train_loader = DataLoader(

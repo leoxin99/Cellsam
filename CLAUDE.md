@@ -52,15 +52,31 @@ Phase 2 结构改进     [███████████████░░░
 | 训练平台 | ALICE L4 (Job 974531) |
 | Best Epoch | 49/50 |
 
-### 当前状态: P2-A 终止, 进入 Baseline + 消融实验
+### 当前状态: Baseline 完成, 进入论文写作
 
 **P2-A (N/O Loss) 已终止**: Fix1-3 均证明 N/O loss 导致 PQ 退化 (详见 `experiments_log.md`)
+
+**T16 Baseline 对比 ✅ (2026-02-22 完成)**:
+
+| Method | Type | PQ | BM-Dice | AJI |
+|--------|------|----|---------|-----|
+| Cellpose v4 | E2E | 0.000 | 0.053 | 0.025 |
+| SAMCell | E2E | 0.000 | 0.008 | 0.004 |
+| CellSAM (pretrained) | Oracle | 0.000 | 0.121 | 0.056 |
+| SAM ViT-B | Oracle | 0.286 | 0.631 | 0.440 |
+| **Ours** | **Oracle** | **0.464** | **0.695** | **0.519** |
+| MedSAM | Oracle | 0.576 | 0.771 | 0.634 |
+| Ours | E2E | 0.180 | 0.567 | 0.338 |
+
+> ⚠️ MedSAM Oracle > Ours Oracle — 但 MedSAM 无检测能力，Ours 是唯一 E2E 方案
+
+**Box Clipping 消融 (T19-abl)**: with_clip PQ=0.466 > no_clip PQ=0.437 (-6.2%) → clipping 有防御价值
 
 **当前工作重点**:
 
 | 任务 | 执行者 | 状态 |
 |------|---------|------|
-| Baseline 对比 (Cellpose/StarDist/MedSAM/SAMCell) | A2 | 🔄 方案审核通过, 执行中 |
+| Baseline 对比 (Cellpose/StarDist/MedSAM/SAMCell) | A2 | ✅ 完成 (StarDist P3 暂缓) |
 | P2-D/E LR+Epoch 消融 | A2 | ⏳ 待执行 |
 | T7 Adapter Instance 评估 (E30/E32) | A2 | ⏳ 待执行 |
 | T9 dataset_parameters.md 深度更新 | A1 | 🔄 执行中 |
@@ -303,7 +319,8 @@ docs/
 - [x] **T3b: Adaptive radius 重扫** — radius=160, F1=0.780 (val71)
 - [ ] P2-D/E: LR+Epoch 消融 (论文需要)
 - [ ] T7: Adapter Instance 评估
-- [ ] Baseline 对比实验 (Cellpose/StarDist/MedSAM/SAMCell)
+- [x] **T16 Baseline 对比实验 ✅** — 6/7 完成 (StarDist P3 暂缓)
+- [x] **T19-abl Box Clipping 消融 ✅** — clipping PQ=0.466 > no-clip PQ=0.437
 
 ---
 
@@ -355,6 +372,8 @@ docs/
 | **E34** | 02-13~14 | 检测参数锁定 | DAPI F1=0.803 (test73 封板) |
 | **P2-A** | 02-15~16 | N/O Loss Fix1-3 | ❌ **终止** (均退化) |
 | **T3b** | 02-19 | Adaptive radius 重扫 | F1=0.780 (radius=160) |
+| **T16** | 02-21~22 | Baseline 对比 (6 methods) | MedSAM PQ=0.576 最强 ⚠️ |
+| **T19-abl** | 02-22 | Box Clipping 消融 | clip PQ=0.466 > no-clip 0.437 ✅ |
 
 > 完整记录: [experiments_log.md](docs/experiments_log.md)
 
@@ -386,6 +405,7 @@ python tools/verify_training_config.py
 
 | 日期 | 内容 |
 |------|------|
+| 2026-02-22 | **T16 Baseline 完成** (6 methods); Box Clipping 消融; Cellpose d=200 补充 |
 | 2026-02-19 | T3b Adaptive radius 重扫完成; 文档优化 (TOC + 早期实验归档) |
 | 2026-02-16 | P2-A Fix3 审核完成, **P2-A 终止** |
 | 2026-02-15 | P2-A Fix1-2 失败; Fix3 延迟启用方案 |

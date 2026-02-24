@@ -99,12 +99,72 @@
 | P2-A Fix2 | 2026-02-15 | N/O Loss (N=0.1, O=0.05) | PQ=0.393 | ⚠️ 改善但差 |
 | P2-A Fix3 | 2026-02-16 | N/O Loss 延迟启用 | PQ=0.466 (N/O OFF时) | ⚠️ P2-A 终止 |
 | T3b | 2026-02-19 | Adaptive search_radius 重扫 | F1=0.780 (radius=160) | ✅ 完成 |
+| **T16** | **2026-02-21~22** | **Baseline 对比 (6 methods)** | **见详细表** | **✅ 完成** |
+| T16-d200 | 2026-02-22 | Cellpose diameter=200 补充 | PQ=0.002, BM=0.190 | ✅ 完成 |
+| **T19-abl** | **2026-02-22** | **Box Clipping 消融** | **clip PQ=0.466 > no-clip PQ=0.437** | **✅ 完成** |
+| **T12** | **2026-02-23** | **Loss 消融 (7×2 seeds)** | **posw=10 PQ=0.494, contour 有害** | **✅ 完成** |
 
 
 
 ---
 
+## T16 Baseline 对比实验 ⭐⭐⭐ (2026-02-21~22)
 
+- **目的**: 论文 Table — 与公开方法对比
+- **评估集**: test(73), 统一使用 `compute_all_metrics()`
+- **脚本**: `baseline_eval.py`, `samcell_eval.py`, `comprehensive_eval.py`, `evaluate_e2e.py`
+
+| Method | Type | PQ | BM-Dice | AJI | Sem.Dice |
+|--------|------|----|---------|-----|----------|
+| Cellpose v4 (auto) | E2E | 0.000 | 0.053 | 0.025 | 0.079 |
+| Cellpose v4 (d=200) | E2E | 0.002 | 0.190 | 0.089 | 0.191 |
+| SAMCell (LIVECell) | E2E | 0.000 | 0.008 | 0.004 | 0.014 |
+| CellSAM (pretrained) | Oracle | 0.000 | 0.121 | 0.056 | 0.219 |
+| SAM ViT-B (vanilla) | Oracle | 0.286 | 0.631 | 0.440 | 0.756 |
+| **Ours (Phase1_L4)** | **Oracle** | **0.464** | **0.695** | **0.519** | **0.756** |
+| **MedSAM** | **Oracle** | **0.576** | **0.771** | **0.634** | **0.862** |
+| Ours (Phase1_L4) | E2E | 0.180 | 0.567 | 0.338 | 0.642 |
+
+> ⚠️ MedSAM (PQ=0.576) > Ours Oracle (PQ=0.464).
+> MedSAM 受益于 100 万+ 医学图像预训练，但没有检测能力。
+
+### T19-abl: Box Clipping 消融 (2026-02-22)
+
+- **目的**: 验证 `apply_box_clipping` 对 Ours Oracle 的影响（MedSAM baseline 无 clipping）
+- **脚本**: 内联 Python, 结果 `experiments/box_clipping_ablation/results.json`
+
+| 配置 | PQ | BM-Dice | AJI | Conflict Pixels |
+|------|----|---------|-----|-----------------|
+| **with_clip (默认)** | **0.466** | **0.714** | **0.557** | 52,262 |
+| no_clip | 0.437 | 0.703 | 0.545 | 57,781 |
+
+**结论**: 去掉 box clipping 反而降 6.2% PQ → 我们的模型在框外产生伪阳性，clipping 有防御价值。MedSAM 不需要 clipping 是因为其框外预测更精准（百万级训练数据的泛化能力更强）。
+
+### T12: Loss 消融实验 ⭐⭐⭐ (2026-02-23)
+
+- **目的**: 论文 Ablation Table — 量化各 loss 组件的贡献
+- **设计**: 7 组配置 × 2 seeds (seed=42 on A100, seed=123 on L4) = 14 runs
+- **基线**: Phase1 rebalance config (posw=2, boundary=1.5, contour=0.3, AJI=0.2, PQ early stop)
+- **评估**: Oracle (GT box), test(73), `comprehensive_eval.py`
+- **产物**: `experiments/ablation_eval/seed{42,123}/*.json`, `src/config/ablation_*.yaml`
+
+| 实验 | PQ (mean) | BM-Dice | AJI | Δ PQ | 置信度 |
+|------|:---------:|:-------:|:---:|:----:|:------:|
+| Full (Phase1, posw=2) | 0.453 | 0.707 | 0.550 | — | — |
+| Ab-0: BCE+Dice only | 0.459 | 0.711 | 0.554 | +0.7pp | ⚠️ |
+| Ab-1: w/o Boundary | 0.454 | 0.708 | 0.554 | +0.2pp | ⚠️ |
+| **Ab-2: w/o Contour** | **0.476** | **0.718** | **0.564** | **+2.3pp** | **✅ 高** |
+| Ab-3: w/o AJI | 0.459 | 0.710 | 0.554 | +0.6pp | ⚠️ |
+| Ab-4: w/o PQ ES | 0.459 | 0.710 | 0.555 | +0.7pp | ⚠️ |
+| **Ab-5: posw=10** | **0.494** | **0.724** | **0.573** | **+4.1pp** | **✅ 高** |
+
+**高置信结论** (两 seed 方向一致 + 幅度大):
+1. **pos_weight=10 >> 2** (+4.1pp PQ) — Phase1 降 posw 是错误决策
+2. **Contour Loss 有害** (+2.3pp PQ when removed) — 与 SAM prompt-conditioned 训练范式冲突
+
+**Best Config** (待验证): posw=10 + contour=off → 预期 PQ ≈ 0.50+
+
+---
 
 ## E34 (Completed): DAPI/Adaptive 参数统一锁定实验 ⭐⭐⭐
 

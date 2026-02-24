@@ -1,0 +1,11 @@
+Encoder: 89,670,912
+Neck: 787,456
+PromptEnc: 6,220
+MaskDec: 4,058,340
+Total SAM: 93,735,472
+
+Strategies:
+Current (pe+md): 4,064,560 (4.3%)
+Neck-only: 787,456 (0.84%)
+Decoder-only: 4,058,340 (4.3%)
+Encoder (no neck): 88,883,456 (94.8%)

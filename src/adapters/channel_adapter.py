@@ -25,10 +25,10 @@ class IndependentChannelAdapter(nn.Module):
     为每个通道学习独立的特征变换，模拟 IC-ViT 的设计思想。
     初始化为恒等映射，确保训练初期与预训练权重兼容。
     
-    输入通道顺序 (来自 SemanticChannelMapper):
-        - Ch0: Actn2 (红色, 肌节纹理)
-        - Ch1: BF (绿色, 细胞边界)
-        - Ch2: DAPI (蓝色, 细胞核)
+    输入通道顺序 (来自 SemanticChannelMapper, 生物学一致):
+        - Ch0 (R): BF (灰度, 细胞边界)
+        - Ch1 (G): Actn2 (绿色荧光, 肌节纹理)
+        - Ch2 (B): DAPI (蓝色荧光, 细胞核)
     
     参数:
         kernel_size: 卷积核大小 (推荐 3)
@@ -65,23 +65,23 @@ class IndependentChannelAdapter(nn.Module):
         """
         Args:
             x: (B, 3, H, W) - 来自 SemanticChannelMapper 的输出
-               通道顺序: [Actn2, BF, DAPI]
+               通道顺序: [BF, Actn2, DAPI]
         
         Returns:
             (B, 3, H, W) - 适配后的图像
         """
-        # 分离通道
-        ch_actn2 = x[:, 0:1, :, :]  # (B, 1, H, W)
-        ch_bf = x[:, 1:2, :, :]
-        ch_dapi = x[:, 2:3, :, :]
+        # 分离通道 (R=BF, G=Actn2, B=DAPI)
+        ch_bf = x[:, 0:1, :, :]     # (B, 1, H, W) - BF
+        ch_actn2 = x[:, 1:2, :, :]  # Actn2
+        ch_dapi = x[:, 2:3, :, :]   # DAPI
         
         # 独立处理
-        ch_actn2 = self.activation(self.actn2_conv(ch_actn2))
         ch_bf = self.activation(self.bf_conv(ch_bf))
+        ch_actn2 = self.activation(self.actn2_conv(ch_actn2))
         ch_dapi = self.activation(self.dapi_conv(ch_dapi))
         
         # 合并
-        return torch.cat([ch_actn2, ch_bf, ch_dapi], dim=1)
+        return torch.cat([ch_bf, ch_actn2, ch_dapi], dim=1)
     
     def get_param_count(self) -> int:
         """返回可训练参数数量"""
