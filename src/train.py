@@ -126,21 +126,24 @@ def create_dataloaders(config: dict):
 
 
 def create_model(config: dict, device):
-    """Create or load CellSAM model and optional channel adapter."""
+    """Create or load CellSAM model and optional channel adapter.
+    
+    Initialization order (critical for LoRA):
+        1. get_model() → fresh SAM
+        2. freeze_encoder → all encoder params requires_grad=False
+        3. apply_lora → creates NEW LoRA params with requires_grad=True
+        4. load_state_dict → loads checkpoint (including LoRA keys if present)
+    
+    This order ensures:
+        - P1-1: LoRA params survive freeze (created AFTER freeze)
+        - M3: LoRA keys in checkpoint are loaded into existing LoRA layers
+               (not silently dropped by strict=False)
+    """
     model = get_model()
     
-    # Load checkpoint if specified
-    if config['model']['checkpoint']:
-        checkpoint_path = config['model']['checkpoint']
-        print(f"Loading checkpoint: {checkpoint_path}")
-        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-        # Handle both dict format and direct state_dict
-        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-            model.load_state_dict(checkpoint['model_state_dict'], strict=False)
-        else:
-            model.load_state_dict(checkpoint, strict=False)
+    use_lora = config['model'].get('use_lora', False)
     
-    # Freeze layers as specified
+    # Step 1: Freeze layers as specified
     if config['model']['freeze_encoder']:
         for param in model.model.image_encoder.parameters():
             param.requires_grad = False
@@ -150,6 +153,24 @@ def create_model(config: dict, device):
         for param in model.model.mask_decoder.parameters():
             param.requires_grad = False
         print("Froze mask decoder")
+    
+    # Step 2: Apply LoRA BEFORE loading checkpoint (M3 fix)
+    # This creates LoRA layers so checkpoint's LoRA keys have matching targets
+    if use_lora:
+        from lora import apply_lora_to_encoder
+        lora_rank = config['model'].get('lora_rank', 4)
+        apply_lora_to_encoder(model.model.image_encoder, rank=lora_rank)
+    
+    # Step 3: Load checkpoint AFTER LoRA is applied
+    if config['model']['checkpoint']:
+        checkpoint_path = config['model']['checkpoint']
+        print(f"Loading checkpoint: {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+        # Handle both dict format and direct state_dict
+        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+        else:
+            model.load_state_dict(checkpoint, strict=False)
     
     # Create channel adapter if enabled
     adapter = None
@@ -201,12 +222,13 @@ def create_optimizer(model, config: dict, adapter=None):
     return optimizer, scheduler
 
 
-def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None, adapter=None, box_expand=0.1):
+def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None, adapter=None, box_expand=0.1, use_lora=False):
     """Train one epoch with optional mixed precision (AMP) and instance-level training.
     
     Key improvements:
     - box_expand: Constrain pred/target to expanded box region
     - Uses cell_id from batch to get specific cell mask (not entire semantic mask)
+    - use_lora: When True, encoder forward runs WITH gradients for LoRA (P0-1 fix)
     """
     model.train()
     if adapter is not None:
@@ -228,8 +250,10 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
         if adapter is not None:
             images = adapter(images)
         
-        # Preprocess images and get embeddings (frozen encoder - no grad needed)
-        with torch.no_grad():
+        # Preprocess images and get embeddings
+        # P0-1 fix: LoRA requires gradient flow through encoder
+        if use_lora:
+            # LoRA: encoder forward WITH gradients (LoRA params need autograd)
             if use_amp:
                 with autocast():
                     img_preprocessed = model.sam_preprocess(images)
@@ -237,6 +261,16 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
             else:
                 img_preprocessed = model.sam_preprocess(images)
                 image_embedding = model.model.image_encoder(img_preprocessed)
+        else:
+            # Standard: frozen encoder, no gradients needed
+            with torch.no_grad():
+                if use_amp:
+                    with autocast():
+                        img_preprocessed = model.sam_preprocess(images)
+                        image_embedding = model.model.image_encoder(img_preprocessed)
+                else:
+                    img_preprocessed = model.sam_preprocess(images)
+                    image_embedding = model.model.image_encoder(img_preprocessed)
         
         batch_loss = 0
         num_cells = 0
@@ -598,7 +632,7 @@ def main():
     for epoch in range(config['training']['epochs']):
         # Fix3: Update N/O loss weights based on delay schedule
         criterion.set_epoch(epoch)
-        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device, scaler=scaler, adapter=adapter, box_expand=box_expand)
+        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device, scaler=scaler, adapter=adapter, box_expand=box_expand, use_lora=config['model'].get('use_lora', False))
         val_metrics = validate(model, val_loader, criterion, device, adapter=adapter, use_pq=use_pq_early_stop, box_expand=box_expand)
         val_dice = val_metrics['bm_1to1']
         val_pq = val_metrics['pq']

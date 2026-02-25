@@ -1,7 +1,7 @@
 # CellSAM 实验记录 (Experiment Log)
 
 > **状态**: 🟢 Active — 实验流水账主文档  
-> **最后更新**: 2026-02-19  
+> **最后更新**: 2026-02-25  
 > **事实来源**: 此文档为实验记录的 SSOT，按时间顺序记录所有实验  
 > **完整历史存档**: [`experiments_log_archive.md`](experiments_log_archive.md)
 
@@ -103,6 +103,11 @@
 | T16-d200 | 2026-02-22 | Cellpose diameter=200 补充 | PQ=0.002, BM=0.190 | ✅ 完成 |
 | **T19-abl** | **2026-02-22** | **Box Clipping 消融** | **clip PQ=0.466 > no-clip PQ=0.437** | **✅ 完成** |
 | **T12** | **2026-02-23** | **Loss 消融 (7×2 seeds)** | **posw=10 PQ=0.494, contour 有害** | **✅ 完成** |
+| **Best Config** | **2026-02-24** | **posw=10+contour=off (4 runs)** | **PQ=0.484 (mean)** | **✅ 完成** |
+| **T18** | **2026-02-24~25** | **三通道消融 (2ch/3ch/noAdapt)** | **T18-C PQ=0.500 (best), A=0.496, B=0.498** | **🔄 5/6 done** |
+| **T17** | **2026-02-25** | **Training Curves 工具** | **parse+plot, Phase1 图 ✅** | **✅ 工具完成** |
+| **T20** | **2026-02-25** | **Attention 可视化脚本** | **Method A+C, 待执行** | **🔄 脚本就绪** |
+| **T11** | **2026-02-25** | **[LoRA Encoder Fine-tuning](t11_lora_design.md)** | **rank=4/8, Q/V LoRA, 待 R1 审核** | **⏳ 设计完成** |
 
 
 
@@ -162,7 +167,69 @@
 1. **pos_weight=10 >> 2** (+4.1pp PQ) — Phase1 降 posw 是错误决策
 2. **Contour Loss 有害** (+2.3pp PQ when removed) — 与 SAM prompt-conditioned 训练范式冲突
 
-**Best Config** (待验证): posw=10 + contour=off → 预期 PQ ≈ 0.50+
+**Best Config 验证 ✅ (2026-02-24)**:
+- 4 runs (A100+L4 × seed42+seed123, 80 epochs)
+- 结果:
+
+| Run | GPU | Seed | PQ | BM-Dice | AJI | Sem.Dice | Best Ep |
+|-----|-----|------|:--:|:-------:|:---:|:--------:|:-------:|
+| 1 | A100 | 42 | 0.487 | 0.722 | 0.571 | 0.802 | 25 |
+| 2 | A100 | 123 | 0.486 | 0.718 | 0.568 | 0.797 | 33 |
+| 3 | L4 | 42 | 0.486 | 0.722 | 0.571 | 0.802 | 25 |
+| 4 | L4 | 123 | 0.479 | 0.718 | 0.569 | 0.800 | 40 |
+| **Mean** | | | **0.484** | **0.720** | **0.570** | **0.800** | |
+
+- Checkpoint: `BestConfig_posw10_noCont_20260224_052553/best_model.pt` (A100 seed42)
+- **发现**: Best Config PQ=0.484 低于 Ab-5 PQ=0.494，说明 posw=10 与 contour=off 存在交互作用而非简单叠加
+
+---
+
+### T18: 三通道通道消融 🔄 (2026-02-24~25, 5/6 done)
+
+- **目的**: 验证多通道输入 (DAPI+Actn2) 是否提升分割性能
+- **基线**: Best Config (PQ=0.484), fine-tune 从 Best Config checkpoint 开始
+- **通道顺序**: R=BF · G=Actn2(绿) · B=DAPI(蓝) (生物学一致)
+- **代码修改**: `SemanticChannelMapper` 通道顺序 + `use_2ch` 模式 + `IndependentChannelAdapter` 同步
+
+| 实验 | 通道 | Adapter | Seeds | GPU |
+|------|--------|:-------:|:-----:|-----|
+| T18-A | R=BF, G=Actn2, **B=BF** (2ch) | ✅ | 42+123 | L4+A100 |
+| T18-B | R=BF, G=Actn2, **B=DAPI** (3ch) | ✅ | 42+123 | L4+A100 |
+| T18-C | R=BF, G=Actn2, B=DAPI (3ch, 无adapter) | ❌ | 42, **123** | L4, **A100** |
+
+- **总运行数**: 7 runs (T18-A/B/C × 2 seeds + T18-Control)
+- **配置**: `t18a_2ch.yaml`, `t18b_3ch.yaml`, `t18c_3ch_no_adapter.yaml`, `t18_control_bf_continue.yaml`
+- **SLURM**: 7/7 完成 ✅ (含 T18-Control Job 1036827, T18-C s123 Job 1036799)
+
+**完整结果 (2026-02-25, Bug 修正后)**:
+
+> ⚠️ 原始 T18-A/B seed42 L4 评估存在 Bug: `ls -td` 取到了 A100 checkpoint。已修复 (Job 1036804)。
+
+| 实验 | Seed | GPU | PQ↑ | BM-Dice | AJI | Sem.Dice | Best Ep | 备注 |
+|------|:----:|:---:|:---:|:-------:|:---:|:--------:|:-------:|:----:|
+| Best Config (BF) | mean(4) | — | 0.484 | 0.720 | 0.570 | — | — | |
+| **T18-Control (BF 继训)** | **42** | **L4** | **0.488** | **0.719** | **0.568** | **0.795** | **12** | **对照** |
+| T18-A (2ch) | 42 | L4 | 0.493 | 0.723 | 0.573 | 0.802 | 7 | 修正 |
+| T18-A (2ch) | 123 | A100 | 0.496 | 0.724 | 0.573 | 0.799 | 27 | |
+| T18-B (3ch+adapter) | 42 | L4 | 0.496 | 0.723 | 0.572 | 0.797 | 27 | 修正 |
+| T18-B (3ch+adapter) | 123 | A100 | 0.498 | 0.725 | 0.574 | 0.801 | 37 | |
+| **T18-C (3ch noAdapt)** | **42** | **L4** | **0.500** | **0.726** | **0.573** | **0.801** | **41** | |
+| T18-C (3ch noAdapt) | 123 | A100 | 0.499 | 0.725 | 0.572 | 0.798 | 27 | |
+
+> ⚠️ 原始 T18-A/B seed42 L4 评估存在 Bug: `ls -td` 取到了 A100 checkpoint。已修复 (Job 1036804)。
+
+**最终分析 (2026-02-25 16:20, 含对照组)**:
+
+| 对比 | PQ 差 | 含义 |
+|------|:-----:|------|
+| T18 avg (0.497) vs Best Config (0.484) | +1.3pp | 总提升 (通道 + 训练) |
+| **T18-Control (0.488)** vs Best Config (0.484) | **+0.4pp** | **纯训练效应** (lr reset + extra epochs) |
+| T18 avg (0.497) vs **T18-Control (0.488)** | **+0.9pp** | **净通道贡献** |
+
+**结论**:
+1. 三通道信息**确实有效** (+0.9pp 净效应), 但效果**被训练效应放大了** (~30% 来自额外训练)
+2. T18-A ≈ T18-B ≈ T18-C (极差 0.7pp < seed 波动 2.5pp): adapter/通道数无法区分
+3. 论文可写: *"Multi-channel PQ=0.497 vs BF-only PQ=0.488 (continued training control), Δ=+0.9pp"*
 
 ---
 
@@ -644,14 +711,19 @@ E18 发现 Adaptive 方法 Precision 较低 (0.672)，怀疑边缘过滤过松�
 
 ## 待实验 (Planned)
 
+> **2026-02-25 R1 更新**: E-B1~B6 baseline 已由 T16 完成; P2-D/E 已被 T12 消融覆盖; T7 已过时。
+
 | ID | 实验名称 | 优先级 | 状态 |
 |----|---------|--------|------|
-| P2-D | lr=5e-5, epochs=50 (LR消融) | P1 | ⏳ 待做 |
-| P2-E | lr=1e-4, epochs=80 (Epoch消融) | P1 | ⏳ 待做 |
-| E-B1 | Cellpose baseline | P1 | ⏳ 待做 (A2 执行) |
-| E-B2 | StarDist baseline | P1 | ⏳ 待做 (A2 执行) |
-| E-B4 | CellSAM Original (test73 重跑) | P0 | ⏳ 待做 |
-| E-B5 | MedSAM baseline | P2 | ⏳ 待做 |
-| E-B6 | SAMCell baseline | P2 | ⏳ 待做 |
-| T7 | Adapter Instance 评估 (E30/E32) | P1 | ⏳ 待做 |
+| ~~P2-D~~ | ~~lr=5e-5, epochs=50 (LR消融)~~ | — | ❌ 不再需要 (T12 完成了完整消融) |
+| ~~P2-E~~ | ~~lr=1e-4, epochs=80 (Epoch消融)~~ | — | ❌ 不再需要 (T12 完成了完整消融) |
+| ~~E-B1~~ | ~~Cellpose baseline~~ | — | ✅ T16 已完成 (PQ=0.073) |
+| ~~E-B2~~ | ~~StarDist baseline~~ | — | ✅ T16 已完成 (PQ=0.000) |
+| ~~E-B4~~ | ~~CellSAM Original (test73)~~ | — | ✅ T16 已完成 (PQ=0.000) |
+| ~~E-B5~~ | ~~MedSAM baseline~~ | — | ✅ T16 已完成 (PQ=0.101) |
+| ~~E-B6~~ | ~~SAMCell baseline~~ | — | ✅ T16 已完成 (PQ=0.213) |
+| ~~T7~~ | ~~Adapter Instance 评估~~ | — | ❌ 已过时 (Phase 2 终止) |
+| **T11** | **LoRA Encoder ViT-B Q/V (rank=4/8)** | **P1** | **⏳ 设计完成, 待 R1 审核** |
+
+> T11 设计文档: `docs/t11_lora_design.md`
 

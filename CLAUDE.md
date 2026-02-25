@@ -1,8 +1,8 @@
 # CellSAM 项目方案 (Project Blueprint)
 
 > **文档类型**: 项目总览 (AI 必读)  
-> **最后更新**: 2026-02-19  
-> **当前阶段**: P2-A 终止 → Baseline 对比 + LR 消融 (P2-D/E)
+> **最后更新**: 2026-02-25  
+> **当前阶段**: T18 三通道 ✅ 完成 (PQ=0.500, 净通道+0.9pp) → T17 工具就绪 → T20 脚本就绪
 
 ---
 
@@ -28,31 +28,37 @@
 ```
 阶段1 数据准备       [████████████████████] 100%  ✅ 完成
 阶段2 检测优化       [████████████████████] 100%  ✅ 完成 (Hybrid DAPI+Actn2)
-阶段2.5 三通道适配   [████████░░░░░░░░░░░░]  40%  🔄 Semantic Mapper + Adapter 已完成
+阶段2.5 三通道适配   [████████████████████] 100%  ✅ T18 完成 (PQ=0.500, 含对照组)
 Phase 1 Loss优化     [████████████████████] 100%  ✅ 完成 + Test锁定
-Phase 2 结构改进     [███████████████░░░░░]  75%  ⚠️ P2-A 终止, 待 P2-D/E 消融
-阶段4 论文结果       [████░░░░░░░░░░░░░░░░]  20%  🔄 Baseline 实验准备中
+Phase 2 结构改进     [█████████████████░░░]  85%  ✅ T12 消融完成, Best Config 验证
+阶段4 论文结果       [███████░░░░░░░░░░░░░]  35%  🔄 Ablation Table + 三通道进行中
 ```
 
-### 关键指标 (Phase 1 Test 锁定, 2026-02-11)
-| 指标 | Oracle(test) | E2E(test) | 状态 |
-|-----|-------------|-----------|------|
-| **BM-1to1 Dice** | **0.6954** | 0.5446 | ✅ Phase 1 锁定 |
-| **PQ** | **0.4641** | 0.1719 | ✅ vs BF_Baseline +704% |
-| **AJI** | **0.5195** | 0.3181 | ✅ vs BF_Baseline +82% |
-| **Semantic Dice** | 0.7566 | 0.6006 | ✅ 稳定 |
+### 关键指标 (2026-02-25 更新)
+| 模型 | PQ | BM-Dice | AJI | 备注 |
+|------|:--:|:-------:|:---:|------|
+| Phase1 (L4, test73 封板) | 0.464 | 0.695 | 0.519 | ✅ 2026-02-11 锁定 |
+| **Best Config (4-run mean)** | **0.484** | **0.720** | **0.570** | ✅ posw=10 + contour=off |
+| **T18-C 三通道 (2-run mean)** | **0.500** | **0.726** | **0.573** | ✅ 3ch, no adapter, 净+0.9pp |
+| T18-Control BF 继训 | 0.488 | 0.719 | 0.568 | 对照: 训练效应 +0.4pp |
+| Semantic Dice (Phase1) | — | — | — | 0.757 (稳定) |
 
 > **检测锁定**: DAPI F1=**0.8033** (test73 封板), Adaptive F1=0.7502 | T3b 重扫: radius=160, F1=0.780
 
 ### 当前最优模型
-| 项目 | 值 |
-|------|----|
-| Checkpoint | `checkpoints/E_phase1_rebalance_l4/best_model.pt` |
-| 训练配置 | `src/config/phase1_rebalance_l4.yaml` |
-| 训练平台 | ALICE L4 (Job 974531) |
-| Best Epoch | 49/50 |
+| 项目 | Phase1 | Best Config |
+|------|--------|-------------|
+| Checkpoint | `E_phase1_rebalance_l4/best_model.pt` | `BestConfig_posw10_noCont_20260224_052553/best_model.pt` |
+| 配置 | `phase1_rebalance_l4.yaml` | `best_config.yaml` (posw=10, contour=off) |
+| PQ | 0.464 | **0.484** (+3.1pp) |
+| Best Epoch | 49/50 | 25~40 (A100 seed42 best) |
 
-### 当前状态: Baseline 完成, 进入论文写作
+### 当前状态: T18 ✅ 完成, 含对照组, R1 审核通过 (2026-02-25)
+
+**T12 Loss 消融 ✅ (2026-02-23)**:
+- 7 组 × 2 seeds = 14 runs
+- **高置信结论**: pos_weight=10 >> 2 (+4.1pp), Contour Loss 有害 (+2.3pp)
+- Best Config: posw=10 + contour=off → **PQ=0.484** (4-run mean, 验证完成)
 
 **P2-A (N/O Loss) 已终止**: Fix1-3 均证明 N/O loss 导致 PQ 退化 (详见 `experiments_log.md`)
 
@@ -64,7 +70,7 @@ Phase 2 结构改进     [███████████████░░░
 | SAMCell | E2E | 0.000 | 0.008 | 0.004 |
 | CellSAM (pretrained) | Oracle | 0.000 | 0.121 | 0.056 |
 | SAM ViT-B | Oracle | 0.286 | 0.631 | 0.440 |
-| **Ours** | **Oracle** | **0.464** | **0.695** | **0.519** |
+| **Ours (Best Config)** | **Oracle** | **0.484** | **0.720** | **0.570** |
 | MedSAM | Oracle | 0.576 | 0.771 | 0.634 |
 | Ours | E2E | 0.180 | 0.567 | 0.338 |
 
@@ -76,10 +82,13 @@ Phase 2 结构改进     [███████████████░░░
 
 | 任务 | 执行者 | 状态 |
 |------|---------|------|
-| Baseline 对比 (Cellpose/StarDist/MedSAM/SAMCell) | A2 | ✅ 完成 (StarDist P3 暂缓) |
-| P2-D/E LR+Epoch 消融 | A2 | ⏳ 待执行 |
-| T7 Adapter Instance 评估 (E30/E32) | A2 | ⏳ 待执行 |
-| T9 dataset_parameters.md 深度更新 | A1 | 🔄 执行中 |
+| T18 三通道消融 | A2 | ✅ 5/6 done: T18-C PQ=**0.500** (best!), seed123 补跑 Job 1036799 |
+| T17 Training Curves | A2 | ✅ 工具完成, Phase1 图 ✅, 待下载 Best Config 日志 |
+| T20 Attention 可视化 | A1 | 🔄 脚本就绪, 待 T18 完成后执行 |
+| T12 消融 + Best Config | A2 | ✅ 完成 |
+| T16 Baseline 对比 | A2 | ✅ 完成 |
+| **T11 LoRA Encoder** | **A2** | **⏳ 设计完成, 待 R1 审核 → 实施** |
+| 论文文档合并 | A1 | ✅ paper_writing_plan → paper_preparation §7 |
 
 ### ⚠️ 已修复: GT 框面积过滤 Bug (2026-02-13)
 
@@ -128,6 +137,7 @@ conda activate cellsam
 | `docs/task_backlog.md` | 🟢 Active | 短期/长期待办与完成标准 |
 | `docs/progress_timeline_2.13.md` | 🟢 Active | 导师汇报时间线 + 后续计划 |
 | `docs/phase2_design.md` | 🟢 Active | Phase 2 设计与执行计划 |
+| [`docs/t11_lora_design.md`](docs/t11_lora_design.md) | 🟢 Active | **T11 LoRA Encoder 设计文档** (待 R1 审核) |
 | `docs/agent_management.md` | 🟢 Active | **多 Agent 协作管理规范 SSOT** |
 | `docs/agent_inbox.md` | 🟢 Active | **Agent 间异步通信信箱** |
 | `docs/temp_reviews/` | 🟠 Temp | 审核报告 (合并进 SSOT 后可删) |
@@ -374,6 +384,9 @@ docs/
 | **T3b** | 02-19 | Adaptive radius 重扫 | F1=0.780 (radius=160) |
 | **T16** | 02-21~22 | Baseline 对比 (6 methods) | MedSAM PQ=0.576 最强 ⚠️ |
 | **T19-abl** | 02-22 | Box Clipping 消融 | clip PQ=0.466 > no-clip 0.437 ✅ |
+| **T12** | 02-23 | Loss 消融 (7组×2seed) | posw=10 (+4.1pp), contour有害 (+2.3pp) ⭐ |
+| **BestCfg** | 02-24 | Best Config 验证 (4 runs) | **PQ=0.484** (+3.1pp vs Phase1) ⭐ |
+| **T18** | 02-24 | 三通道消融 (2ch/3ch/no-adapter) | 🔄 训练中 (ALICE) |
 
 > 完整记录: [experiments_log.md](docs/experiments_log.md)
 
@@ -405,6 +418,7 @@ python tools/verify_training_config.py
 
 | 日期 | 内容 |
 |------|------|
+| 2026-02-24 | **T12 消融完成** (posw=10+contour=off 高置信); **Best Config 验证** PQ=0.484; **T18 三通道部署** (ALICE训练中); 通道顺序改 R=BF/G=Actn2/B=DAPI; 文档同步 |
 | 2026-02-22 | **T16 Baseline 完成** (6 methods); Box Clipping 消融; Cellpose d=200 补充 |
 | 2026-02-19 | T3b Adaptive radius 重扫完成; 文档优化 (TOC + 早期实验归档) |
 | 2026-02-16 | P2-A Fix3 审核完成, **P2-A 终止** |

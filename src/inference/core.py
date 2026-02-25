@@ -68,9 +68,13 @@ def load_cellsam_checkpoint(
     adapter_kwargs: Optional[dict] = None,
 ):
     """
-    统一 checkpoint 加载器 (含 adapter 支持)
+    统一 checkpoint 加载器 (含 adapter + LoRA 支持)
     
-    所有评估脚本应使用此函数加载模型，确保 adapter 不被遗漏。
+    所有评估脚本应使用此函数加载模型，确保 adapter/LoRA 不被遗漏。
+    
+    P0-2 fix: 自动检测 checkpoint 中的 LoRA keys，
+    先 apply_lora_to_encoder 再 load_state_dict，
+    防止 strict=False 静默丢弃 LoRA 权重。
     
     Args:
         checkpoint_path: checkpoint 文件路径
@@ -92,12 +96,24 @@ def load_cellsam_checkpoint(
     
     # 提取模型权重
     if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-        model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+        state_dict = checkpoint['model_state_dict']
     elif isinstance(checkpoint, dict):
-        model.load_state_dict(checkpoint, strict=False)
+        state_dict = checkpoint
     else:
-        model.load_state_dict(checkpoint, strict=False)
+        state_dict = checkpoint
     
+    # P0-2 fix: 检测 LoRA keys → 先注入 LoRA 层 → 再加载权重
+    has_lora = any('lora_' in k for k in state_dict.keys())
+    if has_lora:
+        sys.path.insert(0, str(Path(__file__).parent))
+        from lora import apply_lora_to_encoder
+        lora_rank = 4
+        if isinstance(checkpoint, dict) and 'config' in checkpoint:
+            lora_rank = checkpoint['config'].get('model', {}).get('lora_rank', 4)
+        apply_lora_to_encoder(model.model.image_encoder, rank=lora_rank)
+        print(f"  ✅ LoRA detected in checkpoint (rank={lora_rank}), applied to encoder")
+    
+    model.load_state_dict(state_dict, strict=False)
     model = model.to(device)
     model.eval()
     
@@ -121,6 +137,7 @@ def load_cellsam_checkpoint(
             'epoch': checkpoint.get('epoch', '?'),
             'best_dice': checkpoint.get('best_dice', 0),
             'has_adapter': 'adapter_state_dict' in checkpoint,
+            'has_lora': has_lora,
         }
     
     return model, adapter, info

@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from cellSAM import get_model
 from augmented_dataset import AugmentedAllenDataset
-from inference.core import segment_with_boxes, InferenceConfig
+from inference.core import segment_with_boxes, InferenceConfig, load_cellsam_checkpoint
 from metrics.instance_metrics import compute_all_metrics
 
 
@@ -30,20 +30,14 @@ def eval_checkpoint(ckpt_path: str, device: str = "cuda") -> dict:
     """Evaluate a single checkpoint on test(73) with GT boxes."""
     device = torch.device(device if torch.cuda.is_available() else "cpu")
     
-    # Load model
-    model = get_model()
-    checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)
-    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-        model.load_state_dict(checkpoint['model_state_dict'], strict=False)
-        epoch = checkpoint.get('epoch', '?')
-        train_pq = checkpoint.get('best_pq', 0)
-        train_dice = checkpoint.get('best_dice', 0)
-    else:
-        model.load_state_dict(checkpoint, strict=False)
-        epoch, train_pq, train_dice = '?', 0, 0
+    # Load model via unified loader (auto-detects LoRA + adapter)
+    model, adapter, info = load_cellsam_checkpoint(ckpt_path, device=str(device))
+    epoch = info.get('epoch', '?')
+    train_dice = info.get('best_dice', 0)
     
-    model = model.to(device)
-    model.eval()
+    # Extract train_pq from checkpoint directly (not in info)
+    checkpoint = torch.load(ckpt_path, map_location='cpu', weights_only=False)
+    train_pq = checkpoint.get('best_pq', 0) if isinstance(checkpoint, dict) else 0
     
     print(f"  Loaded: epoch={epoch}, train_pq={train_pq:.4f}, train_dice={train_dice:.4f}")
     
