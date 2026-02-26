@@ -24,7 +24,7 @@ model:
 
 training:
   epochs: 80
-  batch_size: 4
+  batch_size: 2         # Reduced from 4: LoRA encoder gradients need more VRAM
   learning_rate: 0.0001
   weight_decay: 0.0001
   warmup_epochs: 5

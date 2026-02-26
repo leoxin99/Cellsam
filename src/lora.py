@@ -84,7 +84,7 @@ class LoRAQKVLinear(nn.Module):
         return qkv
 
 
-def apply_lora_to_encoder(encoder, rank: int = 4):
+def apply_lora_to_encoder(encoder, rank: int = 4, use_grad_checkpoint: bool = True):
     """Apply LoRA to all attention QKV layers in SAM ViT-B encoder.
     
     Must be called AFTER freeze_encoder (P1-1 fix):
@@ -95,20 +95,38 @@ def apply_lora_to_encoder(encoder, rank: int = 4):
     Args:
         encoder: SAM ViT-B image_encoder (model.model.image_encoder)
         rank: LoRA rank (4 or 8)
+        use_grad_checkpoint: Enable gradient checkpointing to reduce VRAM
+            (~38GB → ~3GB for encoder activations). Trades ~30% speed for memory.
     
     Returns:
         encoder with LoRA applied (modified in-place)
     """
+    from torch.utils.checkpoint import checkpoint as torch_checkpoint
+    
     lora_count = 0
     for block in encoder.blocks:
         original_qkv = block.attn.qkv
         block.attn.qkv = LoRAQKVLinear(original_qkv, rank=rank)
         lora_count += 1
+        
+        # Fix-1: Gradient checkpointing — wrap each block's forward
+        # This drops intermediate activations and recomputes during backward,
+        # reducing VRAM from ~38GB to ~3GB (only block boundary tensors kept)
+        if use_grad_checkpoint:
+            original_forward = block.forward
+            # Use closure to capture the correct reference
+            def _make_ckpt_forward(fn):
+                def ckpt_forward(*args, **kwargs):
+                    return torch_checkpoint(fn, *args, use_reentrant=False, **kwargs)
+                return ckpt_forward
+            block.forward = _make_ckpt_forward(original_forward)
     
     lora_params = [p for p in encoder.parameters() if p.requires_grad]
     n_lora = sum(p.numel() for p in lora_params)
     print(f"Applied LoRA (rank={rank}) to {lora_count} attention blocks")
     print(f"  LoRA trainable params: {n_lora:,}")
+    if use_grad_checkpoint:
+        print(f"  Gradient checkpointing: ENABLED (VRAM ~38GB → ~3GB)")
     return encoder
 
 

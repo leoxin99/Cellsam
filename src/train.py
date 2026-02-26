@@ -275,6 +275,16 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
         batch_loss = 0
         num_cells = 0
         
+        # Fix-3: For LoRA, count expected cells upfront for loss scaling
+        # (per-box backward needs the total count for correct averaging)
+        if use_lora:
+            num_cells_expected = 0
+            for i in range(images.shape[0]):
+                for j in range(len(boxes[i])):
+                    if boxes[i][j].sum() != 0:
+                        num_cells_expected += 1
+            num_cells_expected = max(num_cells_expected, 1)
+        
         for i in range(images.shape[0]):
             sample_boxes = boxes[i]
             sample_mask = masks[i]
@@ -394,7 +404,18 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
                                          instance_mask=sample_mask.float(),
                                          confidence_map=confidence_map.detach())
                     
-                    batch_loss += loss
+                    # Fix-3: Per-box backward for LoRA mode
+                    # Each box's loss backward immediately → releases decoder computation graph
+                    # Gradients accumulate in .grad (math-equivalent to batch backward)
+                    if use_lora:
+                        scaled_loss = loss / num_cells_expected
+                        if use_amp:
+                            scaler.scale(scaled_loss).backward()
+                        else:
+                            scaled_loss.backward()
+                        batch_loss += loss.item()  # Track scalar only
+                    else:
+                        batch_loss += loss
                     num_cells += 1
                     
                     # Phase 2: Accumulate confidence map for L_overlap
@@ -408,28 +429,47 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
                     continue
         
         if num_cells > 0:
-            avg_loss = batch_loss / num_cells
-            
-            if use_amp:
-                scaler.scale(avg_loss).backward()
-                scaler.unscale_(optimizer)
-                # Clip gradients for both model and adapter
-                all_params = list(model.parameters())
-                if adapter is not None:
-                    all_params.extend(list(adapter.parameters()))
-                torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
-                scaler.step(optimizer)
-                scaler.update()
+            # Fix-3: LoRA already did per-box backward, just step optimizer
+            if use_lora:
+                if use_amp:
+                    scaler.unscale_(optimizer)
+                    all_params = list(model.parameters())
+                    if adapter is not None:
+                        all_params.extend(list(adapter.parameters()))
+                    torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    all_params = list(model.parameters())
+                    if adapter is not None:
+                        all_params.extend(list(adapter.parameters()))
+                    torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
+                    optimizer.step()
+                
+                total_loss += batch_loss / num_cells  # Already scalar
             else:
-                avg_loss.backward()
-                # Clip gradients for both model and adapter
-                all_params = list(model.parameters())
-                if adapter is not None:
-                    all_params.extend(list(adapter.parameters()))
-                torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
-                optimizer.step()
+                avg_loss = batch_loss / num_cells
+                
+                if use_amp:
+                    scaler.scale(avg_loss).backward()
+                    scaler.unscale_(optimizer)
+                    # Clip gradients for both model and adapter
+                    all_params = list(model.parameters())
+                    if adapter is not None:
+                        all_params.extend(list(adapter.parameters()))
+                    torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    avg_loss.backward()
+                    # Clip gradients for both model and adapter
+                    all_params = list(model.parameters())
+                    if adapter is not None:
+                        all_params.extend(list(adapter.parameters()))
+                    torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
+                    optimizer.step()
             
-            total_loss += avg_loss.item()
+                total_loss += avg_loss.item()
             num_batches += 1
     
     return total_loss / max(num_batches, 1)
