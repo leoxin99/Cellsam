@@ -156,9 +156,21 @@ ssh s3890074@login.alice.universiteitleiden.nl "cd ~/CellSam && git pull origin 
 | ~2026-02 | `cuda/11.8` 移除 | SLURM `module load` 失败 | 改用 `CUDA/12.1.1` |
 | ~2026-02 | Miniforge3 升级，`~/miniconda3` 消失 | `source ~/miniconda3/conda.sh` 失败 | 改用 `eval "$(conda shell.bash hook)"` |
 | ~2026-02 | MKL 激活脚本引用未定义变量 | `set -u` 导致脚本静默退出 | `set -u` 移到 conda activate 之后 |
+| 2026-03-02 | `train.py` 新增 `from official_preprocess import ...` | `ModuleNotFoundError` — `src/` 不在 PYTHONPATH | PYTHONPATH 加入 `${HOME}/CellSam/src` |
 
 **教训**:
 1. **Login ≠ Compute**: login 节点能跑通的命令不代表 SLURM 脚本也能跑通（初始化路径不同）
 2. **维护后必检**: 每次 Alice 维护后先检查 `module avail CUDA` 和 `conda info --base`
 3. **不硬编码路径**: 用 `eval "$(conda shell.bash hook)"` 替代 `source ~/miniconda3/...`
 4. **注意 set -u**: conda 的激活脚本会引用未定义变量，`set -u` 必须在 conda activate 之后
+5. **🚨 Eval checkpoint 安全规则 (2026-02-25 新增)**:
+   - **禁止** `ls -td checkpoints/${prefix}_* | head -1` 查找 checkpoint — 并发 job 共享文件系统时会取错目录
+   - **必须**使用 **before/after snapshot** 模式: 训练前记录已有目录列表, 训练后 `comm -13` 取差集
+   - 或者在 checkpoint 目录名中**包含 seed 信息** (如 `${prefix}_seed${seed}_YYYYMMDD`)
+   - **所有新 SLURM 脚本必须遵守此规则**, 已有脚本不改 (历史参考)
+   - 参考实现: `scripts/train_t18_l4.sh` L46-68, `scripts/train_t18_control.sh` L40-55
+6. **🚨 PYTHONPATH 必须包含 `src/` (2026-03-02 新增)**:
+   - 新增 `src/` 下的模块 (如 `official_preprocess.py`) 时，SLURM 脚本的 PYTHONPATH 必须包含 `${HOME}/CellSam/src`
+   - 本地能跑不代表 ALICE 能跑 — 本地 Python 自动将脚本所在目录加入 `sys.path`，但 SLURM 环境不同
+   - **提交前必须检查**: 每次修改 `src/` 下的 import 后，grep 所有 SLURM 脚本确认 PYTHONPATH 覆盖所有 import 路径
+   - 标准写法: `export PYTHONPATH="${HOME}/CellSam/src:${HOME}/CellSam:${PYTHONPATH:-}"`
