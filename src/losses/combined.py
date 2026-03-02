@@ -436,6 +436,62 @@ class OverlapMutexLoss(nn.Module):
         return (excess ** 2).mean()
 
 
+class FocalLoss(nn.Module):
+    """
+    Sigmoid Focal Loss for class-imbalanced segmentation.
+    
+    Lin et al., "Focal Loss for Dense Object Detection", ICCV 2017.
+    
+    FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t)
+    
+    where p_t = sigmoid(logit) for positive, 1-sigmoid(logit) for negative.
+    
+    Args:
+        alpha: Balancing factor for positive class (default 0.25)
+        gamma: Focusing parameter, higher -> more focus on hard samples (default 2.0)
+    
+    Complements pos_weight:
+    - pos_weight: "positive pixels are 10x more important" (class balance)
+    - Focal: "already-correct pixels contribute less gradient" (sample difficulty)
+    """
+    
+    def __init__(self, alpha: float = 0.25, gamma: float = 2.0):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+    
+    def forward(self, pred_logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            pred_logits: (N,) raw logits (before sigmoid)
+            target: (N,) binary ground truth {0, 1}
+        Returns:
+            Scalar focal loss
+        """
+        pred_logits = pred_logits.reshape(-1)
+        target = target.reshape(-1).float()
+        
+        # Numerically stable sigmoid
+        p = torch.sigmoid(pred_logits)
+        
+        # p_t: probability of correct class
+        p_t = p * target + (1 - p) * (1 - target)
+        
+        # alpha_t: weight for each class
+        alpha_t = self.alpha * target + (1 - self.alpha) * (1 - target)
+        
+        # Focal modulating factor
+        focal_weight = (1 - p_t) ** self.gamma
+        
+        # BCE with logits (numerically stable)
+        bce = F.binary_cross_entropy_with_logits(
+            pred_logits, target, reduction='none'
+        )
+        
+        focal_loss = alpha_t * focal_weight * bce
+        return focal_loss.mean()
+
+
 class CombinedLoss(nn.Module):
     """
     Combined loss for instance segmentation.
@@ -453,6 +509,7 @@ class CombinedLoss(nn.Module):
                  use_contour=False, contour_weight=0.1,
                  use_neighbor=False, neighbor_weight=0.3,
                  use_overlap=False, overlap_weight=0.1,
+                 use_focal=False, focal_weight=0.3, focal_alpha=0.25, focal_gamma=2.0,
                  neighbor_gamma=1.5, overlap_margin=0.05,
                  delay_epochs=0, ramp_epochs=10):
         super().__init__()
@@ -464,6 +521,7 @@ class CombinedLoss(nn.Module):
         self.contour = ContourLoss()
         self.neighbor_loss_fn = NeighborIntrusionLoss(gamma=neighbor_gamma)
         self.overlap_loss_fn = OverlapMutexLoss(margin=overlap_margin)
+        self.focal_loss_fn = FocalLoss(alpha=focal_alpha, gamma=focal_gamma)
         
         self.pos_weight = pos_weight
         self.boundary_weight = boundary_weight
@@ -487,6 +545,8 @@ class CombinedLoss(nn.Module):
         self.use_contour = use_contour
         self.use_neighbor = use_neighbor
         self.use_overlap = use_overlap
+        self.use_focal = use_focal
+        self.focal_weight = focal_weight
 
     def set_epoch(self, epoch):
         """Update N/O weights based on epoch for delayed enable + linear ramp.
@@ -559,6 +619,11 @@ class CombinedLoss(nn.Module):
 
         base_loss = 0.5 * dice + 0.5 * bce
         
+        # Focal Loss (supplements BCE, focuses on hard samples)
+        focal_val = torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
+        if self.use_focal:
+            focal_val = self.focal_loss_fn(pred_box.reshape(-1), target_box.reshape(-1).float())
+        
         # Normalized weight computation
         # Computability-gated: only include weight in denominator if the loss
         # CAN be computed (required inputs are present). This prevents silent
@@ -575,6 +640,8 @@ class CombinedLoss(nn.Module):
             total_extra_weight += self.size_weight
         if self.use_contour:
             total_extra_weight += self.contour_weight
+        if self.use_focal:
+            total_extra_weight += self.focal_weight
         # Neighbor/overlap: only count weight if input is computable
         # Check both presence AND shape compatibility (Codex 17.10 finding #2)
         neighbor_computable = (
@@ -596,6 +663,10 @@ class CombinedLoss(nn.Module):
         total_weight = raw_base + total_extra_weight
         
         total_loss = (raw_base / total_weight) * base_loss
+        
+        # Focal Loss
+        if self.use_focal:
+            total_loss = total_loss + (self.focal_weight / total_weight) * focal_val
         
         # Add optional losses
         if self.use_boundary and n_pos > 0:

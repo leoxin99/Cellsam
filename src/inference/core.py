@@ -26,7 +26,7 @@ class InferenceConfig:
     apply_box_clipping: bool = True
     box_expand: float = 0.1
     conflict_policy: str = "argmax_prob"  # argmax_prob, first_write, last_write
-    apply_postprocess: bool = False
+    apply_postprocess: bool = True  # Plan B: enable official morphological smoothing
     validate_size: bool = False
     min_cell_area: int = 13884     # 心肌细胞最小面积 (GT P1, 1024px)
     max_cell_area: int = 174735    # 心肌细胞最大面积 (GT P99, 1024px)
@@ -110,7 +110,7 @@ def load_cellsam_checkpoint(
         lora_rank = 4
         if isinstance(checkpoint, dict) and 'config' in checkpoint:
             lora_rank = checkpoint['config'].get('model', {}).get('lora_rank', 4)
-        apply_lora_to_encoder(model.model.image_encoder, rank=lora_rank)
+        apply_lora_to_encoder(model.model_cp.image_encoder, rank=lora_rank)
         print(f"  ✅ LoRA detected in checkpoint (rank={lora_rank}), applied to encoder")
     
     model.load_state_dict(state_dict, strict=False)
@@ -184,22 +184,23 @@ def segment_with_boxes(
     all_boxes = []
     
     with torch.no_grad():
-        # SAM 预处理和图像编码
-        img_preprocessed = model.sam_preprocess(image)
-        image_embedding = model.model.image_encoder(img_preprocessed)
+        # Plan B: 使用官方预处理管线 + model_cp
+        from official_preprocess import official_preprocess_and_encode
+        model.adv_mode = True  # ensure model_cp branch
+        image_embedding = official_preprocess_and_encode(model, image, device)
         
         for i in range(N):
             box = boxes[i:i+1].unsqueeze(0)  # [1, 1, 4]
             
-            # Prompt encoding
-            sparse_emb, dense_emb = model.model.prompt_encoder(
+            # Prompt encoding (model_cp)
+            sparse_emb, dense_emb = model.model_cp.prompt_encoder(
                 points=None, boxes=box, masks=None
             )
             
-            # Mask decoding
-            low_res_masks, iou_pred = model.model.mask_decoder(
+            # Mask decoding (model_cp)
+            low_res_masks, iou_pred = model.model_cp.mask_decoder(
                 image_embeddings=image_embedding,
-                image_pe=model.model.prompt_encoder.get_dense_pe(),
+                image_pe=model.model_cp.prompt_encoder.get_dense_pe(),
                 sparse_prompt_embeddings=sparse_emb,
                 dense_prompt_embeddings=dense_emb,
                 multimask_output=False,
@@ -331,7 +332,21 @@ def postprocess_instance_mask(
     config: InferenceConfig
 ) -> np.ndarray:
     """
-    实例 mask 后处理
+    实例 mask 后处理 — 集成官方 CellSAM postprocess_predictions() 形态学平滑
+    
+    每个实例依次执行:
+      1. 官方形态学平滑 (from cellSAM model.py L182-202):
+         - remove_small_regions(holes, 20px)
+         - remove_small_regions(islands, 20px) 
+         - binary_opening(disk(2))
+         - binary_closing(disk(2))
+         - binary_dilation(disk(10))
+         - binary_erosion(disk(10))
+         - gaussian_filter(σ=3) > 0.5
+      2. 连通组件分析 — 保留最大组件
+      3. 尺寸验证 (可选)
+    
+    参考: cellSAM_source/cellSAM/model.py postprocess_predictions()
     
     Args:
         instance_mask: [H, W] 实例分割结果
@@ -341,14 +356,54 @@ def postprocess_instance_mask(
         处理后的 instance_mask
     """
     from scipy import ndimage
+    from scipy.ndimage import gaussian_filter
+    from skimage.morphology import disk, binary_opening, binary_closing, binary_dilation, binary_erosion
+    try:
+        from segment_anything.utils.amg import remove_small_regions
+    except ImportError:
+        # Fallback: skip remove_small_regions if SAM utils not available
+        remove_small_regions = None
     
     result = np.zeros_like(instance_mask)
     new_id = 0
     
     for cell_id in range(1, instance_mask.max() + 1):
-        cell_mask = (instance_mask == cell_id)
+        cell_mask = (instance_mask == cell_id).astype(np.uint8)
         
-        # 连通组件分析 - 保留最大组件
+        if cell_mask.sum() == 0:
+            continue
+        
+        # --- Step 1: 官方形态学平滑 (postprocess_predictions) ---
+        mask_bool = cell_mask.astype(bool)
+        
+        # 1a. 填小洞 + 去小碎片 (如果 remove_small_regions 可用)
+        if remove_small_regions is not None:
+            try:
+                mask_bool, _ = remove_small_regions(mask_bool, 20, mode="holes")
+                mask_bool, _ = remove_small_regions(mask_bool, 20, mode="islands")
+            except Exception:
+                pass
+        
+        # 1b. 形态学开运算 (去毛刺): 侵蚀 → 膨胀
+        selem_small = disk(2)
+        mask_bool = binary_opening(mask_bool, selem_small)
+        
+        # 1c. 形态学闭运算 (填缝隙): 膨胀 → 侵蚀
+        mask_bool = binary_closing(mask_bool, selem_small)
+        
+        # 1d. 大半径膨胀 + 侵蚀 (平滑边界)
+        selem_large = disk(10)
+        mask_bool = binary_dilation(mask_bool, selem_large)
+        mask_bool = binary_erosion(mask_bool, selem_large)
+        
+        # 1e. 高斯模糊 + 重新二值化 (最终平滑)
+        mask_float = gaussian_filter(mask_bool.astype(np.float32), sigma=3)
+        cell_mask = (mask_float > 0.5).astype(np.uint8)
+        
+        if cell_mask.sum() == 0:
+            continue
+        
+        # --- Step 2: 连通组件分析 — 保留最大组件 ---
         labeled, n_components = ndimage.label(cell_mask)
         if n_components == 0:
             continue
@@ -357,7 +412,7 @@ def postprocess_instance_mask(
         largest_idx = np.argmax(component_sizes) + 1
         largest_mask = (labeled == largest_idx)
         
-        # 尺寸验证
+        # --- Step 3: 尺寸验证 (可选) ---
         if config.validate_size:
             area = largest_mask.sum()
             if area < config.min_cell_area or area > config.max_cell_area:

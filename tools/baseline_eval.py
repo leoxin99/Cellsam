@@ -1,8 +1,12 @@
 """
-T16 Baseline Comparison — Unified Evaluation Script
+[DEPRECATED] T16 Baseline Comparison -- Unified Evaluation Script
+
+DEPRECATED (2026-03-02): This script uses legacy 'model_cp -> model.model' weight copy
+at L184, which is incompatible with Plan B (direct model_cp usage). Use
+tools/standardized_inference.py for current Oracle/E2E evaluation.
 
 Evaluates external baselines on test(73) using compute_all_metrics.
-All baselines produce instance masks → metrics computed identically.
+All baselines produce instance masks -> metrics computed identically.
 
 Experiments:
   Group A (Oracle, GT boxes):
@@ -181,6 +185,9 @@ def eval_cellsam_pretrained(dataset):
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = get_model()
+    # T25 Fix: Use official inference weights (model_cp) instead of Stage 1 weights
+    model.model.load_state_dict(model.model_cp.state_dict())
+    print("★ T25 fix: Using official inference weights (model_cp → model.model)")
     model = model.to(device)
     model.eval()
     

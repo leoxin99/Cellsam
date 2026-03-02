@@ -141,25 +141,47 @@ def create_model(config: dict, device):
     """
     model = get_model()
     
+    # Plan B: Use model_cp (Stage 2 weights, PQ=0.434) directly.
+    # No weight copy needed — we operate on model_cp throughout.
+    # Ensure adv_mode=True so forward()/prep_2 use model_cp branch.
+    model.adv_mode = True
+    print("★ Plan B: Using model_cp directly (adv_mode=True, official pipeline)")
+    
     use_lora = config['model'].get('use_lora', False)
     
-    # Step 1: Freeze layers as specified
-    if config['model']['freeze_encoder']:
-        for param in model.model.image_encoder.parameters():
+    # Step 0: Freeze ALL non-target branches (model + cellfinder)
+    # These branches are not used in Plan B training, but model.parameters()
+    # would otherwise include them in the optimizer (~200M unwanted params)
+    for param in model.model.parameters():
+        param.requires_grad = False
+    if hasattr(model, 'cellfinder') and model.cellfinder is not None:
+        for param in model.cellfinder.parameters():
             param.requires_grad = False
-        print("Froze image encoder")
+    print("Froze model (Stage 1) + cellfinder branches")
+    
+    # Step 1: Freeze layers as specified (on model_cp — the active branch)
+    if config['model']['freeze_encoder']:
+        for param in model.model_cp.image_encoder.parameters():
+            param.requires_grad = False
+        print("Froze image encoder (model_cp)")
     
     if config['model']['freeze_decoder']:
-        for param in model.model.mask_decoder.parameters():
+        for param in model.model_cp.mask_decoder.parameters():
             param.requires_grad = False
         print("Froze mask decoder")
+    
+    # Plan B: Always freeze prompt encoder (512 params, pure positional encoding)
+    # Literature consensus: FSAM, ProMISe, Sam2Rad, MedSAM all freeze PE
+    for param in model.model_cp.prompt_encoder.parameters():
+        param.requires_grad = False
+    print("Froze prompt encoder (model_cp, 512 params)")
     
     # Step 2: Apply LoRA BEFORE loading checkpoint (M3 fix)
     # This creates LoRA layers so checkpoint's LoRA keys have matching targets
     if use_lora:
         from lora import apply_lora_to_encoder
         lora_rank = config['model'].get('lora_rank', 4)
-        apply_lora_to_encoder(model.model.image_encoder, rank=lora_rank)
+        apply_lora_to_encoder(model.model_cp.image_encoder, rank=lora_rank)
     
     # Step 3: Load checkpoint AFTER LoRA is applied
     if config['model']['checkpoint']:
@@ -204,6 +226,20 @@ def create_optimizer(model, config: dict, adapter=None):
         trainable_params.extend(adapter_params)
         print(f"Adapter parameters: {sum(p.numel() for p in adapter_params):,}")
     
+    # Diagnostic: per-branch trainable param breakdown (A1 review fix)
+    branches = {
+        'model': model.model,
+        'model_cp.image_encoder': model.model_cp.image_encoder,
+        'model_cp.prompt_encoder': model.model_cp.prompt_encoder,
+        'model_cp.mask_decoder': model.model_cp.mask_decoder,
+    }
+    if hasattr(model, 'cellfinder') and model.cellfinder is not None:
+        branches['cellfinder'] = model.cellfinder
+    for name, module in branches.items():
+        n_train = sum(p.numel() for p in module.parameters() if p.requires_grad)
+        n_total = sum(p.numel() for p in module.parameters())
+        status = '[TRAIN]' if n_train > 0 else '[FROZEN]'
+        print(f"  {status} {name}: {n_train:,} / {n_total:,} trainable")
     print(f"Total trainable parameters: {sum(p.numel() for p in trainable_params):,}")
     
     optimizer = torch.optim.AdamW(
@@ -222,7 +258,7 @@ def create_optimizer(model, config: dict, adapter=None):
     return optimizer, scheduler
 
 
-def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None, adapter=None, box_expand=0.1, use_lora=False):
+def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None, adapter=None, box_expand=0.1, use_lora=False, iou_weight=0.0):
     """Train one epoch with optional mixed precision (AMP) and instance-level training.
     
     Key improvements:
@@ -250,27 +286,26 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
         if adapter is not None:
             images = adapter(images)
         
-        # Preprocess images and get embeddings
+        # Plan B: Use official preprocessing pipeline (prep_2 + forward)
         # P0-1 fix: LoRA requires gradient flow through encoder
+        from official_preprocess import official_preprocess_only, official_preprocess_and_encode
         if use_lora:
             # LoRA: encoder forward WITH gradients (LoRA params need autograd)
             if use_amp:
                 with autocast():
-                    img_preprocessed = model.sam_preprocess(images)
-                    image_embedding = model.model.image_encoder(img_preprocessed)
+                    img_preprocessed = official_preprocess_only(model, images)
+                    image_embedding = model.model_cp.image_encoder(img_preprocessed)
             else:
-                img_preprocessed = model.sam_preprocess(images)
-                image_embedding = model.model.image_encoder(img_preprocessed)
+                img_preprocessed = official_preprocess_only(model, images)
+                image_embedding = model.model_cp.image_encoder(img_preprocessed)
         else:
             # Standard: frozen encoder, no gradients needed
             with torch.no_grad():
                 if use_amp:
                     with autocast():
-                        img_preprocessed = model.sam_preprocess(images)
-                        image_embedding = model.model.image_encoder(img_preprocessed)
+                        image_embedding = official_preprocess_and_encode(model, images)
                 else:
-                    img_preprocessed = model.sam_preprocess(images)
-                    image_embedding = model.model.image_encoder(img_preprocessed)
+                    image_embedding = official_preprocess_and_encode(model, images)
         
         batch_loss = 0
         num_cells = 0
@@ -316,12 +351,12 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
                 try:
                     if use_amp:
                         with autocast():
-                            sparse_emb, dense_emb = model.model.prompt_encoder(
+                            sparse_emb, dense_emb = model.model_cp.prompt_encoder(
                                 points=None, boxes=box_tensor, masks=None
                             )
-                            low_res_masks, _ = model.model.mask_decoder(
+                            low_res_masks, iou_pred = model.model_cp.mask_decoder(
                                 image_embeddings=image_embedding[i:i+1],
-                                image_pe=model.model.prompt_encoder.get_dense_pe(),
+                                image_pe=model.model_cp.prompt_encoder.get_dense_pe(),
                                 sparse_prompt_embeddings=sparse_emb,
                                 dense_prompt_embeddings=dense_emb,
                                 multimask_output=False,
@@ -359,13 +394,23 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
                             loss = criterion(pred_clipped, target_clipped, box=box.tolist(),
                                              instance_mask=sample_mask.float(),
                                              confidence_map=confidence_map.detach())
+                            
+                            # IoU Head Loss: align quality prediction with actual IoU
+                            if iou_weight > 0 and iou_pred is not None:
+                                with torch.no_grad():
+                                    pred_binary = (torch.sigmoid(pred_clipped) > 0.5).float()
+                                    intersection = (pred_binary * target_clipped).sum()
+                                    union = pred_binary.sum() + target_clipped.sum() - intersection
+                                    actual_iou = intersection / (union + 1e-6)
+                                iou_loss = F.mse_loss(iou_pred.squeeze(), actual_iou)
+                                loss = loss + iou_weight * iou_loss
                     else:
-                        sparse_emb, dense_emb = model.model.prompt_encoder(
+                        sparse_emb, dense_emb = model.model_cp.prompt_encoder(
                             points=None, boxes=box_tensor, masks=None
                         )
-                        low_res_masks, _ = model.model.mask_decoder(
+                        low_res_masks, iou_pred = model.model_cp.mask_decoder(
                             image_embeddings=image_embedding[i:i+1],
-                            image_pe=model.model.prompt_encoder.get_dense_pe(),
+                            image_pe=model.model_cp.prompt_encoder.get_dense_pe(),
                             sparse_prompt_embeddings=sparse_emb,
                             dense_prompt_embeddings=dense_emb,
                             multimask_output=False,
@@ -403,6 +448,16 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
                         loss = criterion(pred_clipped, target_clipped, box=box.tolist(),
                                          instance_mask=sample_mask.float(),
                                          confidence_map=confidence_map.detach())
+                        
+                        # IoU Head Loss: align quality prediction with actual IoU
+                        if iou_weight > 0 and iou_pred is not None:
+                            with torch.no_grad():
+                                pred_binary = (torch.sigmoid(pred_clipped) > 0.5).float()
+                                intersection = (pred_binary * target_clipped).sum()
+                                union = pred_binary.sum() + target_clipped.sum() - intersection
+                                actual_iou = intersection / (union + 1e-6)
+                            iou_loss = F.mse_loss(iou_pred.squeeze(), actual_iou)
+                            loss = loss + iou_weight * iou_loss
                     
                     # Fix-3: Per-box backward for LoRA mode
                     # Each box's loss backward immediately → releases decoder computation graph
@@ -499,9 +554,10 @@ def validate(model, dataloader, criterion, device, adapter=None, use_pq=False, b
     num_samples = 0
     
     # 统一推理配置 (单一来源, 仅 override box_expand from training config)
+    # A1 review fix: use InferenceConfig.default() which has apply_postprocess=True
+    # This ensures early-stop metric matches external evaluation metric
     infer_cfg = InferenceConfig.default()
     infer_cfg.box_expand = box_expand
-    infer_cfg.apply_postprocess = False
     infer_cfg.validate_size = False
     
     with torch.no_grad():
@@ -626,6 +682,11 @@ def main():
         overlap_weight=config['loss'].get('overlap_weight', 0.1),
         neighbor_gamma=config['loss'].get('neighbor_gamma', 1.5),
         overlap_margin=config['loss'].get('overlap_margin', 0.05),
+        # Plan B: Focal Loss + IoU Head (A1 review: must be explicit in YAML)
+        use_focal=config['loss'].get('use_focal', False),
+        focal_weight=config['loss'].get('focal_weight', 0.3),
+        focal_alpha=config['loss'].get('focal_alpha', 0.25),
+        focal_gamma=config['loss'].get('focal_gamma', 2.0),
         # Fix3: Delayed loss enable (phase2_design.md §8.4)
         delay_epochs=config['loss'].get('delay_epochs', 0),
         ramp_epochs=config['loss'].get('ramp_epochs', 10),
@@ -647,6 +708,11 @@ def main():
         enabled_losses.append("Neighbor")
     if config['loss'].get('use_overlap', False):
         enabled_losses.append("Overlap")
+    if config['loss'].get('use_focal', False):
+        enabled_losses.append(f"Focal(a={config['loss'].get('focal_alpha', 0.25)},g={config['loss'].get('focal_gamma', 2.0)})")
+    iou_w = config['training'].get('iou_weight', 0.0)
+    if iou_w > 0:
+        enabled_losses.append(f"IoU_Head(w={iou_w})")
     print(f"Enabled losses: {', '.join(enabled_losses)}")
     
     # Mixed precision scaler
@@ -672,7 +738,8 @@ def main():
     for epoch in range(config['training']['epochs']):
         # Fix3: Update N/O loss weights based on delay schedule
         criterion.set_epoch(epoch)
-        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device, scaler=scaler, adapter=adapter, box_expand=box_expand, use_lora=config['model'].get('use_lora', False))
+        iou_weight = config['training'].get('iou_weight', 0.0)
+        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device, scaler=scaler, adapter=adapter, box_expand=box_expand, use_lora=config['model'].get('use_lora', False), iou_weight=iou_weight)
         val_metrics = validate(model, val_loader, criterion, device, adapter=adapter, use_pq=use_pq_early_stop, box_expand=box_expand)
         val_dice = val_metrics['bm_1to1']
         val_pq = val_metrics['pq']
