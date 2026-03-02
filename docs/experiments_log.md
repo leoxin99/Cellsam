@@ -88,10 +88,12 @@
 | **⚠️** | **2026-02-05** | **发现: Semantic Dice 无意义** | **Instance Dice=0.03** | **⚠️ 关键** |
 
 | E29 | 2026-02-05 | BF Instance P1 | PQ=0.33→P1调参后0.475 | ✅ 已训练 (A1) |
+
+| **T24-wt** | **2026-03-01** | **CellSAM 权重对比: model vs model_cp vs SAM ViT-B** | **314/314 参数不同; model≠SAM, model_cp≠SAM** | **✅ 完成 (R1)** |
 | E30 | 2026-02-05 | Adapter Instance P1 | 有 checkpoint 未评估 | ⚠️ 待评估 |
 | E31 | 2026-02-05 | BF Instance P2 (全部Loss) | 未训练 | ❌ P2-A 终止 |
 | E32 | 2026-02-05 | Adapter Instance P2 | 有 checkpoint 未评估 | ⚠️ 待评估 |
-| **E33** | **2026-02-06** | **GT Box + 预训练CellSAM (Baseline)** | **BM-Dice=0.111, PQ=0.000** | **✅ Baseline** |
+| **E33** | **2026-02-06** | **GT Box + 预训练CellSAM (Baseline)** | **BM-Dice=0.111, PQ=0.000** ⚠️ 旧 unified 路径; T24 修正后官方路径 PQ=0.434 | **✅ Baseline** |
 | **E34** | **2026-02-13~14** | **DAPI/Adaptive 参数统一锁定 (val→test)** | **E34b+test73 已完成并封板** | **✅ 完成** |
 | BugFix | 2026-02-13 | GT 框面积过滤移除 | 5173/5173 通过 | 🔧 已修复 |
 | **Phase 1** | **2026-02-10** | **Loss 重平衡 + PQ 早停** | **Oracle PQ=0.464, BM=0.695** | **✅ 当前最佳** |
@@ -105,26 +107,74 @@
 | **T12** | **2026-02-23** | **Loss 消融 (7×2 seeds)** | **posw=10 PQ=0.494, contour 有害** | **✅ 完成** |
 | **Best Config** | **2026-02-24** | **posw=10+contour=off (4 runs)** | **PQ=0.484 (mean)** | **✅ 完成** |
 | **T18** | **2026-02-24~25** | **三通道消融 (2ch/3ch/noAdapt)** | **T18-C PQ=0.500 (best), A=0.496, B=0.498** | **🔄 5/6 done** |
-| **T17** | **2026-02-25** | **Training Curves 工具** | **parse+plot, Phase1 图 ✅** | **✅ 工具完成** |
+| **T17** | **2026-02-26** | **Training Curves 图** | **Best Config best PQ=0.508 @ ep39, Phase1 PQ=0.475** | **✅ 完成** |
 | **T20** | **2026-02-25** | **Attention 可视化脚本** | **Method A+C, 待执行** | **🔄 脚本就绪** |
-| **T11** | **2026-02-25** | **[LoRA Encoder Fine-tuning](t11_lora_design.md)** | **rank=4/8, Q/V LoRA, 待 R1 审核** | **⏳ 设计完成** |
+| **T11** | **2026-02-26** | **[LoRA Encoder Fine-tuning](t11_lora_design.md)** | **r4 PQ=0.483 (≈baseline), r8 PQ=0.494 (+1.0pp)** | **✅ 完成** |
+| **T24-wt** | **2026-03-01** | **CellSAM 权重对比 (model vs model_cp)** | **model_cp PQ=0.434 >> model; 权重完全不同** | **✅ 完成** |
+| **T27a** | **2026-03-01~02** | **Plan B Decoder-Only (model_cp + Focal + IoU)** | **Val PQ=0.638, BM-Dice=0.791 🏆** | **✅ seed=42** |
+| T27a-s123 | 2026-03-02 | T27a seed=123 重跑 (修复 checkpoint 命名) | 训练中 | 🔄 |
+| **T28** | **2026-03-02** | **Plan B 三通道 (BF+DAPI+Actn2, model_cp)** | **训练中 (L4 s42 + L4 s123 + A100 s123)** | **🔄 训练中** |
 
 
 
 ---
+
+## T27a Plan B Decoder-Only ⭐⭐⭐ (2026-03-01~02)
+
+> **最重要的实验**: Oracle PQ 从 0.484 跃升至 **0.638** (+15.4pp), 超越 MedSAM (0.576)
+
+### 背景与动机
+
+T24 权重审计发现 CellSAM 公开 checkpoint 中包含两组权重:
+- `model`: 论文描述的图像特征微调模型, 在心肌细胞数据上效果差 (~PQ=0.337)
+- `model_cp`: 经过更充分训练的分支, 预训练即可达到 **PQ=0.434**
+
+之前所有实验 (Phase1/Best Config/T18) 使用 `model.model` 路径, 效果受限.
+T27a 迁移到 `model_cp` 分支 + 官方推理管线.
+
+### T27a vs 旧方案对比
+
+| 项目 | 旧方案 (Best Config) | T27a (Plan B) |
+|------|---------------------|---------------|
+| 模型分支 | model.model | **model_cp** |
+| 预处理 | 自定义 | **官方 prep_2() + forward()** |
+| 后处理 | 无 | **官方 7 步形态学平滑** |
+| Prompt Encoder | 可训练 | **冻结** |
+| 非目标分支 | 未冻结 (~200M) | **全局冻结** |
+| 新增 Loss | — | **Focal Loss (w=0.3) + IoU Head (w=0.1)** |
+| Boundary 权重 | 1.5 | **0.3** (平衡) |
+| 可训练参数 | ~200M (bug) | **4,058,340** (mask_decoder only) |
+
+### 结果
+
+| Seed | GPU | Val PQ | Val BM-Dice | Early Stop | 训练时间 |
+|:----:|:---:|:------:|:-----------:|:----------:|:--------:|
+| 42 | L4 | **0.638** | **0.791** | Epoch 26 (patience=15) | 4h 23m |
+| 123 | L4 | — | — | 训练中 (重跑) | — |
+
+### PQ 演进
+
+```
+Phase1 (旧)          0.464  ██████████████████░░░░░░░░░░
+Best Config (旧)      0.484  ███████████████████░░░░░░░░░
+T18-C 3ch (旧)        0.500  ████████████████████░░░░░░░░
+MedSAM (参考)         0.576  ██████████████████████░░░░░░
+T27a Plan B           0.638  █████████████████████████░░░  <- NEW BEST
+```---
 
 ## T16 Baseline 对比实验 ⭐⭐⭐ (2026-02-21~22)
 
 - **目的**: 论文 Table — 与公开方法对比
 - **评估集**: test(73), 统一使用 `compute_all_metrics()`
 - **脚本**: `baseline_eval.py`, `samcell_eval.py`, `comprehensive_eval.py`, `evaluate_e2e.py`
+- **口径修正 (2026-02-27)**: `experiments/baseline_comparison/results_combined.json` 为历史错误汇总文件（标签/口径不一致），已删除；T16 仅以 `experiments/baseline_comparison/results.json` 与各 `per_sample_*.json` 为准。
 
 | Method | Type | PQ | BM-Dice | AJI | Sem.Dice |
 |--------|------|----|---------|-----|----------|
 | Cellpose v4 (auto) | E2E | 0.000 | 0.053 | 0.025 | 0.079 |
 | Cellpose v4 (d=200) | E2E | 0.002 | 0.190 | 0.089 | 0.191 |
 | SAMCell (LIVECell) | E2E | 0.000 | 0.008 | 0.004 | 0.014 |
-| CellSAM (pretrained) | Oracle | 0.000 | 0.121 | 0.056 | 0.219 |
+| CellSAM (pretrained) | Oracle | 0.434 | 0.682 | 0.499 | 0.784 | ⚠️ T24 修正: 官方推理路径 |
 | SAM ViT-B (vanilla) | Oracle | 0.286 | 0.631 | 0.440 | 0.756 |
 | **Ours (Phase1_L4)** | **Oracle** | **0.464** | **0.695** | **0.519** | **0.756** |
 | **MedSAM** | **Oracle** | **0.576** | **0.771** | **0.634** | **0.862** |
@@ -719,7 +769,7 @@ E18 发现 Adaptive 方法 Precision 较低 (0.672)，怀疑边缘过滤过松�
 | ~~P2-E~~ | ~~lr=1e-4, epochs=80 (Epoch消融)~~ | — | ❌ 不再需要 (T12 完成了完整消融) |
 | ~~E-B1~~ | ~~Cellpose baseline~~ | — | ✅ T16 已完成 (PQ=0.073) |
 | ~~E-B2~~ | ~~StarDist baseline~~ | — | ✅ T16 已完成 (PQ=0.000) |
-| ~~E-B4~~ | ~~CellSAM Original (test73)~~ | — | ✅ T16 已完成 (PQ=0.000) |
+| ~~E-B4~~ | ~~CellSAM Original (test73)~~ | — | ✅ T16 已完成; T24 修正: 旧路径 PQ=0.000 → 官方路径 PQ=0.434 |
 | ~~E-B5~~ | ~~MedSAM baseline~~ | — | ✅ T16 已完成 (PQ=0.101) |
 | ~~E-B6~~ | ~~SAMCell baseline~~ | — | ✅ T16 已完成 (PQ=0.213) |
 | ~~T7~~ | ~~Adapter Instance 评估~~ | — | ❌ 已过时 (Phase 2 终止) |

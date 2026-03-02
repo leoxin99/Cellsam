@@ -1,7 +1,7 @@
-# CellSAM 心肌细胞分割 — 论文准备材料
+﻿# CellSAM 心肌细胞分割 — 论文准备材料
 
-> **更新日期**: 2026-02-25
-> **论文类型**: Conference paper (导师建议)
+> **更新日期**: 2026-03-02
+> **论文类型**: 硕士论文 (Master's Thesis, 20-50 pages)
 > **答辩时间**: 2026 年 4-5 月
 
 ---
@@ -38,9 +38,10 @@
 
 | 挑战 | 本文方案 | 论文贡献 |
 |------|---------|---------|
-| CellSAM 原始 loss 不适应心肌细胞边界 | CombinedLoss 多组件设计 + 权重重平衡 | **Loss 工程** |
+| CellSAM 原始 loss 不适应心肌细胞边界 | CombinedLoss 多组件设计 + Focal + IoU Head | **Loss 工程** |
 | 心肌细胞检测无现成工具 | Hybrid DAPI+Actn2 核检测方案 | **检测管线** |
-| SAM 预训练假设 RGB 输入 | BF-only 微调 + 三通道语义映射 (T18: 净+0.9pp PQ, 含对照组) | **输入策略** |
+| SAM 预训练假设 RGB 输入 | BF-only 微调 + 三通道语义映射 | **输入策略** |
+| CellSAM 模型路径与论文描述不一致 | 权重审计 + model_cp 迁移 + 官方管线对齐 | **模型路径审计** |
 | 无公开心肌细胞分割 benchmark | 统一评估框架 (BM-Dice, PQ, AJI) | **评估标准** |
 
 ---
@@ -62,6 +63,145 @@
             ├── 输出: 单细胞二值 mask
             └── 后处理: 6 步边界平滑 → 实例组装 (argmax_prob)
 ```
+
+### 2.1b CellSAM 模型架构与冻结策略分析
+
+**CellSAM (公开发布 checkpoint) 结构**: 基于 SAM ViT-B, 在对象层面包含 3 个主要模块:
+
+| 模块 | 结构 | 参数量 (约) | 当前可证结论 |
+|------|------|:---------:|------|
+| `model` (SAM 分支 A) | image_encoder (ViT + neck) + prompt_encoder + mask_decoder | ~89M | 与 CellFinder backbone 的非-neck部分对齐 |
+| `model_cp` (SAM 分支 B) | 同上 (初始化时 deepcopy, 发布 checkpoint 中为独立权重分支) | ~89M | **官方分割推理默认走这一路** |
+| `cellfinder` (AnchorDETR) | SAMBackbone + AnchorDETR transformer decoder + bbox postprocess | ~20M | 官方检测分支 |
+
+> [!NOTE]
+> `model` / `model_cp` / `cellfinder` 不是 3 个独立权重文件, 而是同一个官方 checkpoint (`cellsam_general.pt`) 内部的 3 组 state_dict 前缀。
+
+**对象关系与本地实测**:
+
+| 对比对象 | same | diff | 结论 |
+|------|:----:|:----:|------|
+| `cellfinder.decode_head.backbone.body` vs `model.image_encoder` 去 neck | 171 | 0 | **完全一致** |
+| `cellfinder.decode_head.backbone.body` vs `model_cp.image_encoder` 去 neck | 0 | 171 | **完全不同** |
+| `model.image_encoder` 去 neck vs `model_cp.image_encoder` 去 neck | 0 | 171 | **完全不同** |
+| `model` 全分支 vs `model_cp` 全分支 | 0 | 314 | **两个 SAM 分支全局不同** |
+
+**当前应采用的解释**:
+
+1. 发布代码对象层面, 检测和分割**不是共享同一个 Python `image_encoder` 实例**
+2. `cellfinder` 里的 `SAMBackbone` 由 `ModifiedImageEncoderViT` 构成, 只保留:
+   - `patch_embed`
+   - `pos_embed`
+   - `blocks`
+   不包含 neck
+3. 权重层面, `cellfinder backbone` 对齐的是 `model` 分支的非-neck部分
+4. 官方分割推理默认走 `model_cp`
+
+> [!NOTE]
+> 因此, 不应再把公开发布 checkpoint 简单解释成“`model_cp` = 在 `model` 上只改 neck 得到的纯 Stage 2 结果”。
+
+### 2.1c CellFinder 调用链与“共享 backbone”源码结构图
+
+论文写法里的“共享 backbone”更接近**功能层共享**，不是发布代码里“共享同一个 Python 实例对象”。
+
+#### 源码调用链
+
+```text
+CellSAM
+  -> self.cellfinder = CellfinderAnchorDetr(config)
+      -> decode_head = AnchorDETR(...)
+          -> backbone = SAMBackbone(...)
+              -> sam_model_registry['vit_b']()
+              -> .image_encoder
+              -> ModifiedImageEncoderViT(
+                     patch_embed
+                     pos_embed
+                     blocks
+                 )
+```
+
+对应源码:
+
+- `cellSAM_source/cellSAM/sam_inference.py:134`
+- `cellSAM_source/cellSAM/AnchorDETR/models/anchor_detr.py:412`
+- `cellSAM_source/cellSAM/AnchorDETR/models/backbone.py:219`
+- `cellSAM_source/cellSAM/AnchorDETR/models/backbone.py:180`
+
+#### 对象层结构图
+
+```text
+CellSAM
+  ├─ model
+  │   └─ image_encoder (ViT + neck)
+  ├─ model_cp
+  │   └─ image_encoder (ViT + neck)
+  └─ cellfinder
+      └─ decode_head.backbone.body
+          └─ ModifiedImageEncoderViT
+              = patch_embed + pos_embed + ViT blocks
+              = model 分支 backbone 主体
+              ≠ model_cp 分支 backbone 主体
+```
+
+#### 本地实测结论
+
+| 对比 | same | diff | 结论 |
+|------|:----:|:----:|------|
+| `cellfinder.decode_head.backbone.body` vs `model.image_encoder` 去 neck | 171 | 0 | 完全一致 |
+| `cellfinder.decode_head.backbone.body` vs `model_cp.image_encoder` 去 neck | 0 | 171 | 完全不同 |
+| `model.image_encoder` 去 neck vs `model_cp.image_encoder` 去 neck | 0 | 171 | 完全不同 |
+
+因此论文里更严谨的表述应是:
+
+> 发布 checkpoint 中，CellFinder 的 SAMBackbone 与 `model` 分支的 ViT 主体对齐；分割推理则走 `model_cp` 分支。所谓“共享 backbone”应理解为功能层共享同类 ViT 表征，而不是代码对象层共享同一个 encoder 实例。
+
+### 2.1d 论文两阶段描述 vs 发布 checkpoint 事实
+
+CellSAM 论文的训练描述是:
+
+1. **Stage 1**: 训练 ViT backbone + CellFinder 做检测
+2. **Stage 2**: 冻结 ViT encoder 和 SAM mask decoder, 微调 neck 做分割适配
+
+但对**公开发布 checkpoint** 的代码级核查结果是:
+
+1. `model` 与 `model_cp` 的 encoder 非-neck部分 **171/171 全不同**
+2. neck **6/6 全不同**
+3. mask decoder **120/120 全不同**
+4. prompt encoder **17/17 全不同**
+
+这意味着:
+
+> 论文描述的是两阶段训练策略; 但公开 checkpoint 并没有以“只差 neck 的 stage1/stage2 成对分支”形式保留下来。
+
+当前最安全的写法应是:
+
+> **在本项目中, 将 `model_cp` 视为官方分割推理分支, 将 `model` 视为与 CellFinder backbone 对齐的另一套 SAM 分支, 而不对两者差异做超出公开代码证据的强推断。**
+
+关于“为什么连 prompt encoder / mask decoder 也全变了”, 目前**只能确认事实, 不能确认原因**。公开仓库没有 Stage 2 训练脚本, 因此以下都不能写成定论:
+
+1. 不能定论 `model_cp` 是直接从 `model` 继续训练得到
+2. 不能定论发布 checkpoint 保留了训练中的中间态语义
+3. 不能定论作者是否在发布版中做过额外重打包 / 分支重置 / 推理专用导出
+
+因此论文中应写成:
+
+> **公开代码可证的是“发布 checkpoint 中 `model` / `model_cp` 全局不同”; 不可证的是“它们为什么不同到 prompt encoder 和 mask decoder”。**
+
+**Prompt Encoder 结构 (SAM 原始)**:
+
+Prompt Encoder 的 box→embedding 过程是纯位置编码 + 查表, **无复杂网络**:
+1. Box `[x1,y1,x2,y2]` → 拆成 2 个角点坐标
+2. 坐标归一化到 `[0,1]` → 乘以随机高斯矩阵 → `sin/cos` 正弦编码 → 256 维向量
+3. 加上学到的"角色" Embedding (左上角 token / 右下角 token, 各 256 维)
+4. 核心编码矩阵 `positional_encoding_gaussian_matrix` 是 `register_buffer` → **不参与梯度计算**
+5. Box prompt 实际可训练参数仅 **512 个** (2 × Embedding(1,256))
+
+**Prompt Encoder 微调价值** (文献共识: 冻结即可):
+- **FSAM** (IEEE, 2024): 冻结 prompt encoder, 只微调 encoder + decoder
+- **ProMISe** (arXiv, 2024): 冻结全部 SAM 参数, 通过外部模块适配
+- **Sam2Rad** (NIH/PMC, 2024): 冻结全部 SAM 模块, 避免 "feature damage"
+- **MedSAM** (Nature Communications, 2024): 冻结 image encoder + prompt encoder, 只微调 decoder
+- **本项目**: Prompt encoder 未显式冻结但参数极少 (512), 对结果影响可忽略
 
 ### 2.2 Loss 函数设计 (核心创新)
 
@@ -202,10 +342,12 @@ LoRA 旁路: x → A(768→r) → B(r→768) → 加到 Q  (可训练)
 
 | 方法 | PQ | BM-Dice | AJI | 备注 |
 |------|:--:|:-------:|:---:|------|
-| CellSAM 原始 | 0.000 | 0.111 | 0.056 | 未微调 |
+| CellSAM 原始 | 0.434 | 0.682 | 0.499 | 官方推理路径 (T24 修正) |
 | SAM ViT-B | 0.286 | 0.631 | 0.440 | 无细胞微调 |
 | Phase 1 (posw=2) | 0.464 | 0.695 | 0.519 | 50 ep |
 | **Best Config** (posw=10) | **0.484** | **0.720** | **0.570** | 80 ep, 4 runs mean |
+| T11 LoRA r4 | 0.483 | 0.720 | 0.569 | 2 seeds mean, ≈Best Config |
+| **T11 LoRA r8** | **0.494** | **0.725** | **0.578** | **2 seeds mean, +1.0pp** |
 | T18-A (BF+Actn2) | 0.496* | 0.724 | 0.573 | 🔄 seed42 only |
 | T18-B (3ch) | 0.498* | 0.725 | 0.574 | 🔄 seed42 only |
 | MedSAM | 0.576 | 0.771 | 0.634 | 上限参考 |
@@ -359,7 +501,9 @@ gantt
 |--------|------|------|:----:|
 | Fig.1 | 方法整体架构图 | 手绘/工具 | ⏳ |
 | Fig.2 | Loss 函数各组件示意图 | 手绘/代码可视化 | ⏳ |
-| Fig.3 | Training curves (loss + PQ vs epoch) | T17 | ⏳ |
+| Fig.3 | Training curves (loss + PQ vs epoch) | T17: `figures/training_curves_comparison.png` | ✅ |
+
+> **TODO Fig.3**: 后续加 mean±std 阴影带 (多 seed 曲线), R1 审核建议 — 审稿人可能问 single run or average。Caption 需写 "Validation metrics during training"。
 | Fig.4 | 分割结果可视化 (GT vs Ours vs Baseline) | Phase 1 checkpoint + Baseline | ⏳ |
 | Fig.5 | 检测结果示例 (DAPI 框 + 分割) | 已有 (napari 可视化) | 🔄 |
 
@@ -381,7 +525,7 @@ gantt
 
 | 配置 | BM-Dice | PQ | AJI | SQ | RQ | 来源 |
 |------|:-------:|:--:|:---:|:--:|:--:|------|
-| CellSAM 原始 (Oracle) | 0.111 | 0.000 | — | — | — | E33 |
+| CellSAM 原始 (Oracle) | 0.682 | 0.434 | 0.499 | 0.678 | 0.630 | T24 修正 (model_cp) |
 | E29 Instance 基线 (Oracle) | 0.593 | 0.326 | 0.410 | 0.586 | 0.557 | E29 |
 | Phase 1 (Oracle) | 0.695 | 0.464 | 0.519 | 0.616 | 0.753 | Phase 1 |
 | Phase 1 (E2E, DAPI) | 0.545 | 0.172 | 0.318 | — | — | E2E |

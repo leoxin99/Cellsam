@@ -2,23 +2,21 @@
 
 > 状态: 🟢 Active  
 > 维护原则: 只记录"可执行任务"，每项必须有口径/产物/完成标准。  
-> 更新时间: 2026-02-20 (2.19 导师会议后重排优先级)
+> 更新时间: 2026-03-02 (T27a PQ=0.638 超越 MedSAM)
 
 ## 📋 目录 (按优先级排列)
 
-### 🔴 P0 — 导师会议紧急任务
-- [T16. Baseline 对比实验](#t16-baseline-对比实验--p0)
-- [T17. Training Curves 图](#t17-training-curves-图--p0)
-- [T18. 三通道 Decoder 实验](#t18-三通道-decoder-实验-p0)
+### 🔴 P0 — 当前紧急
+- T27a seed=123 重跑: 🔄 ALICE L4 训练中
+- T28. Plan B 三通道: 🔄 ALICE L4+A100 训练中 (3 jobs)
+- T27a/T28 test(73) 评估: ⏳ 等训练完成
 
-### 🟡 P1 — 论文消融 / 调研
-- [T19. 框外像素分割策略调研](#t19-框外像素分割策略调研-p1)
-- [T21. 研究 CellSAM 原始 loss 设定](#t21-研究-cellsam-原始-loss-设定-)
-- [T12. Phase 1 Loss 消融实验](#t12-phase-1-loss-消融实验-论文-ablation-table-)
+### 🟡 P1 — 论文需要
+- IoU filter ablation (post-training)
+- T20. Grad-CAM 可解释性可视化: 脚本就绪, 待执行
+- 论文写作: Introduction/Method 初稿完成, 等最终数据
 
 ### 🟢 P2 — 有时间就做
-- [T20. Grad-CAM 可解释性可视化](#t20-grad-cam-可解释性可视化-p2)
-- [T11. Encoder LoRA 微调探索](#t11-encoder-lora-微调探索)
 - [T13. Adapter vs BF 公平对比](#t13-adapter-vs-bf-公平对比-原-t7)
 - [T9. dataset_parameters.md 更新](#t9-dataset_parametersmd-剩余章节更新)
 - [T10. CLAUDE.md 关联文档审核](#t10-claudemd-关联文档逐个深度审核)
@@ -30,8 +28,10 @@
 - [T8. 推理冲突区域策略](#t8-推理冲突区域高级策略探索)
 
 ### ✅ 已完成
-- [T1. E34 Test 封板](#t1-e34-test-封板评估-dapiadaptive--completed-2026-02-14) | [T2. E34b 联合消融](#t2-e34b-边缘双核联合消融-val71--completed-2026-02-14) | [T3. Adaptive 退化诊断](#t3-adaptive-退化诊断补充--completed-2026-02-16)
-- [T4. 参数防呆](#t4-默认参数与锁定参数的执行防呆--completed-2026-02-16) | [T3b. 半径重扫](#t3b-adaptive-search_radius-重扫-80-180--completed-2026-02-19)
+- T16 Baseline ✅ | T17 曲线 ✅ | T18 三通道 ✅ | T24 权重审计 ✅
+- T12 消融 ✅ | T11 LoRA ✅ | T19-abl Box Clipping ✅
+- T27a Plan B seed=42 ✅ (PQ=0.638, BM=0.791)
+- T1 E34封板 ✅ | T2 E34b联合消融 ✅ | T3/T3b Adaptive ✅ | T4 防呆 ✅
 
 ---
 
@@ -112,6 +112,17 @@
 - 完成标准:
   - [ ] Grad-CAM 实现
   - [ ] BF vs 3ch 的注意力区域对比图
+
+### T24. CellSAM inference-path fairness re-audit (A2+R1) - Pending
+- Priority: **P0**
+- Background: current `cellsam_pretrained` baseline runs through unified `segment_with_boxes()` instead of official CellSAM `predict()/segment_cellular_image()` path.
+- Risk: baseline may be underestimated (or at least not methodologically comparable) due to inference-path mismatch.
+- Key code: `tools/baseline_eval.py:209`, `src/inference/core.py`, `cellSAM_source/cellSAM/sam_inference.py`
+- Completion criteria:
+  - [ ] A2 + R1 decide whether baseline should switch to official inference path.
+  - [ ] Run side-by-side eval on same `test(73)` + same GT boxes: official vs unified (PQ/BM-Dice/AJI).
+  - [ ] Record final methodology statement in `baseline_methodology_audit` or `experiments_log`.
+
 
 ---
 

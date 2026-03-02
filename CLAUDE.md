@@ -1,8 +1,8 @@
 # CellSAM 项目方案 (Project Blueprint)
 
 > **文档类型**: 项目总览 (AI 必读)  
-> **最后更新**: 2026-02-25  
-> **当前阶段**: T18 三通道 ✅ 完成 (PQ=0.500, 净通道+0.9pp) → T17 工具就绪 → T20 脚本就绪
+> **最后更新**: 2026-03-02  
+> **当前阶段**: T27a Plan B ✅ (PQ=0.638, 超越 MedSAM) → T28 三通道训练中 → T27a seed=123 重跑中
 
 ---
 
@@ -30,30 +30,32 @@
 阶段2 检测优化       [████████████████████] 100%  ✅ 完成 (Hybrid DAPI+Actn2)
 阶段2.5 三通道适配   [████████████████████] 100%  ✅ T18 完成 (PQ=0.500, 含对照组)
 Phase 1 Loss优化     [████████████████████] 100%  ✅ 完成 + Test锁定
-Phase 2 结构改进     [█████████████████░░░]  85%  ✅ T12 消融完成, Best Config 验证
-阶段4 论文结果       [███████░░░░░░░░░░░░░]  35%  🔄 Ablation Table + 三通道进行中
+Phase 2 结构改进     [███████████████████░]  95%  ✅ T27a PQ=0.638, T28 训练中
+阶段4 论文结果       [█████████░░░░░░░░░░░]  45%  🔄 等 T28 + test 评估
 ```
 
-### 关键指标 (2026-02-25 更新)
+### 关键指标 (2026-03-02 更新)
 | 模型 | PQ | BM-Dice | AJI | 备注 |
 |------|:--:|:-------:|:---:|------|
 | Phase1 (L4, test73 封板) | 0.464 | 0.695 | 0.519 | ✅ 2026-02-11 锁定 |
-| **Best Config (4-run mean)** | **0.484** | **0.720** | **0.570** | ✅ posw=10 + contour=off |
-| **T18-C 三通道 (2-run mean)** | **0.500** | **0.726** | **0.573** | ✅ 3ch, no adapter, 净+0.9pp |
-| T18-Control BF 继训 | 0.488 | 0.719 | 0.568 | 对照: 训练效应 +0.4pp |
-| Semantic Dice (Phase1) | — | — | — | 0.757 (稳定) |
+| Best Config (4-run mean) | 0.484 | 0.720 | 0.570 | ✅ posw=10 + contour=off |
+| T18-C 三通道 (2-run mean) | 0.500 | 0.726 | 0.573 | ✅ 3ch, no adapter |
+| MedSAM (参考上限) | 0.576 | 0.771 | 0.634 | Oracle, 100 万+医学图像预训练 |
+| **T27a Plan B (seed=42, val)** | **0.638** | **0.791** | **—** | **🏆 当前最优, 超越 MedSAM** |
+| T28 三通道 Plan B | — | — | — | 🔄 训练中 (L4+A100, 2 seeds) |
 
 > **检测锁定**: DAPI F1=**0.8033** (test73 封板), Adaptive F1=0.7502 | T3b 重扫: radius=160, F1=0.780
 
 ### 当前最优模型
-| 项目 | Phase1 | Best Config |
-|------|--------|-------------|
-| Checkpoint | `E_phase1_rebalance_l4/best_model.pt` | `BestConfig_posw10_noCont_20260224_052553/best_model.pt` |
-| 配置 | `phase1_rebalance_l4.yaml` | `best_config.yaml` (posw=10, contour=off) |
-| PQ | 0.464 | **0.484** (+3.1pp) |
-| Best Epoch | 49/50 | 25~40 (A100 seed42 best) |
+| 项目 | Best Config (旧) | T27a Plan B (新) |
+|------|-----------------|-------------------|
+| Checkpoint | `BestConfig_posw10_noCont_.../best_model.pt` | `T27a_PlanB_DecoderOnly_20260302_110041/best_model.pt` |
+| 配置 | `best_config.yaml` | `t27a_planb_decoder.yaml` |
+| PQ (val) | 0.484 | **0.638** (+15.4pp) |
+| Best Epoch | 25~40 | 11 (early stop @26) |
+| 关键改进 | posw=10, contour=off | **model_cp + 官方预处理 + Focal + IoU Head** |
 
-### 当前状态: T18 ✅ 完成, 含对照组, R1 审核通过 (2026-02-25)
+### 当前状态: T27a ✅ PQ=0.638 (超越 MedSAM), T28 三通道训练中 (2026-03-02)
 
 **T12 Loss 消融 ✅ (2026-02-23)**:
 - 7 组 × 2 seeds = 14 runs
@@ -68,10 +70,11 @@ Phase 2 结构改进     [█████████████████░
 |--------|------|----|---------|-----|
 | Cellpose v4 | E2E | 0.000 | 0.053 | 0.025 |
 | SAMCell | E2E | 0.000 | 0.008 | 0.004 |
-| CellSAM (pretrained) | Oracle | 0.000 | 0.121 | 0.056 |
+| CellSAM (pretrained) | Oracle | 0.434 | 0.682 | 0.499 | ⚠️ T24 修正: 官方推理路径 |
 | SAM ViT-B | Oracle | 0.286 | 0.631 | 0.440 |
-| **Ours (Best Config)** | **Oracle** | **0.484** | **0.720** | **0.570** |
+| Ours (Best Config) | Oracle | 0.484 | 0.720 | 0.570 |
 | MedSAM | Oracle | 0.576 | 0.771 | 0.634 |
+| **Ours (T27a Plan B)** | **Oracle** | **0.638** | **0.791** | **—** | **🏆 超越 MedSAM** |
 | Ours | E2E | 0.180 | 0.567 | 0.338 |
 
 > ⚠️ MedSAM Oracle > Ours Oracle — 但 MedSAM 无检测能力，Ours 是唯一 E2E 方案
@@ -140,6 +143,8 @@ conda activate cellsam
 | [`docs/t11_lora_design.md`](docs/t11_lora_design.md) | 🟢 Active | **T11 LoRA Encoder 设计文档** (待 R1 审核) |
 | `docs/agent_management.md` | 🟢 Active | **多 Agent 协作管理规范 SSOT** |
 | `docs/agent_inbox.md` | 🟢 Active | **Agent 间异步通信信箱** |
+| [`docs/technical_qa_2.27.md`](docs/technical_qa_2.27.md) | 🟢 Active | **技术细节 Q&A** (SAM 架构、训练策略、CellSAM 设计) |
+| [`docs/paper_preparation.md`](docs/paper_preparation.md) §2.1b | 🟢 Active | **CellSAM 架构分析**: model vs model_cp 权重对比, Prompt Encoder 结构与微调价值 |
 | `docs/temp_reviews/` | 🟠 Temp | 审核报告 (合并进 SSOT 后可删) |
 | `docs/codex_claude_seg.md` | 🟡 Historical | A1/A2 联合工作台 (Phase 0-2 全链路) |
 | `docs/codex_claude_arrange.md` | 🟡 Historical | 文件整理方案 (2026-02-10) |
@@ -378,7 +383,7 @@ docs/
 | **E23** | 02-02 | uint8 截断 Bug 修复 | DAPI F1: 0→78% ✅ |
 | **E29** | 02-05 | Instance-level 基线 | BM-1to1=0.593, PQ=0.326 |
 | **Phase 1** | 02-10 | Loss 重平衡 + PQ 早停 | **Oracle PQ=0.464, BM=0.695** ⭐ |
-| **E33** | 02-06 | 预训练 CellSAM Baseline | BM-Dice=0.111, PQ=0.000 |
+| **E33** | 02-06 | 预训练 CellSAM Baseline | BM-Dice=0.111, PQ=0.000 ⚠️ 历史(旧 unified 路径); T24 修正后官方路径 PQ=0.434 |
 | **E34** | 02-13~14 | 检测参数锁定 | DAPI F1=0.803 (test73 封板) |
 | **P2-A** | 02-15~16 | N/O Loss Fix1-3 | ❌ **终止** (均退化) |
 | **T3b** | 02-19 | Adaptive radius 重扫 | F1=0.780 (radius=160) |
