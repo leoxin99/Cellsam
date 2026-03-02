@@ -644,10 +644,11 @@ def main():
     if seed is not None:
         set_seed(seed)
     
-    # Create output directory
+    # Create output directory (include seed to prevent collisions)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     exp_name = config['output']['experiment_name']
-    output_dir = Path(config['output']['checkpoint_dir']) / f"{exp_name}_{timestamp}"
+    seed_suffix = f"_seed{seed}" if seed is not None else ""
+    output_dir = Path(config['output']['checkpoint_dir']) / f"{exp_name}{seed_suffix}_{timestamp}"
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Output directory: {output_dir}")
     

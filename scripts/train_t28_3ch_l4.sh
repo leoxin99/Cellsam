@@ -1,16 +1,16 @@
 #!/bin/bash -l
-#SBATCH --job-name=t27a_s123_l4
+#SBATCH --job-name=t28_3ch_l4
 #SBATCH --partition=gpu-l4-24g
 #SBATCH --gres=gpu:1
 #SBATCH --time=48:00:00
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=8
-#SBATCH --output=logs/t27a_s123_l4_%j.log
-#SBATCH --error=logs/t27a_s123_l4_%j.err
+#SBATCH --output=logs/t28_3ch_l4_%j.log
+#SBATCH --error=logs/t28_3ch_l4_%j.err
 
 # ============================================
-# T27a: Plan B Decoder-Only (L4, seed=123) — RERUN
-# Dir naming now includes seed to prevent collisions
+# T28: Three-Channel Decoder-Only (L4)
+# Same as T27a but with BF+DAPI+Actn2 3-channel input
 # ============================================
 
 set -o pipefail
@@ -25,16 +25,16 @@ cd ~/CellSam
 mkdir -p logs checkpoints
 
 echo "============================================"
-echo "T27a: Plan B Decoder-Only (L4, seed=123) RERUN"
+echo "T28: Three-Channel Decoder-Only (L4)"
 echo "Job ID: $SLURM_JOB_ID"
 echo "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader)"
 echo "Start: $(date)"
 echo "============================================"
 
-EXP_PREFIX="T27a_PlanB_DecoderOnly"
+EXP_PREFIX="T28_PlanB_3ch"
 BEFORE_DIRS=$(ls -d checkpoints/${EXP_PREFIX}_* 2>/dev/null | sort)
 
-python src/train.py --config src/config/t27a_planb_decoder.yaml --seed 123
+python src/train.py --config src/config/t28_planb_3ch.yaml
 TRAIN_EXIT=$?
 echo "Train exit: $TRAIN_EXIT, Time: $(date)"
 
@@ -47,7 +47,7 @@ AFTER_DIRS=$(ls -d checkpoints/${EXP_PREFIX}_* 2>/dev/null | sort)
 EXP_DIR=$(comm -13 <(echo "$BEFORE_DIRS") <(echo "$AFTER_DIRS") | head -1)
 
 if [ -z "$EXP_DIR" ]; then
-  echo "WARNING: Could not identify new checkpoint dir, falling back to ls -td"
+  echo "WARNING: Could not find new checkpoint dir"
   EXP_DIR=$(ls -td checkpoints/${EXP_PREFIX}_* 2>/dev/null | head -1)
 fi
 
