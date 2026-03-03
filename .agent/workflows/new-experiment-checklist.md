@@ -14,7 +14,7 @@ description: 新实验提交前的 Pre-Flight Checklist — 避免 PYTHONPATH/gi
 - [ ] 确认数据配置: `use_bf_only` / `use_semantic_mapping` / `use_official_encoding` / `official_r_channel`
 - [ ] 确认 freeze 策略: 哪些模块可训练, 预期 trainable count
 - [ ] 确认 loss 配置: 所有 weight 参数是否传参到 `train_one_epoch()`
-- [ ] 确认 checkpoint 目录命名包含 seed (`experiment_name` 字段)
+- [ ] 确认 checkpoint 目录命名包含 seed (`experiment_name` 字段)\r\n- [ ] **🚨 防碰撞**: 不同 seed 的**同一实验**必须生成不同的 checkpoint 目录:\r\n  - 代码自动生成: `{exp_name}_seed{seed}_{timestamp}`\r\n  - SLURM 脚本的 `EXP_PREFIX` 也必须包含 seed, 如 `T29a_Official_BF_seed123`\r\n  - **禁止**: 多个 seed 共用同一个 `EXP_PREFIX` → 会导致 `best_model.pt` 被覆盖\r\n  - SLURM `--job-name` 也要包含 seed 以便 `squeue` 区分, 如 `t29a_s123_a100`
 
 ## Phase 2: 本地验证
 

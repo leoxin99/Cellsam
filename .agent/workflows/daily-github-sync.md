@@ -47,6 +47,9 @@ git add experiments/**/*.json
 - `logs/` (训练日志，通常从 Alice 同步)
 - `*.pt` / `*.pth` (模型权重)
 
+> ⚠️ **确认**: `src/` 代码会被推送到 GitHub（含训练脚本、配置、预处理等）。
+> 这是预期行为，`.gitignore` 已配置白名单规则确保 `src/` 始终被跟踪。
+
 ## 3. 编写提交信息
 
 使用 Conventional Commits 格式：
@@ -101,6 +104,14 @@ Set-Location d:\AI\paper\CellSam
 git add CLAUDE.md docs/ .agent/ src/ tools/ scripts/ experiments/**/*.json --ignore-errors 2>$null
 git commit -m "docs: daily update $(Get-Date -Format 'yyyy-MM-dd')"
 git push origin main
+```
+
+## 6.5 ALICE 同步 (如有 ALICE 任务)
+
+推送后，如果 ALICE 有正在运行或即将提交的任务:
+// turbo
+```bash
+ssh s3890074@login.alice.universiteitleiden.nl "cd ~/CellSam && git pull"
 ```
 
 ## 7. 常见问题
