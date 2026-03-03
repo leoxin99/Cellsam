@@ -1,9 +1,12 @@
 # Agent Team 架构优化方案
 
-> ⚠️ **修正声明 (2026-02-15)**:  
-> 本方案初版基于"A1(Codex)为异步平台"的假设，但实际三个 Agent 均为 **Antigravity (VS Code) 交互式对话**。  
-> 已由 R1+A1 联合审核修正（详见 `agent_inbox.md` [22:45] 条目）。  
-> 以下正文中标注 `[已修正]` 的部分为受影响内容，`agent_management.md` 中已是正确版本。
+> ⚠️ **状态**: 🟡 Historical — 本文档为 2026-02-15 的架构提案，方案 A 已实施至 `agent_management.md`  
+> **实施状态**: 改动 1 ✅ (A1/A2 按任务线分工) · 改动 2 ❌ (JSON 格式未采用，保持 markdown) · 改动 3 ✅ (`agent_status.md`) · 改动 4 ✅ (R1 主动读 inbox)  
+> **方案 B/C**: 未实施，长期参考  
+>  
+> 初版修正声明 (2026-02-15):  
+> 本方案基于"A1(Codex)为异步平台"的假设，实际三个 Agent 均为 **Antigravity (VS Code) 交互式对话**。  
+> 已由 R1+A1 联合审核修正，`agent_management.md` 中已是正确版本。以下 `[已修正]` 标注受影响内容。
 
 ## 1. 当前架构分析
 

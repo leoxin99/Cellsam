@@ -7,9 +7,11 @@
 ## 📋 目录 (按优先级排列)
 
 ### 🔴 P0 — 当前紧急
-- T27a seed=123 重跑: 🔄 ALICE L4 训练中
-- T28. Plan B 三通道: 🔄 ALICE L4+A100 训练中 (3 jobs)
-- T27a/T28 test(73) 评估: ⏳ 等训练完成
+- CellFinder 框检测评估: P0 最紧急, 明天实施
+- T29 官方通道编码: ALICE L4+A100 (T29a/b/c x seed=42)
+- T28 三通道 seed=123: ALICE L4 running
+- T27a/T28/T29 test(73) eval: waiting
+- T29a/b/c seed=123: after seed=42 comparison
 
 ### 🟡 P1 — 论文需要
 - IoU filter ablation (post-training)

@@ -1,4 +1,4 @@
-# Active Tools Scripts
+﻿# Active Tools Scripts
 
 > **Updated**: 2026-02-10
 > **Full entry point reference**: See [ENTRYPOINTS.md](ENTRYPOINTS.md)
@@ -8,8 +8,8 @@
 | Script | Purpose |
 |--------|---------|
 | `standardized_inference.py` | Oracle evaluation with GT boxes |
-| `evaluate_e2e.py` | End-to-end: DAPI detection �?SAM segmentation |
-| `comprehensive_eval.py` | Multi-model comparison (BF vs Adapter) |
+| `evaluate_e2e.py` | End-to-end: DAPI detection �?SAM segmentation |
+| `comprehensive_eval.py` | **ARCHIVED**  `tools/archive/`. 被 `eval_ablation.py` 取代 |
 | `test_unified_regression.py` | 10-test regression verification suite |
 
 ## Auxiliary
@@ -17,7 +17,7 @@
 | Script | Purpose |
 |--------|---------|
 | `compare_models.py` | Model comparison analysis (non-primary) |
-| `run_inference.py` | **DEPRECATED** �?legacy pipeline |
+| `run_inference.py` | **DEPRECATED** �?legacy pipeline |
 
 ## Analysis & Visualization (retained, not archived)
 

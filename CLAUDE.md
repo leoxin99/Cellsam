@@ -1,64 +1,5 @@
-# CellSAM 项目方案 (Project Blueprint)
 
-> **文档类型**: 项目总览 (AI 必读)  
-> **最后更新**: 2026-03-02  
-> **当前阶段**: T27a Plan B ✅ (PQ=0.638, 超越 MedSAM) → T28 三通道训练中 → T27a seed=123 重跑中
 
----
-
-## 📋 目录
-
-- [项目状态仪表板](#项目状态仪表板)
-- [环境配置](#️-环境配置-critical)
-- [多 Agent 协作模式](#-多-agent-协作模式)
-- [关键文档链接](#关键文档链接-)
-- [代码架构](#代码架构)
-- [阶段性任务清单](#阶段性任务清单)
-- [关键决策速查](#关键决策速查)
-- [新 AI 必读清单](#-新-ai-必读清单-required-reading)
-- [关键实验历史](#-关键实验历史-experiment-summary)
-- [训练前必须执行](#-训练前必须执行-critical)
-- [常见问题](#常见问题)
-
----
-
-## 项目状态仪表板
-
-### 整体进度
-```
-阶段1 数据准备       [████████████████████] 100%  ✅ 完成
-阶段2 检测优化       [████████████████████] 100%  ✅ 完成 (Hybrid DAPI+Actn2)
-阶段2.5 三通道适配   [████████████████████] 100%  ✅ T18 完成 (PQ=0.500, 含对照组)
-Phase 1 Loss优化     [████████████████████] 100%  ✅ 完成 + Test锁定
-Phase 2 结构改进     [███████████████████░]  95%  ✅ T27a PQ=0.638, T28 训练中
-阶段4 论文结果       [█████████░░░░░░░░░░░]  45%  🔄 等 T28 + test 评估
-```
-
-### 关键指标 (2026-03-02 更新)
-| 模型 | PQ | BM-Dice | AJI | 备注 |
-|------|:--:|:-------:|:---:|------|
-| Phase1 (L4, test73 封板) | 0.464 | 0.695 | 0.519 | ✅ 2026-02-11 锁定 |
-| Best Config (4-run mean) | 0.484 | 0.720 | 0.570 | ✅ posw=10 + contour=off |
-| T18-C 三通道 (2-run mean) | 0.500 | 0.726 | 0.573 | ✅ 3ch, no adapter |
-| MedSAM (参考上限) | 0.576 | 0.771 | 0.634 | Oracle, 100 万+医学图像预训练 |
-| **T27a Plan B (seed=42, val)** | **0.638** | **0.791** | **—** | **🏆 当前最优, 超越 MedSAM** |
-| T28 三通道 Plan B | — | — | — | 🔄 训练中 (L4+A100, 2 seeds) |
-
-> **检测锁定**: DAPI F1=**0.8033** (test73 封板), Adaptive F1=0.7502 | T3b 重扫: radius=160, F1=0.780
-
-### 当前最优模型
-| 项目 | Best Config (旧) | T27a Plan B (新) |
-|------|-----------------|-------------------|
-| Checkpoint | `BestConfig_posw10_noCont_.../best_model.pt` | `T27a_PlanB_DecoderOnly_20260302_110041/best_model.pt` |
-| 配置 | `best_config.yaml` | `t27a_planb_decoder.yaml` |
-| PQ (val) | 0.484 | **0.638** (+15.4pp) |
-| Best Epoch | 25~40 | 11 (early stop @26) |
-| 关键改进 | posw=10, contour=off | **model_cp + 官方预处理 + Focal + IoU Head** |
-
-### 当前状态: T27a ✅ PQ=0.638 (超越 MedSAM), T28 三通道训练中 (2026-03-02)
-
-**T12 Loss 消融 ✅ (2026-02-23)**:
-- 7 组 × 2 seeds = 14 runs
 - **高置信结论**: pos_weight=10 >> 2 (+4.1pp), Contour Loss 有害 (+2.3pp)
 - Best Config: posw=10 + contour=off → **PQ=0.484** (4-run mean, 验证完成)
 
@@ -80,6 +21,24 @@ Phase 2 结构改进     [██████████████████
 > ⚠️ MedSAM Oracle > Ours Oracle — 但 MedSAM 无检测能力，Ours 是唯一 E2E 方案
 
 **Box Clipping 消融 (T19-abl)**: with_clip PQ=0.466 > no_clip PQ=0.437 (-6.2%) → clipping 有防御价值
+
+### 📏 实验可视化标准 (强制)
+
+每个实验完成后必须提供:
+1. **5 个固定测试样本** napari 截图 (test set 前 5 张)
+2. **三通道展示**: BF (灰度) + DAPI (蓝色) + Actn2 (绿色)
+3. 预测分割 (Labels 层) + GT 分割 (对比)
+4. 指标表: PQ, BM-Dice, Semantic Dice
+
+> 原始 TIFF 通道索引: BF=Ch0, Actn2=Ch1, DAPI=Ch4
+
+### 🔒 新实验 Pre-Flight Checklist
+
+**每次新实验必须执行** `.agent/workflows/new-experiment-checklist.md`:
+- Phase 1: 设计 — 找参照 YAML, 只改目标变量
+- Phase 2: 本地 dry-run 验证
+- Phase 3: ALICE `git add -A` → 确认文件 → 检查日志
+- Phase 4: 训练后 napari 可视化 + 文档更新
 
 **当前工作重点**:
 

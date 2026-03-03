@@ -1,0 +1,106 @@
+﻿python : d:\AI/paper/CellSam/cellSAM_source\cellSAM\model.py:110: Futu
+reWarning: You are using `torch.load` with `weights_only=False` (the c
+urrent default value), which uses the default pickle module implicitly
+. It is possible to construct malicious pickle data which will execute
+ arbitrary code during unpickling (See https://github.com/pytorch/pyto
+rch/blob/main/SECURITY.md#untrusted-models for more details). In a fut
+ure release, the default value for `weights_only` will be flipped to `
+True`. This limits the functions that could be executed during unpickl
+ing. Arbitrary objects will no longer be allowed to be loaded via this
+ mode unless they are explicitly allowlisted by the user via `torch.se
+rialization.add_safe_globals`. We recommend you start setting `weights
+_only=True` for any use case where you don't have full control of the 
+loaded file. Please open an issue on GitHub for any issues related to 
+this experimental feature.
+所在位置 行:1 字符: 25
++ conda activate cellsam; python -c "
++                         ~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (d:\AI/paper/Cel...mental 
+    feature.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  model.load_state_dict(torch.load(model_path, map_location="cpu"), st
+rict=False)
+Loaded 73 samples (training=False)
+
+Official CellSAM:   0%|          | 0/73 [00:00<?, ?it/s]
+Official CellSAM:   1%|▏         | 1/73 [00:03<03:56,  3.29s/it]
+Official CellSAM:   3%|▎         | 2/73 [00:05<02:48,  2.37s/it]
+Official CellSAM:   4%|▍         | 3/73 [00:06<02:11,  1.88s/it]
+Official CellSAM:   5%|▌         | 4/73 [00:07<02:01,  1.76s/it]
+Official CellSAM:   7%|▋         | 5/73 [00:09<01:48,  1.60s/it]
+Official CellSAM:   8%|▊         | 6/73 [00:11<02:09,  1.94s/it]d:\AI/
+paper/CellSam/cellSAM_source\cellSAM\sam_inference.py:351: UserWarning
+: Low IOU threshold, ignoring mask.
+  warnings.warn("Low IOU threshold, ignoring mask.")
+
+Official CellSAM:  10%|▉         | 7/73 [00:12<01:46,  1.62s/it]
+Official CellSAM:  11%|█         | 8/73 [00:13<01:29,  1.38s/it]
+Official CellSAM:  12%|█▏        | 9/73 [00:14<01:27,  1.37s/it]
+Official CellSAM:  14%|█▎        | 10/73 [00:16<01:28,  1.40s/it]
+Official CellSAM:  15%|█▌        | 11/73 [00:17<01:14,  1.20s/it]
+Official CellSAM:  16%|█▋        | 12/73 [00:18<01:15,  1.24s/it]
+Official CellSAM:  18%|█▊        | 13/73 [00:19<01:15,  1.26s/it]
+Official CellSAM:  19%|█▉        | 14/73 [00:21<01:16,  1.29s/it]
+Official CellSAM:  21%|██        | 15/73 [00:22<01:16,  1.33s/it]
+Official CellSAM:  22%|██▏       | 16/73 [00:23<01:12,  1.27s/it]
+Official CellSAM:  23%|██▎       | 17/73 [00:26<01:29,  1.60s/it]
+Official CellSAM:  25%|██▍       | 18/73 [00:27<01:26,  1.58s/it]
+Official CellSAM:  26%|██▌       | 19/73 [00:28<01:14,  1.38s/it]
+Official CellSAM:  27%|██▋       | 20/73 [00:30<01:15,  1.43s/it]
+Official CellSAM:  29%|██▉       | 21/73 [00:31<01:19,  1.53s/it]
+Official CellSAM:  30%|███       | 22/73 [00:33<01:17,  1.51s/it]
+Official CellSAM:  32%|███▏      | 23/73 [00:34<01:07,  1.35s/it]
+Official CellSAM:  33%|███▎      | 24/73 [00:35<00:57,  1.18s/it]
+Official CellSAM:  34%|███▍      | 25/73 [00:36<01:04,  1.35s/it]
+Official CellSAM:  36%|███▌      | 26/73 [00:38<01:08,  1.46s/it]
+Official CellSAM:  37%|███▋      | 27/73 [00:39<01:03,  1.39s/it]
+Official CellSAM:  38%|███▊      | 28/73 [00:40<00:56,  1.25s/it]
+Official CellSAM:  40%|███▉      | 29/73 [00:42<01:05,  1.50s/it]
+Official CellSAM:  41%|████      | 30/73 [00:44<01:04,  1.49s/it]
+Official CellSAM:  42%|████▏     | 31/73 [00:45<01:00,  1.43s/it]
+Official CellSAM:  44%|████▍     | 32/73 [00:46<00:51,  1.26s/it]
+Official CellSAM:  45%|████▌     | 33/73 [00:47<00:50,  1.27s/it]
+Official CellSAM:  47%|████▋     | 34/73 [00:48<00:49,  1.27s/it]
+Official CellSAM:  48%|████▊     | 35/73 [00:49<00:44,  1.17s/it]
+Official CellSAM:  49%|████▉     | 36/73 [00:51<00:51,  1.38s/it]
+Official CellSAM:  51%|█████     | 37/73 [00:53<00:50,  1.41s/it]
+Official CellSAM:  52%|█████▏    | 38/73 [00:55<00:56,  1.62s/it]
+Official CellSAM:  53%|█████▎    | 39/73 [00:56<00:49,  1.47s/it]
+Official CellSAM:  55%|█████▍    | 40/73 [00:57<00:46,  1.40s/it]
+Official CellSAM:  56%|█████▌    | 41/73 [00:59<00:53,  1.67s/it]
+Official CellSAM:  58%|█████▊    | 42/73 [01:01<00:46,  1.50s/it]
+Official CellSAM:  59%|█████▉    | 43/73 [01:02<00:48,  1.62s/it]
+Official CellSAM:  60%|██████    | 44/73 [01:05<00:55,  1.93s/it]
+Official CellSAM:  62%|██████▏   | 45/73 [01:07<00:53,  1.92s/it]
+Official CellSAM:  63%|██████▎   | 46/73 [01:08<00:43,  1.62s/it]
+Official CellSAM:  64%|██████▍   | 47/73 [01:10<00:41,  1.61s/it]
+Official CellSAM:  66%|██████▌   | 48/73 [01:12<00:48,  1.95s/it]
+Official CellSAM:  67%|██████▋   | 49/73 [01:15<00:51,  2.16s/it]
+Official CellSAM:  68%|██████▊   | 50/73 [01:17<00:46,  2.04s/it]
+Official CellSAM:  70%|██████▉   | 51/73 [01:19<00:48,  2.21s/it]
+Official CellSAM:  71%|███████   | 52/73 [01:21<00:40,  1.94s/it]
+Official CellSAM:  73%|███████▎  | 53/73 [01:22<00:33,  1.69s/it]
+Official CellSAM:  74%|███████▍  | 54/73 [01:24<00:32,  1.72s/it]
+Official CellSAM:  75%|███████▌  | 55/73 [01:25<00:30,  1.68s/it]
+Official CellSAM:  77%|███████▋  | 56/73 [01:27<00:32,  1.89s/it]
+Official CellSAM:  78%|███████▊  | 57/73 [01:29<00:27,  1.74s/it]
+Official CellSAM:  79%|███████▉  | 58/73 [01:30<00:23,  1.57s/it]
+Official CellSAM:  81%|████████  | 59/73 [01:31<00:21,  1.52s/it]
+Official CellSAM:  82%|████████▏ | 60/73 [01:34<00:22,  1.74s/it]
+Official CellSAM:  84%|████████▎ | 61/73 [01:34<00:17,  1.43s/it]
+Official CellSAM:  85%|████████▍ | 62/73 [01:36<00:16,  1.48s/it]
+Official CellSAM:  86%|████████▋ | 63/73 [01:37<00:14,  1.48s/it]
+Official CellSAM:  88%|████████▊ | 64/73 [01:38<00:11,  1.25s/it]
+Official CellSAM:  89%|████████▉ | 65/73 [01:39<00:10,  1.26s/it]
+Official CellSAM:  90%|█████████ | 66/73 [01:42<00:10,  1.51s/it]
+Official CellSAM:  92%|█████████▏| 67/73 [01:43<00:08,  1.35s/it]
+Official CellSAM:  93%|█████████▎| 68/73 [01:44<00:06,  1.33s/it]
+Official CellSAM:  95%|█████████▍| 69/73 [01:45<00:05,  1.29s/it]
+Official CellSAM:  96%|█████████▌| 70/73 [01:46<00:03,  1.15s/it]
+Official CellSAM:  97%|█████████▋| 71/73 [01:48<00:02,  1.38s/it]
+Official CellSAM:  99%|█████████▊| 72/73 [01:49<00:01,  1.34s/it]
+Official CellSAM: 100%|██████████| 73/73 [01:51<00:00,  1.41s/it]
+Official CellSAM: 100%|██████████| 73/73 [01:51<00:00,  1.52s/it]
+Saved 73 samples to d:\AI\paper\CellSam\experiments\baseline_comparison\per_sample_cellsam_official.json
+Mean PQ = 0.4339

@@ -135,8 +135,22 @@ merge_close_nuclei(regions, use_relative_distance=False, fixed_merge_distance=37
 
 ---
 
+## 8. SLURM 脚本规则 (2026-02-25)
+
+**⚠️ Checkpoint 引用必须使用绝对路径**
+
+从 T18 eval bug 学到的教训: `ls -td checkpoints/*/` 在 SLURM 中可能选错目录。
+
+**规则**:
+1. 训练脚本结束时将 checkpoint 路径写入 `$SLURM_SUBMIT_DIR/latest_ckpt.txt`
+2. Eval 脚本从该文件读取，不使用 `ls -td` 动态查找
+3. 详见 [`alice_quick_reference.md`](file:///d:/AI/paper/CellSam/docs/alice_quick_reference.md)
+
+---
+
 ## 更新日志
 
 | 日期 | 更新 |
 |------|------|
+| 2026-02-25 | 新增 §8 SLURM 脚本规则 |
 | 2026-01-23 | 初始创建，定义标准检测函数入口 |

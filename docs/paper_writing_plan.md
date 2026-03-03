@@ -1,4 +1,11 @@
-# 论文写作计划
+# ⚠️ 已合并至 `paper_preparation.md` §7 (2026-02-25)
+
+> 本文件内容已合并至 `paper_preparation.md` 的 §7 写作规划。
+> 后续更新请直接编辑 `paper_preparation.md`，本文件保留仅供历史参考。
+
+---
+
+# 论文写作计划 (ARCHIVED)
 
 ## 1. 目标期刊推荐
 
@@ -68,7 +75,7 @@
 |------|------|:---:|
 | 3.1 Dataset | Allen hiPSC-CM; 334/71/73 split; 通道映射 (BF→SAM) | ✅ |
 | 3.2 Detection Pipeline | DAPI 核检测 → 框生成 → SAM prompt | ✅ |
-| 3.3 SAM Fine-tuning (Phase 1) | Loss 设计: Dice+BCE+Boundary+AJI+Contour; 冻结 encoder | ✅ |
+| 3.3 SAM Fine-tuning (Phase 1) | Loss 设计: Dice+BCE+Boundary+AJI（Contour 经消融后移除）; 冻结 encoder | ✅ |
 | 3.4 Exclusion-Aware Losses (Phase 2) | L_neighbor + L_overlap 设计动机 | ✅ 框架可写，结果待定 |
 
 > **P2 降级预案 (R1 review)**: 若 Fix3 仍不及 P1 (PQ=0.475)，将 §3.4 定位为 "Preliminary Exploration"，不作为主要贡献，移入 Discussion 作为 Future Work。

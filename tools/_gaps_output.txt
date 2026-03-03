@@ -1,0 +1,17 @@
+﻿Ab0_bce_dice_only              val_PQ=0.4821   test_PQ=0.4499 gap=+0.0323
+Ab1_no_boundary                val_PQ=0.4797   test_PQ=0.4561 gap=+0.0236
+Ab2_no_contour                 val_PQ=0.5012   test_PQ=0.4763 gap=+0.0249
+Ab3_no_aji                     val_PQ=0.4879   test_PQ=0.4639 gap=+0.0241
+Ab4_no_pq_earlystop            val_PQ=0.0000   test_PQ=0.4691 gap=-0.4691
+Ab5_posw10                     val_PQ=0.5203   test_PQ=0.5059 gap=+0.0145
+E_phase1_rebalance_l4          val_PQ=0.4799   test_PQ=0.4602 gap=+0.0197
+
+--- Best Config 4 runs ---
+  seed123              val_PQ=0.5082   test_PQ=0.4801 gap=+0.0280
+  seed42_l4            val_PQ=0.5061   test_PQ=0.4855 gap=+0.0206
+
+--- T11 LoRA ---
+  r4_seed123_l4        val_PQ=0.5072   test_PQ=0.4831 gap=+0.0241
+  r4_seed42_l4         val_PQ=0.5017   test_PQ=0.4828 gap=+0.0189
+  r8_seed123_a100      val_PQ=0.5046   test_PQ=0.4880 gap=+0.0166
+  r8_seed42_a100       val_PQ=0.5139   test_PQ=0.5010 gap=+0.0130

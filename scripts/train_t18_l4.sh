@@ -43,6 +43,10 @@ train_and_eval() {
   echo "========== [$label] Training: $exp_prefix (seed=$seed) =========="
   echo "Start: $(date)"
 
+  # Snapshot checkpoint dirs BEFORE training
+  local before_dirs
+  before_dirs=$(ls -d checkpoints/${exp_prefix}_* 2>/dev/null | sort)
+
   python src/train.py --config "$config" --seed $seed
   local train_exit=$?
   echo "Train exit: $train_exit, Time: $(date)"
@@ -52,9 +56,17 @@ train_and_eval() {
     return $train_exit
   fi
 
-  # Find the latest experiment directory
+  # Find the NEW directory created by THIS training run
+  local after_dirs
+  after_dirs=$(ls -d checkpoints/${exp_prefix}_* 2>/dev/null | sort)
   local exp_dir
-  exp_dir=$(ls -td checkpoints/${exp_prefix}_* 2>/dev/null | head -1)
+  exp_dir=$(comm -13 <(echo "$before_dirs") <(echo "$after_dirs") | head -1)
+
+  # Fallback: if comm fails, use ls -td (original behavior)
+  if [ -z "$exp_dir" ]; then
+    echo "WARNING: Could not identify new checkpoint dir, falling back to ls -td"
+    exp_dir=$(ls -td checkpoints/${exp_prefix}_* 2>/dev/null | head -1)
+  fi
 
   mkdir -p "$eval_dir"
 

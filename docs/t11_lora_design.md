@@ -1,4 +1,4 @@
-# T11: LoRA Encoder Fine-tuning 设计文档
+﻿# T11: LoRA Encoder Fine-tuning 设计文档
 
 > **状态**: ✅ R1+A1 审核通过 (有条件) — 实施中  
 > **创建日期**: 2026-02-25  
@@ -169,7 +169,7 @@ LoRA_V = B_v @ A_v  (A_v: [768→r], B_v: [r→768])
 
 #### P1-2: eval 脚本 CLI 支持
 
-`comprehensive_eval.py` 需确认支持 `--exp-dir` CLI 参数，T11 有 4 个配置需要用 CLI 指定。
+~~`comprehensive_eval.py`~~ **已归档**。T11 使用 `eval_ablation.py --exp-dir` (已内置于 SLURM 脚本)。
 
 ### 3.4 `src/lora.py` 核心设计
 
@@ -263,7 +263,7 @@ def get_lora_state_dict(model):
 ### 4.2 评估
 
 - **评估集**: test(73)
-- **评估方式**: Oracle (GT box), `tools/comprehensive_eval.py`
+- **评估方式**: Oracle (GT box), `tools/eval_ablation.py --exp-dir`
 - **指标**: PQ, BM-Dice, AJI, Sem.Dice
 
 ### 4.3 成功标准

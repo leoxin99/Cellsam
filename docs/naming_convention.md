@@ -3,7 +3,7 @@
 ## 概述
 
 > **状态**: 🟢 Active — 命名规范参考文档
-> **最后更新**: 2026-02-13
+> **最后更新**: 2026-02-25
 
 本文档定义了 CellSAM 项目中模型、实验和方案的标准命名规范，避免混淆。
 
@@ -79,6 +79,17 @@ E{编号}_{模型类型}_{阶段}_{日期}
 | **P2-E** | Phase 2-E - 轮次消融 | P2-A + lr=1e-4, epochs=80 |
 
 > 注：旧命名 `P2-C`（lr 与 epochs 同时变动）已废弃，拆分为 `P2-D/P2-E` 以保证单变量对比。
+
+### T18 三通道实验命名 (2026-02-25)
+
+| 实验 ID | 配置文件 | 通道 | Adapter |
+|---------|---------|------|:-------:|
+| **T18-A** | `t18a_2ch.yaml` | BF+Actn2 (2ch) | ✅ |
+| **T18-B** | `t18b_3ch.yaml` | BF+DAPI+Actn2 (3ch) | ✅ |
+| **T18-C** | `t18c_3ch_no_adapter.yaml` | BF+DAPI+Actn2 (3ch) | ❌ |
+| **T18-Control** | `t18_control_bf_continue.yaml` | BF×3 (继训对照) | — |
+
+Seed 命名: `T18-A_s42` / `T18-A_s123` (seed42 / seed123)
 
 ---
 
@@ -158,5 +169,6 @@ E{编号}_{模型类型}_{阶段}_{日期}
 
 实验阶段:
 ├── P1: 基础损失 (Dice + BCE + Boundary + AJI)
-└── P2: 高级损失 (P1 + Topology + Size + Contour)
+├── P2: 高级损失 (P1 + Topology + Size + Contour) — 已终止
+└── T18: 三通道消融 (A=2ch, B=3ch, C=no-adapter, Control=BF继训)
 ```

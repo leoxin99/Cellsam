@@ -10,7 +10,7 @@ Review: docs/inbox/t11_review_r1a1.md
 
 Usage:
     from lora import apply_lora_to_encoder, get_lora_state_dict
-    apply_lora_to_encoder(model.model.image_encoder, rank=4)
+    apply_lora_to_encoder(model.model_cp.image_encoder, rank=4)
 """
 
 import math
@@ -93,7 +93,7 @@ def apply_lora_to_encoder(encoder, rank: int = 4, use_grad_checkpoint: bool = Tr
         → LoRA params are trainable, base weights stay frozen
     
     Args:
-        encoder: SAM ViT-B image_encoder (model.model.image_encoder)
+        encoder: SAM ViT-B image_encoder (model.model_cp.image_encoder)
         rank: LoRA rank (4 or 8)
         use_grad_checkpoint: Enable gradient checkpointing to reduce VRAM
             (~38GB → ~3GB for encoder activations). Trades ~30% speed for memory.

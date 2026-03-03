@@ -241,6 +241,8 @@ A.CoarseDropout(
 
 ## 五、审批状态
 
-- [ ] 用户审批 Loss 方案
-- [ ] 用户审批增强方案
-- [ ] 用户审批消融实验计划
+> ⚠️ Historical — 以下方案已被实际 T12 消融实验取代，不再需要单独审批。
+
+- [x] Loss 方案 → TopologyLoss/ContourLoss 因断图问题弃用；BoundaryLoss/AJILoss 已集成
+- [x] 增强方案 → ElasticTransform 已集成；其余未采纳
+- [x] 消融实验 → 被 T12 七组消融覆盖

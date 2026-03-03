@@ -5,7 +5,7 @@
 > **事实来源**: 此文档为实验记录的 SSOT，按时间顺序记录所有实验  
 > **完整历史存档**: [`experiments_log_archive.md`](experiments_log_archive.md)
 
----
+---\r\n\r\n### 📏 可视化标准 (2026-03-03 起)\r\n\r\n每个实验结果必须包含 **5 个固定测试样本** (test set 前 5 张) 的 napari 截图:\r\n- **BF** (Ch0, 灰度) + **DAPI** (Ch4, 蓝色) + **Actn2** (Ch1, 绿色)\r\n- 预测分割 + GT 分割叠加对比\r\n- 通道索引参照: 原始 TIFF `img[0]=BF, img[1]=Actn2, img[4]=DAPI`\r\n\r\n---
 
 ## 📋 目录
 

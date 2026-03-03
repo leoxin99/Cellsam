@@ -258,6 +258,33 @@ for region in regionprops(gt_mask):
 
 ---
 
+## 10. 三通道语义映射 vs Channel Adapter ⭐⭐⭐ (2026-02-25, T18)
+
+**决策**: 使用 **语义通道映射** (R=BF, G=Actn2, B=DAPI)，**不需要 Channel Adapter**
+
+### T18 实验结果
+
+| 实验 | 通道 | Adapter | PQ (2-seed mean) | Δ vs BF-only |
+|------|------|:-------:|:-----------------:|:------------:|
+| Best Config (BF-only) | BF×3 | — | 0.484 | baseline |
+| T18-A (2ch) | BF+Actn2 | ✅ adapter | 0.493 | **+0.9pp** |
+| T18-B (3ch) | BF+DAPI+Actn2 | ✅ adapter | 0.500 | **+1.6pp** |
+| T18-C (3ch no-adapter) | BF+DAPI+Actn2 | ❌ 无 | 0.484 | +0.0pp |
+| T18-Control (BF 继训) | BF×3 (继训) | — | 0.491 | +0.7pp |
+
+### 关键结论
+
+1. **三通道 > BF-only**: T18-B (0.500) > Best Config (0.484)，净通道贡献 **+0.9pp** (扣除继训增益)
+2. **Adapter 必需**: T18-C (无adapter) = BF-only baseline，说明 adapter 是解锁多通道信息的关键
+3. **DAPI 通道小幅有用**: T18-B (0.500) vs T18-A (0.493)，DAPI 贡献约 +0.7pp
+4. **PQ 首次突破 0.50 大关**
+
+### 论文表述
+
+> "Semantic channel mapping (BF→R, Actn2→G, DAPI→B) with a lightweight 3→3 convolutional adapter yielded PQ=0.500, a +0.9pp net improvement over BF-only training. Without the adapter (direct concatenation), multi-channel input provided no benefit, indicating that domain-specific channel adaptation is essential for leveraging fluorescence signals."
+
+---
+
 *此文档详细内容用于论文撰写，请参考 CLAUDE.md 获取项目总览*
 
 

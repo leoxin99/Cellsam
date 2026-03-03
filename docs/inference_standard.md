@@ -1,4 +1,4 @@
-# CellSAM 推理标准文档
+﻿# CellSAM 推理标准文档
 
 > **状态**: 🟢 Active — 推理与评估的唯一口径文档
 > **最后更新**: 2026-02-16
@@ -96,7 +96,7 @@ RQ (Recognition Quality) = TP / (TP + 0.5*FP + 0.5*FN)
 
 | 工具 | 用途 | Box 来源 | 说明 |
 |------|------|----------|------|
-| `tools/comprehensive_eval.py` | **Oracle 评估** | GT boxes | 纯分割能力 (无 argparse，需改代码内参数) |
+| `tools/comprehensive_eval.py` | **已归档**  `tools/archive/`, 被 `eval_ablation.py --exp-dir` 取代 |  |  |
 | `tools/evaluate_e2e.py` | **E2E 评估** | DAPI 检测 | 含检测误差 |
 | `tools/test_unified_regression.py` | **回归测试** | GT boxes | 防止退化 |
 | `tools/smoke_test_e2e.py` | **冒烟测试** | GT boxes | 默认 30 样本 |

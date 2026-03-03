@@ -32,10 +32,19 @@ class IndependentChannelAdapter(nn.Module):
     
     参数:
         kernel_size: 卷积核大小 (推荐 3)
-        use_relu: 是否使用 ReLU 激活 (推荐 True)
+        use_relu: 是否使用 ReLU 激活 (默认 False, 避免与恒等初始化冲突)
     """
     
-    def __init__(self, kernel_size: int = 3, use_relu: bool = True):
+    def __init__(self, kernel_size: int = 3, use_relu: bool = False):
+        """
+        Args:
+            kernel_size: 卷积核大小 (推荐 3)
+            use_relu: 是否使用 ReLU 激活 (默认 False)
+                      ⚠️ ReLU + identity init 冲突: 恒等初始化保证 output=input,
+                      但 ReLU 从 epoch 1 就裁切负值, 破坏恒等映射。
+                      对于 pixel 空间 (0~255) 影响有限, 但 SemanticChannelMapper
+                      输出可能含经 normalization 后的负值。建议关闭。
+        """
         super().__init__()
         
         self.kernel_size = kernel_size
@@ -47,7 +56,7 @@ class IndependentChannelAdapter(nn.Module):
         self.bf_conv = nn.Conv2d(1, 1, kernel_size, padding=padding, bias=True)
         self.dapi_conv = nn.Conv2d(1, 1, kernel_size, padding=padding, bias=True)
         
-        # 激活函数
+        # 激活函数 (默认关闭, 避免与恒等初始化冲突)
         self.activation = nn.ReLU(inplace=True) if use_relu else nn.Identity()
         
         # 初始化为恒等映射

@@ -14,7 +14,7 @@ CellSAM 项目采用**语义通道映射 (Semantic Channel Mapping) + 可学习�
 |------|------|
 | **SemanticChannelMapper** | 将 (BF, DAPI, Actn2) → 伪 RGB |
 | **IndependentChannelAdapter** | 每通道独立 3×3 卷积，~30 参数 |
-| **通道映射** | R=Actn2, G=BF, B=DAPI |
+| **通道映射** | R=BF, G=Actn2, B=DAPI (生物学一致: Actn2=绿色, DAPI=蓝色) |
 | **配置** | `src/config/semantic_adapter.yaml` |
 
 ---
@@ -24,9 +24,9 @@ CellSAM 项目采用**语义通道映射 (Semantic Channel Mapping) + 可学习�
 ### 2.1 映射方案
 
 ```
-R ← Actn2 (Ch2): 肌节纹理，P1-P99 百分位截断
-G ← BF (Ch0): 细胞边界，CLAHE 增强
-B ← DAPI (Ch1): 细胞核，高斯平滑
+R ← BF (Ch0): 细胞边界，CLAHE 增强
+G ← Actn2 (Ch2): 肌节纹理 (绿色荧光)，P1-P99 百分位截断
+B ← DAPI (Ch1): 细胞核 (蓝色荧光)，高斯平滑
 ```
 
 ### 2.2 优势
@@ -63,9 +63,10 @@ B ← DAPI (Ch1): 细胞核，高斯平滑
 
 ```python
 # 3 个独立 3×3 卷积，参数量 ≈ 30
-self.actn2_conv = nn.Conv2d(1, 1, kernel_size=3, padding=1)
-self.bf_conv = nn.Conv2d(1, 1, kernel_size=3, padding=1)
-self.dapi_conv = nn.Conv2d(1, 1, kernel_size=3, padding=1)
+# 通道顺序: R=BF, G=Actn2, B=DAPI
+self.bf_conv = nn.Conv2d(1, 1, kernel_size=3, padding=1)     # R (BF)
+self.actn2_conv = nn.Conv2d(1, 1, kernel_size=3, padding=1)  # G (Actn2)
+self.dapi_conv = nn.Conv2d(1, 1, kernel_size=3, padding=1)   # B (DAPI)
 ```
 
 ### 4.2 设计亮点

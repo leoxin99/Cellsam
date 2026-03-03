@@ -1,9 +1,20 @@
 """
-Unified inference pipeline for CellSAM.
+[DEPRECATED] Legacy inference pipeline — replaced by inference/core.py
 
+⚠️ This file still uses model.model.* (Stage 1 weights) and the old
+sam_preprocess() pipeline. It is NOT compatible with Plan B (model_cp + official pipeline).
+Use inference/core.py segment_with_boxes() instead.
+
+Original description:
+Unified inference pipeline for CellSAM.
 This module provides the main entry point for running inference,
 consolidating all post-processing and visualization into a single interface.
 """
+import warnings
+warnings.warn(
+    "inference/pipeline.py is deprecated. Use inference/core.py segment_with_boxes() instead.",
+    DeprecationWarning, stacklevel=2
+)
 import sys
 from pathlib import Path
 import numpy as np

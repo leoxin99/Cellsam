@@ -2,6 +2,7 @@
 
 > 状态: 🟢 Active  
 > 创建日期: 2026-02-15  
+> 最后更新: 2026-02-25  
 > SSOT 级别: 本文件是多 Agent 协作的唯一权威参考  
 
 ---
@@ -36,8 +37,9 @@
 
 | 角色 | 可以做 | 不可以做 |
 |------|--------|----------|
-| **实施 Agent (A1/A2)** | 修改 `src/`; 编写脚本 `tools/`; 运行实验; 创建 config | 自行封板重大参数; 直接修改 SSOT 文档的"已锁定"字段 |
-| **审核 Agent (R1)** | 读取所有代码/产物; 写审核报告; 回填 SSOT 文档; 更新 `task_backlog.md` | 修改 `src/` 核心代码; 修改训练配置 YAML; 运行实验 |
+| **A1 (Codex)** | 数据处理; 参数文档; 检测消融 (E34/T3b/T9); 文档审计 | 自行封板重大参数; 直接修改 SSOT 文档的"已锁定"字段 |
+| **A2 (Claude)** | 训练代码; SLURM 部署; 评估工具; 论文文档; config YAML | 自行封板重大参数; 直接修改 SSOT 文档的"已锁定"字段 |
+| **R1 (Reviewer)** | 读取所有代码/产物; 写审核报告到 inbox; 回填 SSOT 文档; 更新 `task_backlog.md` | 修改 `src/` 核心代码; 修改训练配置 YAML; 运行实验 |
 | **用户** | 最终审批; 分配任务; 在 Agent 之间传递消息 | — |
 
 ---
@@ -141,6 +143,8 @@ Agent 之间**无法直接通信**（各自独立的 Antigravity 窗口）。通
 | **Agent 信箱 `docs/agent_inbox.md`** | 异步 | 产物摘要、审核结论、任务交接 |
 | **共享文件系统 (Git Repo)** | 异步 | 代码、实验结果 JSON、文档 |
 
+> ⚠️ **Inbox 规则 #5** (2026-02-25 新增): R1 审核结果**必须先写入 inbox**，再通知用户。详见 `agent_inbox.md` 归档规则。
+
 ### 3.2 产物提交格式 (实施 Agent → 用户 → 审核 Agent)
 
 实施 Agent 完成任务后，向用户提交的摘要**必须包含**:
@@ -200,18 +204,22 @@ Agent 之间**无法直接通信**（各自独立的 Antigravity 窗口）。通
 
 | 文件/目录 | 主要写入者 | 次要写入者 | 说明 |
 |-----------|----------|----------|------|
-| `src/` | 实施 Agent | — | 审核 Agent 只读 |
-| `tools/` | 实施 Agent | — | 审核 Agent 只读 |
-| `scripts/` | 实施 Agent | — | SLURM 脚本 |
-| `src/config/` | 实施 Agent | — | 训练配置 |
-| `experiments/` | 实施 Agent (自动写盘) | — | 实验结果 JSON |
-| `docs/temp_reviews/` | 审核 Agent | 实施 Agent (复核) | 临时审核报告 |
-| `CLAUDE.md` | 审核 Agent (回填) | 实施 Agent (紧急修正) | 项目总览 SSOT |
-| `docs/task_backlog.md` | 审核 Agent (勾选) | 用户 (新增任务) | 待办清单 |
-| `docs/experiments_log.md` | 审核 Agent (回填) | 实施 Agent (初始记录) | 实验流水账 |
-| `docs/dapi_detection_design.md` | 审核 Agent (锁定标记) | 实施 Agent (设计更新) | 检测参数 SSOT |
-| `docs/agent_management.md` | 审核 Agent | — | 本文件 |
-| `.agent/workflows/` | 审核 Agent | 用户 | 工作流定义 |
+| `src/` | A1/A2 | — | R1 只读 |
+| `tools/` | A2 | A1 | R1 只读 |
+| `scripts/` | A2 | — | SLURM 脚本 |
+| `src/config/` | A2 | — | 训练配置 YAML |
+| `experiments/` | A2 (自动写盘) | — | 实验结果 JSON |
+| `docs/agent_inbox.md` | R1/A1/A2 | 用户 | 异步通信信箱 |
+| `docs/inbox_archive/` | R1 | — | 归档 (只追加) |
+| `CLAUDE.md` | R1 (回填) | A2 (紧急修正) | 项目总览 SSOT |
+| `docs/task_backlog.md` | R1 (勾选) | 用户 (新增任务) | 待办清单 |
+| `docs/experiments_log.md` | R1 (回填) | A2 (初始记录) | 实验流水账 |
+| `docs/dataset_parameters.md` | A1 (回填) | R1 (审核标记) | 数据集参数 SSOT |
+| `docs/agent_management.md` | R1 | — | 本文件 |
+| `docs/agent_status.md` | R1 (全局刷新) | A1/A2 (自行更新) | 实时状态板 |
+| `docs/r1_handoff.md` | R1 | — | R1 移交文档 |
+| `docs/a2_handoff_*.md` | A2 | R1 (审核) | A2 移交文档 |
+| `.agent/workflows/` | R1 | 用户 | 工作流定义 |
 
 ### 4.2 并发冲突防护 (A 模式约束)
 
@@ -250,11 +258,44 @@ Agent 之间**无法直接通信**（各自独立的 Antigravity 窗口）。通
 
 ---
 
+## 5b. 代码文档规范 (Code Documentation Standard)
+
+> ⚠️ **强制规则** (2026-03-01 起生效): 所有新增的 Python 脚本/模块**必须**在文件开头包含来源说明。
+
+**格式要求**: 文件开头的 docstring 必须包含以下字段:
+
+```python
+"""
+<脚本名称/用途 — 一句话摘要>
+
+背景 (<日期>, <创建者 Agent ID>):
+  <为什么创建这个文件? 对应哪个 Task/问题?>
+
+目的:
+  <这个脚本做什么? 列出 1-3 个要点>
+
+依赖:
+  <需要哪些数据/文件/环境?>
+
+结果记录在: <对应文档路径>
+"""
+```
+
+**适用范围**:
+- `src/` 下所有新增模块
+- `tools/` 下所有新增脚本
+- `scripts/` 下所有新增 SLURM/Shell 脚本 (用 `#` 注释)
+- 不适用于修改已有文件 (但鼓励补充)
+
+**示例**: 参见 [`tools/_compare_weights.py`](../tools/_compare_weights.py)
+
+---
+
 ## 6. 更新日志
 
 | 日期 | 内容 |
 |------|------|
-| 2026-02-15 | 初版创建: Agent 清单、职能边界、通信协议、文件所有权、并发防护 |
-| 2026-02-15 | 修正: 三个 Agent 均为 Antigravity (VS Code) 交互式对话，非 Codex 异步平台 |
-| 2026-02-15 | 新增: `agent_status.md` 实时状态板，写入约束文件索引 |
+| **2026-03-01** | **R1**: 新增 §5b 代码文档规范 — 所有新脚本必须包含来源/目的 docstring |
+| **2026-02-25** | **R1**: 全局更新 — §1.2 职能边界改为 A1/A2 具体分工; §3.1 新增 inbox 规则 #5 引用; §4.1 文件所有权大幅更新 (inbox/archive/handoff/dataset_params); `agent_status.md` 全面刷新 |
 | 2026-02-17 | 新增 §2.2 审核意见回复模板（A1/A2 固定格式） |
+| 2026-02-15 | 初版创建 + 修正 (Antigravity 交互式) + `agent_status.md` |

@@ -1,4 +1,4 @@
-# CellSAM 代码清单
+﻿# CellSAM 代码清单
 
 > **状态**: 🟢 Active — 代码入口速查
 > **最后更新**: 2026-02-13
@@ -31,7 +31,7 @@
 |------|------|------|
 | `src/inference/core.py` | **统一推理核心** ⭐ | InferenceConfig + segment_with_boxes |
 | `src/inference/postprocess.py` | 后处理 | 面积过滤、形态学操作 |
-| `tools/comprehensive_eval.py` | Oracle 评估 | GT boxes → 全指标 (Dice/PQ/SQ/RQ/AJI) |
+| `tools/comprehensive_eval.py` | **已归档**  `tools/archive/` | 被 `eval_ablation.py` 取代 → 全指标 (Dice/PQ/SQ/RQ/AJI) |
 | `tools/evaluate_e2e.py` | E2E 评估 | DAPI 检测 → 分割 → 评估 |
 | `tools/test_unified_regression.py` | 回归测试 | 训练前必跑，防止退化 |
 | `tools/smoke_test_e2e.py` | 冒烟测试 | 快速验证 (默认 30 样本) |

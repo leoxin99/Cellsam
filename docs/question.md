@@ -1,7 +1,142 @@
-# CellSAM 项目技术问答汇总（Question）
+# CellSAM 项目技术问答汇总 (Question)
 
-> 更新时间: 2026-02-12
-> 范围: 本轮对话中与训练/推理/评估/损失设计相关的核心技术问题
+> 更新时间: 2026-02-25
+> 范围: 项目中与训练/推理/评估/损失设计/模型架构相关的核心技术问题
+
+---
+
+## 10. CellSAM Image Encoder 如何微调？用什么 loss？(2026-02-24)
+
+### Q1. CellSAM 公开源码有训练代码吗？
+
+**❌ 没有。** `cellSAM_source/` 目录只有推理代码。GitHub 仓库 (vanvalenlab/cellSAM) 无 `train/` 目录。
+
+| 模块 | 有 loss 代码？ | 说明 |
+|------|:-----------:|------|
+| `AnchorDETR/models/anchor_detr.py` | ✅ | CellFinder 检测 loss: focal CE + L1 + GIoU |
+| `sam_inference.py` | ❌ | 纯推理: `predict()` 全在 `@torch.no_grad()` 下 |
+
+### Q2. 论文怎么说的？
+
+根据 Nature Methods 论文 + 补充材料 (通过 PMC 确认):
+
+| 阶段 | 训练模块 | Loss | 冻结模块 |
+|------|---------|------|---------|
+| **Stage 1** | CellFinder + ViT Encoder | Focal CE + L1 + GIoU (检测 loss) | Mask Decoder |
+| **Stage 2** | **仅 Neck** (2 层 Conv) | **Dice + BCE** (分割 loss) | ViT Encoder + Mask Decoder |
+
+- Stage 1: ViT Encoder 和 CellFinder **联合训练**，loss 是检测 loss
+- Stage 2: 用 Dice + BCE 对 neck 做分割微调 — 比 SAM 原版 (20×Focal + Dice + IoU MSE) 更简单
+- 微调方法就是**标准监督学习** (loss → 反向传播 → 梯度更新)，没有蒸馏/对比学习等特殊方法
+
+### Q3. `model` vs `model_cp` 的含义？
+
+代码事实 (`sam_inference.py`):
+- `__init__` (L127,137): `model = sam_vit_b()`, `model_cp = deepcopy(model)` → 初始时完全相同
+- `load_state_dict` (L397-407): 如果 checkpoint 有 `model_cp.*` 键，两者各自加载不同权重；否则 `model_cp` 复制 `model`
+- `forward` (L208): `adv_mode=True` 时用 `model_cp.image_encoder`
+- `predict` (L327): `adv_mode=True` 时用 `model_cp` 的 prompt_encoder + mask_decoder
+
+> ⚠️ **之前对话中的解读** ("model=原始, model_cp=微调") **是推测**。代码只能证明它们是两份独立的 SAM 权重副本，具体哪份代表什么取决于 checkpoint 内容。`adv` 前缀可能暗示 adversarial training，但代码中无对抗训练证据。
+
+---
+
+## 11. IoU Head 是什么？我们需要加入吗？(2026-02-24)
+
+### Q1. 什么是 IoU Head？
+
+SAM Mask Decoder 有两个输出:
+```
+SAM Mask Decoder 输出:
+├── low_res_masks: 预测 mask (256×256)
+└── iou_predictions: IoU head 输出 (标量 0~1) ← 预测"这个 mask 质量如何"
+```
+
+训练时用 MSE loss: `L_iou = MSE(predicted_iou, actual_iou)`
+
+### Q2. CellSAM 怎么用 IoU Head 的？
+
+推理时用于**质量过滤**: `if iou_predictions[0][0] < self.iou_threshold: 跳过此 mask`
+(`sam_inference.py:350`)
+
+### Q3. 我们需要加入吗？
+
+**暂不需要。** 原因:
+- IoU Head 主要用于推理时筛选低质量 mask，对训练本身提升不大
+- 当前瓶颈不在 mask 质量评分，而在 encoder 特征适应性
+- Best Config PQ=0.484 → T18 PQ=0.498 的提升来自通道信息而非评分机制
+
+---
+
+## 12. Focal Loss 有必要使用吗？(2026-02-24)
+
+### Q1. Focal Loss 是什么？
+
+```
+标准 BCE:     L = -y·log(p) - (1-y)·log(1-p)
+Focal Loss:   L = -α·(1-p)^γ · y·log(p) - (1-α)·p^γ · (1-y)·log(1-p)
+```
+
+- `γ=2` 时: 95% 确信的像素 loss 权重降低 ~400 倍
+- 效果: 让模型**专注于边界等难分像素**
+
+### Q2. 对比
+
+| 方面 | Focal Loss | 我们的 BCE + pos_weight=10 |
+|------|-----------|--------------------------|
+| **解决什么** | 难/易样本不平衡 | 前景/背景数量不平衡 |
+| **机制** | 降低易分样本权重 | 提升前景类权重 |
+| **SAM 原版** | ✅ (weight=20) | — |
+| **CellSAM Stage2** | ❌ (用 Dice+BCE) | — |
+
+### Q3. 建议
+
+**优先级低 (P2)**。原因:
+1. CellSAM Stage2 自己也没用 Focal，用的 Dice+BCE — 和我们类似
+2. pos_weight=10 已在处理不平衡问题
+3. Focal 主要帮助边界像素，但我们已有 BoundaryLoss
+
+---
+
+## 13. Neck 微调需要 loss 吗？(2026-02-24)
+
+**是的。** 任何基于梯度的微调都需要 loss:
+
+```
+输入 → 模型前向 → 预测 → 与 GT 计算 loss → 反向传播 → 更新参数
+```
+
+"微调 neck" = 只有 neck 参数能被更新 (其他层冻结)，但 loss 仍对最终 mask 输出计算 (Dice + BCE)。梯度从 loss → decoder → neck，只有 neck 参数被 optimizer 更新。
+
+> 不存在"不用 loss 的微调" — 那叫"不训练"。
+
+---
+
+## 14. ALICE T18 训练结果 (2026-02-24)
+
+### Q1. 结果总结
+
+| 实验 | 通道 | PQ | BM-Dice | AJI | Sem.Dice | Best Ep |
+|------|------|:--:|:-------:|:---:|:--------:|:-------:|
+| T18-A (2ch, seed42) | BF+Actn2 | **0.496** | 0.724 | 0.573 | 0.799 | 27 (ES@22) |
+| T18-B (3ch, seed42) | BF+DAPI+Actn2 | **0.498** | 0.725 | 0.574 | 0.801 | 37 |
+| T18-C (3ch no-adapter) | BF+DAPI+Actn2 | **0.484** | 0.716 | 0.563 | 0.798 | 28 |
+
+### Q2. 对比 Best Config
+
+| 模型 | PQ | Δ PQ |
+|------|:--:|:----:|
+| Best Config (BF-only, 4runs mean) | 0.484 | — |
+| T18-A (2ch: BF+Actn2) | **0.496** | **+1.2pp** |
+| T18-B (3ch: BF+DAPI+Actn2) | **0.498** | **+1.4pp** |
+
+### Q3. 关键发现
+
+1. ✅ 三通道 > BF-only: T18-B (0.498) > Best Config (0.484) **+1.4pp**
+2. ✅ 2ch ≈ 3ch: DAPI 通道贡献约 +0.2pp
+3. ✅ PQ 首次接近 0.50 大关
+
+> ⚠️ **经验教训**: 查询 ALICE 时曾使用虚构的 SSH 用户名 `s2688211`，正确信息存于 `docs/alice_quick_reference.md` (`s3890074@login.alice.universiteitleiden.nl`)。根因: AI 跳过了"先查文档"的步骤，凭空生成了合理格式的假用户名。所有涉及具体数值/账号/参数的信息必须从源文件核实。
 
 ---
 

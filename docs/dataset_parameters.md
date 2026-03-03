@@ -2,7 +2,7 @@
 
 > **状态**: 🟢 Active — 数据集参数参考文档
 > **数据集**: Allen Segmented Fields (Full, 478 张)
-> **最后更新**: 2026-02-13
+> **最后更新**: 2026-02-25
 
 ---
 
@@ -94,60 +94,85 @@
 | **max_nucleus_area** | 10,000 | **20,000** | Dev P99 统计 → val 消融上调 |
 | **核/细胞面积比** | ~5.7% | — | 3268 / 57699 |
 
-> ⚠️ 三级参数体系: `代码默认值`(dapi.py 签名) → `Val 消融候选`(E34 结果) → `Test 封板值`(待 T1 完成)。
-> 当前 val 候选尚未写入代码默认值，运行消融脚本时通过 CLI `--min-nucleus-area 1500 --max-nucleus-area 20000` 传入。
+> ⚠️ 三级参数体系: `代码默认值`(dapi.py 签名) → `Val 消融候选`(E34 结果) → `Test 封板快照`(E34-lock，历史口径)。
+> 当前统一评估以 `src/detection/profiles.py` 的 `locked_eval` 为准；历史 test 封板结果保留用于可追溯记录，不反向调参。
 
 ---
 
-## 6. 边缘过滤参数 ⭐ (Dev Set Refined)
+## 6. 边缘过滤参数 ⭐ (Active + Historical)
 
-**来源**: Dev Set 50 张, 有效 GT 核 (area >= 5000 px)
+### 6.1 Active 口径 (val71 联合消融, E34b)
 
-> ⚠️ 口径说明: 本节是历史统计参考，不是 E34 当前锁定参数。  
-> E34 当前检测调参在 `val(71)` 上进行，边缘参数 retune 属于下一轮计划项。
+**来源**: `experiments/ablation_detection_e34b/results.json`  
+**固定条件**: `min_nucleus_area=1500`, `max_nucleus_area=20000`, `use_relative_distance=true`
+
+| edge_margin | 最佳 F1 | TP | FP | FN | 备注 |
+|-------------|:------:|---:|---:|---:|------|
+| **20** | **0.8106** | 644 | 199 | 102 | ✅ `locked_eval` 锁定值 |
+| 32 | 0.7992 | 615 | 178 | 131 | 召回下降 |
+| 50 | 0.7613 | 574 | 188 | 172 | 过滤过强，漏检明显 |
+
+### 6.2 Historical 口径 (Dev50, 仅参考)
 
 | 阈值 | 排除 GT 核 | 说明 |
 |------|-----------|------|
 | 30px | 0.0% | 过于保守 |
-| **50px** | **1.3%** | ✅ 当前使用 (平衡 Precision/Recall) |
-| 100px | 5.6% | 之前版本 |
+| **50px** | **1.3%** | 历史默认 |
+| 100px | 5.6% | 排除偏多 |
 | 150px | 16.3% | 排除过多 |
 
-## 7. 双核合并参数 ⭐ (Dev Set Refined)
+> ✅ 结论：当前评估与封板统一使用 `edge_margin=20`（见 `src/detection/profiles.py` 的 `locked_eval`）。
 
-**来源**: Dev Set 50 张, 有效配对 (area >= 5000 px, ratio < 3.0)
+## 7. 双核合并参数 ⭐ (Active + Historical)
 
-> ⚠️ 口径说明: 本节是历史统计参考，不是 E34 当前锁定参数。  
-> 当前代码仍使用 `size_ratio_threshold=3.0` + 相对距离阈值，需在后续 E34b/E35 做 val 集联合消融复核。
+### 7.1 Active 口径 (val71 联合消融, E34b)
 
-| 统计量 | 值 | 说明 |
-|--------|-----|------|
-| **核间距 Mean** | 161.3 px | |
-| **核间距 P75** | 159.9 px | |
-| **核间距 P95** | 322.1 px | 包含离群值 |
+#### A. `merge_coeff` 消融（固定 `edge_margin=20`）
 
-**结论**:
-- 当前使用 **1.2×直径** (约 136px) 作为合并阈值
-- 此设置较保守，避免误合并相邻细胞
+| merge_coeff | F1 | TP | FP | FN |
+|------------:|:--:|---:|---:|---:|
+| 1.0 | 0.8005 | 672 | 261 | 74 |
+| 1.2 | 0.8073 | 660 | 229 | 86 |
+| **1.4** | **0.8106** | 644 | 199 | 102 |
+| 1.5 | 0.7987 | 619 | 185 | 127 |
+
+#### B. `size_ratio_threshold` 消融（固定 `edge_margin=20`, `merge_coeff=1.4`）
+
+| size_ratio_threshold | F1 | TP | FP | FN |
+|---------------------:|:--:|---:|---:|---:|
+| 2.0 | 0.8101 | 644 | 200 | 102 |
+| **2.5** | **0.8106** | 644 | 199 | 102 |
+| 3.0 | 0.8106 | 644 | 199 | 102 |
+| 3.5 | 0.8106 | 644 | 199 | 102 |
+
+> ✅ 锁定值：`merge_coeff=1.4`, `size_ratio_threshold=2.5`（与 `src/detection/profiles.py` 一致）。
+
+### 7.2 代码默认值 vs 锁定值
+
+| 参数 | 代码默认 (`src/detection/dapi.py`) | 锁定值 (`locked_eval`) |
+|------|-----------------------------------|------------------------|
+| `merge_coeff` | 1.2 | **1.4** |
+| `size_ratio_threshold` | 3.0 | **2.5** |
+| `use_relative_distance` | true | true |
 
 ---
 
-## 8. Z-线检测参数 (更新 2026-02-05)
+## 8. Z-线检测参数 ⭐ (Active 锁定 + 历史口径)
 
-| 参数 | 旧值 | 新值 (1024px) | 说明 |
-|------|------|---------------|------|
-| **search_radius** | 400 | **256** | 核周围搜索区域 (~P99 box/2) |
-| **min_sigma** | 1.0 | **1.0** | blob_log 最小尺度 |
-| **max_sigma** | 4.0 | **4.0** | blob_log 最大尺度 |
-| **threshold** | 0.03 | **0.03** | 检测阈值 |
-| **min_zlines** | 15 | **15** | 自适应框最少 Z-线数 |
+| 参数口径 | search_radius | min_zlines | zline_threshold | F1 | 说明 |
+|----------|--------------:|-----------:|----------------:|:--:|------|
+| 代码默认 (`dapi.py`) | 256 | 15 | 0.03 | - | 运行时默认值 |
+| E34 val 候选 | 200 | 5 | 0.01 | 0.7472 | 首轮 val 消融最优 |
+| **T3b val 最优 / 当前锁定** | **160** | **5** | **0.05** | **0.7800** | ✅ `locked_eval` 当前口径 |
+| E34 test 封板 (历史) | 200 | 5 | 0.01 | 0.7502 | 单次封板，不再反向调参 |
 
-> ⚠️ Val 消融候选 (E34): `search_radius=200`, `min_zlines=5`, `zline_threshold=0.01`。
-> 尚未写入代码默认值，待 T1 test 封板后统一更新。B2/B3 阶段对参数不敏感（参见 `docs/codex_claude_seg.md` 17.11）。
+> 当前项目统一评估以 `src/detection/profiles.py` 的 `locked_eval` 为准（Adaptive: `160/5/0.05`）。
 
 ---
 
-## 9. DAPI 框扩展参数
+## 9. 框扩展参数 ⭐ (DAPI / Adaptive / 共用上游)
+
+### 9.1 DAPI 框扩展（create_bounding_boxes）
 
 | 参数 | 值 | 说明 |
 |------|-----|------|
@@ -155,6 +180,27 @@
 | **expansion_short** | 3.0 | 短轴方向扩展倍数 |
 | **expansion_isotropic** | 4.0 | 圆形核扩展倍数 |
 | **aspect_threshold** | 1.3 | 椭圆/圆形判断阈值 |
+
+### 9.2 Adaptive 框生成（create_adaptive_box）
+
+| 参数 | 当前锁定值 | 说明 |
+|------|-----------:|------|
+| `search_radius` | 160 | Z-line 搜索范围（T3b 最优） |
+| `min_zlines` | 5 | 达不到时走 fallback |
+| `zline_threshold` | 0.05 | blob 检测阈值（T3b 最优） |
+| `padding_ratio` | 0.15 | 自适应框边界留白 |
+| `padding_pixels` | 30 | 最小留白像素 |
+| `fallback_expansion` | 4.0 | Z-line 不足时核框扩展倍数 |
+
+### 9.3 共用上游参数（DAPI / Adaptive 共享）
+
+| 参数 | 锁定值 | 说明 |
+|------|-------:|------|
+| `min_nucleus_area` | 1500 | E34 val 锁定 |
+| `max_nucleus_area` | 20000 | E34 val 锁定 |
+| `edge_margin` | 20 | E34b val 锁定 |
+| `size_ratio_threshold` | 2.5 | E34b val 锁定 |
+| `merge_coeff` | 1.4 | E34b val 锁定 |
 
 ---
 
@@ -176,7 +222,11 @@
 
 ---
 
-## 11. 后处理参数 (更新 2026-02-05)
+## 11. 后处理参数 (SSOT: `inference_standard.md`)
+
+> 推理 SSOT 在 `docs/inference_standard.md`。  
+> 当前统一评估默认 `apply_postprocess=False`（即**默认不开启面积后处理**）。  
+> 仅当显式开启 `apply_postprocess=True` 或 `validate_size=True` 时，下面面积阈值才生效。
 
 | 参数 | 旧值 (1736px) | 新值 (1024px) | 说明 |
 |------|--------------|---------------|------|
@@ -188,7 +238,7 @@
 
 ---
 
-## 12. 章节更新方案 (2026-02-14)
+## 12. 章节更新方案状态 (更新 2026-02-25)
 
 | 章节 | 当前状态 | 更新动作 | 优先级 |
 |------|----------|----------|--------|
@@ -197,12 +247,12 @@
 | 3. 通道映射 | 正确 | 增加抽样验证日期与脚本路径 | Low |
 | 4. 细胞尺寸统计 | ✅ 已修正 | ~~明确换算系数来源~~ → 已补充几何均值说明 | ~~High~~ Done |
 | 5. 细胞核统计 | ✅ 三级体系已标注 | ~~增加 val(71) 候选~~ → 已加三级参数表 | ~~High~~ Done |
-| 6. 边缘过滤参数 | 历史 Dev 结果 | 新增 val 复核小节（edge_margin 20/32/50） | High |
-| 7. 双核合并参数 | 历史 Dev 结果 | 新增 val 复核小节（merge_coeff + size_ratio_threshold 联合） | High |
-| 8. Z-线检测参数 | ✅ 候选已标注 | ~~新增锁定候选与敏感性备注~~ → 已加 val 候选 + B2/B3 不敏感引用 | ~~Medium~~ Done |
-| 9. 框扩展参数 | 规则完整 | 增加 DAPI 与 Adaptive fallback 扩展差异说明 | Medium |
+| 6. 边缘过滤参数 | ✅ 已更新 | Active(val71) + Historical(Dev) 双口径拆分，锁定 `edge_margin=20` | ~~High~~ Done |
+| 7. 双核合并参数 | ✅ 已更新 | 补充 `merge_coeff + size_ratio_threshold` 联合消融表 + 默认/锁定对照 | ~~High~~ Done |
+| 8. Z-线检测参数 | ✅ 已更新 | 同步 T3b 锁定值 `160/5/0.05`，保留 E34 历史口径 | ~~Medium~~ Done |
+| 9. 框扩展参数 | ✅ 已更新 | 拆分 DAPI / Adaptive / 共用上游参数 | ~~Medium~~ Done |
 | 10. 训练相关参数 | ✅ 已改为索引 | ~~缩减为索引~~ → 已改为 config YAML 索引表 | ~~Medium~~ Done |
-| 11. 后处理参数 | 与推理文档有重叠 | 标注 SSOT 为 `inference_standard.md`，本节保留统计依据 | Medium |
+| 11. 后处理参数 | ✅ 已更新 | 补充 `apply_postprocess=False` 默认关闭声明 + SSOT 指向 | ~~Medium~~ Done |
 
 ---
 
@@ -210,6 +260,7 @@
 
 | 日期 | 更新内容 |
 |------|--------|
+| **2026-02-25** | T9 完成：§6/§7/§8/§9/§11 按 `locked_eval` 与 E34/T3b 结果回填；补全 Active/Historical 双口径 |
 | **2026-02-14b** | §4 换算系数补充几何均值说明；§5 核参数改为三级体系表；§8 加 val 候选 + B2/B3 不敏感; §10 改为 config 索引 |
 | **2026-02-14** | 增加 Active/Historical 口径说明；新增章节更新方案；补充边缘/双核参数历史口径警示 |
 | **2026-02-05** | ⭐ 修正分辨率 1608→1736×1776，缩放系数 0.340；更新所有面积参数 |
