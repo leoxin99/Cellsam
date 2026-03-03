@@ -26,21 +26,26 @@ class SemanticChannelMapper:
     """
     语义通道映射器: 将 (BF, DAPI, Actn2) 映射为 SAM 友好的伪 RGB
     
-    通道映射 (生物学一致):
-        R ← BF (Ch0): 细胞边界, CLAHE 增强
-        G ← Actn2 (Ch2): 肌节纹理 (绿色荧光), P1-P99 百分位截断
-        B ← DAPI (Ch1): 细胞核 (蓝色荧光), 高斯平滑
+    默认映射 (旧版, T18/T28):
+        R ← BF, G ← Actn2, B ← DAPI
+    
+    官方编码 (CellSAM 论文, T29):
+        R ← blank (zeros) 或 Actn2, G ← DAPI (nuclear), B ← BF (whole-cell)
     """
     
     def __init__(self, 
-                 actn2_percentile: Tuple[float, float] = (1.0, 99.0),  # Data-driven: P1-P99
+                 actn2_percentile: Tuple[float, float] = (1.0, 99.0),
                  clahe_clip: float = 2.0,
                  clahe_grid: Tuple[int, int] = (8, 8),
-                 dapi_sigma: float = 1.5,  # Data-driven: mild smoothing
-                 use_2ch: bool = False):    # 2ch mode: B channel = BF copy instead of DAPI
+                 dapi_sigma: float = 1.5,
+                 use_2ch: bool = False,
+                 use_official_encoding: bool = False,
+                 official_r_channel: str = 'blank'):  # 'blank' or 'actn2'
         self.actn2_percentile = actn2_percentile
         self.dapi_sigma = dapi_sigma
         self.use_2ch = use_2ch
+        self.use_official_encoding = use_official_encoding
+        self.official_r_channel = official_r_channel
         self.clahe = cv2.createCLAHE(clipLimit=clahe_clip, tileGridSize=clahe_grid)
     
     def __call__(self, image: np.ndarray) -> np.ndarray:
@@ -48,18 +53,28 @@ class SemanticChannelMapper:
         Args:
             image: (H, W, 3) with channels [BF, DAPI, Actn2]
         Returns:
-            mapped: (H, W, 3) with channels [R=BF, G=Actn2, B=DAPI], float32 [0, 1]
+            mapped: (H, W, 3) float32 [0, 1]
         """
         bf = image[..., 0]      # Ch0
         dapi = image[..., 1]    # Ch1
         actn2 = image[..., 2]   # Ch2
         
-        r = self._process_bf(bf)         # R ← BF (灰度, CLAHE 增强)
-        g = self._process_actn2(actn2)    # G ← Actn2 (绿色荧光)
-        if self.use_2ch:
-            b = self._process_bf(bf)      # B ← BF copy (2ch mode: no DAPI)
+        if self.use_official_encoding:
+            # CellSAM paper: (blank/actn2, nuclear, whole-cell)
+            if self.official_r_channel == 'actn2':
+                r = self._process_actn2(actn2)    # R ← Actn2
+            else:
+                r = np.zeros_like(bf, dtype=np.float32)  # R ← blank
+            g = self._process_dapi(dapi)          # G ← DAPI (nuclear)
+            b = self._process_bf(bf)              # B ← BF (whole-cell)
         else:
-            b = self._process_dapi(dapi)  # B ← DAPI (蓝色荧光)
+            # Legacy mapping (T18/T28): R=BF, G=Actn2, B=DAPI
+            r = self._process_bf(bf)
+            g = self._process_actn2(actn2)
+            if self.use_2ch:
+                b = self._process_bf(bf)
+            else:
+                b = self._process_dapi(dapi)
         
         return np.stack([r, g, b], axis=-1).astype(np.float32)
     
@@ -189,8 +204,10 @@ class AugmentedAllenDataset(Dataset):
         max_boxes_per_image: int = 50,
         sample_ids: List[str] = None,
         use_bf_only: bool = False,
-        use_semantic_mapping: bool = False,  # Semantic channel mapping (R=BF, G=Actn2, B=DAPI)
-        use_2ch: bool = False  # 2ch mode: B channel = BF copy (only with semantic_mapping)
+        use_semantic_mapping: bool = False,
+        use_2ch: bool = False,
+        use_official_encoding: bool = False,  # CellSAM paper: (blank, nuclear, whole-cell)
+        official_r_channel: str = 'blank'     # 'blank' or 'actn2'
     ):
         self.target_size = target_size
         self.max_boxes = max_boxes_per_image
@@ -198,11 +215,22 @@ class AugmentedAllenDataset(Dataset):
         self.use_bf_only = use_bf_only
         self.use_semantic_mapping = use_semantic_mapping
         self.use_2ch = use_2ch
+        self.use_official_encoding = use_official_encoding
         
         # Initialize semantic mapper if enabled
         if use_semantic_mapping:
-            self.mapper = SemanticChannelMapper(use_2ch=use_2ch)
-            mode_str = "R=BF, G=Actn2, B=BF(copy)" if use_2ch else "R=BF, G=Actn2, B=DAPI"
+            self.mapper = SemanticChannelMapper(
+                use_2ch=use_2ch,
+                use_official_encoding=use_official_encoding,
+                official_r_channel=official_r_channel
+            )
+            if use_official_encoding:
+                r_str = 'Actn2' if official_r_channel == 'actn2' else 'blank'
+                mode_str = f"R={r_str}, G=DAPI, B=BF (CellSAM official)"
+            elif use_2ch:
+                mode_str = "R=BF, G=Actn2, B=BF(copy)"
+            else:
+                mode_str = "R=BF, G=Actn2, B=DAPI"
             print(f"✅ Semantic Channel Mapping enabled: {mode_str}")
 
         # Setup transforms
@@ -386,10 +414,15 @@ class AugmentedAllenDataset(Dataset):
                 image = self.mapper(image)  # Returns (H, W, 3) float32 [0, 1]
                 image = image.transpose(2, 0, 1)  # (H, W, 3) -> (3, H, W)
             elif self.use_bf_only:
-                # BF-only mode: use only first channel (BF), replicate 3x
                 bf = image[..., 0]
                 bf = self._normalize_image(bf)
-                image = np.stack([bf, bf, bf], axis=0)
+                if self.use_official_encoding:
+                    # CellSAM paper: (blank, blank, whole-cell)
+                    zeros = np.zeros_like(bf)
+                    image = np.stack([zeros, zeros, bf], axis=0)
+                else:
+                    # Legacy: BF replicate 3x
+                    image = np.stack([bf, bf, bf], axis=0)
             else:
                 # Multi-channel: normalize each channel separately
                 # CRITICAL: Must convert to float32 BEFORE loop to avoid truncation!

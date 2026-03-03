@@ -83,6 +83,8 @@ def create_dataloaders(config: dict):
     use_bf_only = config['data'].get('use_bf_only', False)
     use_semantic_mapping = config['data'].get('use_semantic_mapping', False)
     use_2ch = config['data'].get('use_2ch', False)
+    use_official_encoding = config['data'].get('use_official_encoding', False)
+    official_r_channel = config['data'].get('official_r_channel', 'blank')
     
     train_dataset = AugmentedAllenDataset(
         data_dir=config['data']['processed_data_dir'],
@@ -92,7 +94,9 @@ def create_dataloaders(config: dict):
         sample_ids=train_ids,
         use_bf_only=use_bf_only,
         use_semantic_mapping=use_semantic_mapping,
-        use_2ch=use_2ch
+        use_2ch=use_2ch,
+        use_official_encoding=use_official_encoding,
+        official_r_channel=official_r_channel
     )
     
     val_dataset = AugmentedAllenDataset(
@@ -103,7 +107,9 @@ def create_dataloaders(config: dict):
         sample_ids=val_ids,
         use_bf_only=use_bf_only,
         use_semantic_mapping=use_semantic_mapping,
-        use_2ch=use_2ch
+        use_2ch=use_2ch,
+        use_official_encoding=use_official_encoding,
+        official_r_channel=official_r_channel
     )
     
     train_loader = DataLoader(
