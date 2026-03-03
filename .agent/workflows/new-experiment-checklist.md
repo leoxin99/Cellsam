@@ -32,7 +32,7 @@ description: 新实验提交前的 Pre-Flight Checklist — 避免 PYTHONPATH/gi
 - [ ] `git commit -m "..."` + `git push`
 - [ ] SSH 到 ALICE: `git pull`
 - [ ] 确认新文件存在: `ls src/config/新配置.yaml`
-- [ ] 确认 SLURM 脚本: partition/time/mem/seed 正确
+- [ ] 确认 SLURM 脚本: partition/time/mem/seed 正确\r\n- [ ] **🚨 wall-time 必须 `--time=12:00:00`** (不要 48h, 影响 backfill 排队速度)
 - [ ] SLURM 脚本中 `PYTHONPATH` 包含 `${HOME}/CellSam/src`
 - [ ] `sbatch scripts/train_xxx.sh`
 - [ ] 等 1-2 分钟: `squeue -u $USER` 检查状态 (R/PD, 不是 FAILED)

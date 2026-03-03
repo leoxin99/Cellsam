@@ -174,3 +174,8 @@ ssh s3890074@login.alice.universiteitleiden.nl "cd ~/CellSam && git pull origin 
    - 本地能跑不代表 ALICE 能跑 — 本地 Python 自动将脚本所在目录加入 `sys.path`，但 SLURM 环境不同
    - **提交前必须检查**: 每次修改 `src/` 下的 import 后，grep 所有 SLURM 脚本确认 PYTHONPATH 覆盖所有 import 路径
    - 标准写法: `export PYTHONPATH="${HOME}/CellSam/src:${HOME}/CellSam:${PYTHONPATH:-}"`
+9. **wall-time must be 12h (2026-03-03 new)**:
+   - All SLURM scripts: --time=12:00:00 (not 48h)
+   - 48h wall-time blocks backfill scheduling, dramatically slows queue time
+   - Fairshare formula: cpu_hours + 0.25*mem_GB + 128*gpu_hours (half-life 14 days)
+   - Our training runs typically finish in 4-10h, 12h provides sufficient headroom
