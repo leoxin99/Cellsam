@@ -1,4 +1,26 @@
+# CellSAM Project Blueprint
 
+> **Doc type**: Project overview (AI must-read)
+> **Last updated**: 2026-03-04
+> **Current phase**: T27a PQ=0.643, T28 PQ=0.684, T29 ablation done, T30 LoRA running
+
+---
+
+## Project Status Dashboard
+
+### Experiment Index (see docs/experiments/ for detail docs)
+
+| Experiment | Description | Mean PQ | Status |
+|------------|------------|:-------:|:------:|
+| T27a | Plan B BF-only decoder-only | **0.643** | completed |
+| T28 | Plan B 3ch [BF,Actn2,DAPI] | **0.684** | completed |
+| T29a | Official BF [0,0,BF] | 0.642 (s42) | s123 running |
+| T29b | Official 3ch [0,DAPI,BF] | 0.665 (s42) | s123 running |
+| T29c | Official 3ch+Actn2 [Actn2,DAPI,BF] | 0.685 (s42) | s123 running |
+| T30 | LoRA Q/V on encoder (BF-only) | -- | running |
+| T31 | Cellpose paper-aligned baseline | -- | planned |
+
+**T12 Loss ablation** (completed): posw=10 >> 2 (+4.1pp), Contour harmful
 
 - **高置信结论**: pos_weight=10 >> 2 (+4.1pp), Contour Loss 有害 (+2.3pp)
 - Best Config: posw=10 + contour=off → **PQ=0.484** (4-run mean, 验证完成)

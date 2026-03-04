@@ -2,16 +2,16 @@
 
 > 状态: 🟢 Active  
 > 维护原则: 只记录"可执行任务"，每项必须有口径/产物/完成标准。  
-> 更新时间: 2026-03-02 (T27a PQ=0.638 超越 MedSAM)
+> 更新时间: 2026-03-04 (T28 PQ=0.684, T29 消融完成, T30 LoRA running)
 
 ## 📋 目录 (按优先级排列)
 
 ### 🔴 P0 — 当前紧急
-- CellFinder 框检测评估: P0 最紧急, 明天实施
-- T29 官方通道编码: ALICE L4+A100 (T29a/b/c x seed=42)
-- T28 三通道 seed=123: ALICE L4 running
-- T27a/T28/T29 test(73) eval: waiting
-- T29a/b/c seed=123: after seed=42 comparison
+- T29 seed=123: L4 running (~5h), 完成后计算双 seed 均值
+- T30 LoRA Q/V: L4 running (seed=42 + seed=123)
+- T27a/T28/T29/T30 test(73) eval: 等训练完成后推理评估
+- T31 Cellpose paper-aligned rerun: `docs/experiments/active/T31_cellpose_paper_aligned.md`
+- CellFinder 框检测评估: 需独立脚本 (不用 adv_mode 切换)
 
 ### 🟡 P1 — 论文需要
 - IoU filter ablation (post-training)
@@ -124,6 +124,22 @@
   - [ ] A2 + R1 decide whether baseline should switch to official inference path.
   - [ ] Run side-by-side eval on same `test(73)` + same GT boxes: official vs unified (PQ/BM-Dice/AJI).
   - [ ] Record final methodology statement in `baseline_methodology_audit` or `experiments_log`.
+
+### T31. Cellpose paper-aligned baseline rerun - Pending
+- Priority: **P0**
+- Goal: rerun Cellpose baseline on `test(73)` with a methodology aligned to CellSAM public paper-evaluation code, instead of the deprecated BF-grayscale path in `tools/baseline_eval.py`.
+- Experiment doc: `docs/experiments/active/T31_cellpose_paper_aligned.md`
+- Plan note: `docs/t31_cellpose_baseline_rerun_plan_3.04.md`
+- Rationale:
+  - historical baseline fed BF grayscale only: `tools/baseline_eval.py:147-152`
+  - CellSAM public eval uses `cyto3` + explicit `channels=[3,2]`: `cellSAM_source/paper_evaluation/eval_main.py:85`, `cellSAM_source/paper_evaluation/models.py:47`
+  - current traceable results show catastrophic over-segmentation and should not be used as final paper evidence
+- Completion criteria:
+  - [ ] create `tools/cellpose_paper_aligned_eval.py`
+  - [ ] run main result on `test(73)` with `cyto3`, `[0,DAPI,BF]`, `channels=[3,2]`, `diameter=None`
+  - [ ] output both project metrics and CellSAM-paper metrics (`F1`, `Recall`)
+  - [ ] if needed, add one supplementary run with `diameter=200`
+  - [ ] replace the Cellpose row in paper/baseline reporting with the T31 result
 
 
 ---

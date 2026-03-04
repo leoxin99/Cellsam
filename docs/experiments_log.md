@@ -1,8 +1,9 @@
 # CellSAM 实验记录 (Experiment Log)
 
 > **状态**: 🟢 Active — 实验流水账主文档  
-> **最后更新**: 2026-02-25  
+> **最后更新**: 2026-03-04  
 > **事实来源**: 此文档为实验记录的 SSOT，按时间顺序记录所有实验  
+> **详细文档**: `docs/experiments/active/` (进行中) / `docs/experiments/completed/` (已完成)  
 > **完整历史存档**: [`experiments_log_archive.md`](experiments_log_archive.md)
 
 ---\r\n\r\n### 📏 可视化标准 (2026-03-03 起)\r\n\r\n每个实验结果必须包含 **5 个固定测试样本** (test set 前 5 张) 的 napari 截图:\r\n- **BF** (Ch0, 灰度) + **DAPI** (Ch4, 蓝色) + **Actn2** (Ch1, 绿色)\r\n- 预测分割 + GT 分割叠加对比\r\n- 通道索引参照: 原始 TIFF `img[0]=BF, img[1]=Actn2, img[4]=DAPI`\r\n\r\n---
@@ -111,9 +112,13 @@
 | **T20** | **2026-02-25** | **Attention 可视化脚本** | **Method A+C, 待执行** | **🔄 脚本就绪** |
 | **T11** | **2026-02-26** | **[LoRA Encoder Fine-tuning](t11_lora_design.md)** | **r4 PQ=0.483 (≈baseline), r8 PQ=0.494 (+1.0pp)** | **✅ 完成** |
 | **T24-wt** | **2026-03-01** | **CellSAM 权重对比 (model vs model_cp)** | **model_cp PQ=0.434 >> model; 权重完全不同** | **✅ 完成** |
-| **T27a** | **2026-03-01~02** | **Plan B Decoder-Only (model_cp + Focal + IoU)** | **Val PQ=0.638, BM-Dice=0.791 🏆** | **✅ seed=42** |
-| T27a-s123 | 2026-03-02 | T27a seed=123 重跑 (修复 checkpoint 命名) | 训练中 | 🔄 |
-| **T28** | **2026-03-02** | **Plan B 三通道 (BF+DAPI+Actn2, model_cp)** | **训练中 (L4 s42 + L4 s123 + A100 s123)** | **🔄 训练中** |
+| **T27a** | **2026-03-02** | **[Plan B Decoder-Only BF](experiments/completed/T27a_planb_decoder_bf.md)** | **Mean PQ=0.643** | **✅ 完成** |
+| **T28** | **2026-03-02** | **[Plan B 3ch 旧编码](experiments/completed/T28_planb_3ch.md)** | **Mean PQ=0.684** | **✅ 完成** |
+| **T29a** | **2026-03-03** | **[Official BF [0,0,BF]](experiments/active/T29_official_encoding.md)** | **PQ=0.642 (s42)** | **🔄 s123 running** |
+| **T29b** | **2026-03-03** | **Official 3ch [0,DAPI,BF]** | **PQ=0.665 (s42)** | **🔄 s123 running** |
+| **T29c** | **2026-03-03** | **Official 3ch+Actn2 [Actn2,DAPI,BF]** | **PQ=0.685 (s42)** | **🔄 s123 running** |
+| **T30** | **2026-03-04** | **[LoRA Q/V Encoder BF](experiments/active/T30_lora_qv_bf.md)** | **—** | **🔄 running** |
+| T31 | 2026-03-04 | [Cellpose paper-aligned rerun](experiments/active/T31_cellpose_paper_aligned.md) | — | 📋 planned |
 
 
 

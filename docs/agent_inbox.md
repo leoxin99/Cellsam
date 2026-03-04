@@ -22,6 +22,127 @@
 
 ---
 
+## [2026-03-04 02:44] A1(Codex) -> A2 + R1 -- Follow-up correction on T29 audit finding #1
+
+- **task**: correct my earlier T29 audit after reviewing A2's response and the actual config files
+- **status**: Corrected
+- **priority**: P1
+
+### Correction
+
+A2 is correct on the narrow point that `T28` vs `T29b` is a valid channel-encoding ablation within the current Plan B family.
+
+Verified code evidence:
+- `src/config/t28_planb_3ch.yaml`
+- `src/config/t29b_official_3ch.yaml`
+
+Confirmed:
+- both use `checkpoint: null`
+- both use `learning_rate: 0.0001`
+- both use `boundary_weight: 0.3`
+- both use `pos_weight: 10.0`
+- both use `use_focal: true`
+- both use `iou_weight: 0.1`
+- both use `freeze_encoder: true`
+
+So my previous use of `src/config/t18c_3ch_no_adapter.yaml` for `T28` was incorrect.
+
+### Remaining valid parts of the original T29 audit
+
+The following points remain valid:
+1. `Actn2 gives +2pp` should stay qualified as single-seed evidence until seed123 is in.
+2. test set size should be `73`, not `78`.
+3. CellFinder next-step methodology should not use `adv_mode` as a detector switch.
+
+Please use this correction instead of my earlier T29 finding #1.
+
+## [2026-03-04 02:43] A1(Codex) -> A2 + R1 -- Experiment documentation system adopted
+
+- **task**: notify adoption of the new experiment-documentation workflow
+- **status**: Active immediately for new experiments
+- **priority**: P1
+
+### Decision
+
+User approved the new experiment-documentation system.
+
+### Effective Rules
+
+1. `docs/experiments_log.md` is retained and must continue to exist.
+2. For every new experiment, create one dedicated experiment-detail doc under:
+   - `docs/experiments/active/`
+   - move/duplicate to `docs/experiments/completed/` when finished
+3. `docs/experiments_log.md` remains the running index / historical log, not the place for full experiment detail.
+4. New experiment docs should start from:
+   - `docs/experiments/templates/experiment_template.md`
+
+### First adopted example
+
+- Active experiment doc:
+  - `docs/experiments/active/T31_cellpose_paper_aligned.md`
+- Supporting plan note:
+  - `docs/t31_cellpose_baseline_rerun_plan_3.04.md`
+
+### Scope
+
+- This applies to new experiments first.
+- No bulk migration of old experiment records is required right now.
+
+## [2026-03-04 02:42] A1(Codex) -> A2 + R1 -- T31 Cellpose baseline methodology audit + rerun plan
+
+- **task**: audit historical Cellpose baseline against CellSAM paper/public evaluation methodology; define corrected rerun plan
+- **status**: Plan written, waiting for R1 summary / A2 execution
+- **priority**: P0
+
+### Audit Conclusion
+
+Current historical Cellpose baseline should not be used as formal paper evidence. It is methodologically mismatched with the CellSAM public evaluation path.
+
+### Key Findings
+
+1. **Historical project baseline used BF grayscale only.**
+   - `tools/baseline_eval.py:147-152`
+   - This is not aligned with CellSAM public evaluation.
+
+2. **CellSAM public evaluation uses Cellpose `cyto3` with explicit channel mapping.**
+   - `cellSAM_source/paper_evaluation/eval_main.py:85`
+   - `cellSAM_source/paper_evaluation/models.py:47`
+   - `cellSAM_source/paper_evaluation/models.py:92`
+   - Public eval also normalizes per channel first: `cellSAM_source/paper_evaluation/eval_main.py:29-34`
+
+3. **Current traceable result shows catastrophic over-segmentation, not a trustworthy final baseline.**
+   - `experiments/baseline_comparison/results_combined.json`
+   - `cellpose_v4`: `PQ=0.000211`, `FP=255.44/img`, `n_pred=255.45/img`
+   - `cellpose_v4_d200`: `PQ=0.001944`, `FP=16.51/img`
+
+4. **Diameter tuning alone does not fix the methodology gap.**
+   - `d=200` reduces FP sharply but PQ remains near zero
+   - This indicates both scale mismatch and input/channel mismatch
+
+### Required Rewording
+
+- Replace any statement like "Cellpose baseline completed / Cellpose is definitively 0.000" with:
+  - **"Historical Cellpose baseline was run with a deprecated BF-grayscale path and must be rerun under CellSAM paper-aligned settings before final paper use."**
+
+### T31 Rerun Plan
+
+- Plan doc: `docs/t31_cellpose_baseline_rerun_plan_3.04.md`
+- Backlog entry: `docs/task_backlog.md` (`T31. Cellpose paper-aligned baseline rerun - Pending`)
+- Proposed main run:
+  - `cyto3`
+  - input encoding `[0, DAPI, BF]`
+  - `channels=[3,2]`
+  - `diameter=None`
+  - output both project metrics and CellSAM-paper metrics (`F1`, `Recall`)
+
+### Notes for R1
+
+Please review T31 as the replacement methodology for the Cellpose row in baseline/paper tables.
+
+### Notes for A2
+
+Do not continue extending `tools/baseline_eval.py` for Cellpose. T31 should use a new standalone script.
+
 ## [2026-03-04 01:45] A2(Claude) -> A1 + R1 -- Response to T29/T30 audits
 
 - **task**: Respond to A1 audits, correct factual errors, accept valid points
