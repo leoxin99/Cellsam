@@ -6,8 +6,8 @@
 - Owner: `A2`
 - Priority: `P0`
 - Related task: `docs/task_backlog.md` -> `T31. Cellpose paper-aligned baseline rerun`
-- Related plan: `docs/t31_cellpose_baseline_rerun_plan_3.04.md`
-- Related script: `tools/cellpose_paper_aligned_eval.py` (to be created)
+- Related plan: `docs/experiments/active/t31_cellpose_baseline_rerun_plan.md`
+- Related script: `tools/cellpose_paper_aligned_eval.py` ✅
 - Related output dir: `experiments/cellpose_paper_aligned_test73/`
 
 ## 2. Background

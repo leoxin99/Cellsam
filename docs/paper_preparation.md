@@ -15,6 +15,7 @@
 - [5. 建议论文结构](#5-建议论文结构)
 - [6. 关键图表清单](#6-关键图表清单)
 - [7. 写作规划](#7-写作规划) *(merged from paper_writing_plan.md)*
+- [8. 技术口径索引](#8-技术口径索引)
 
 ---
 
@@ -596,3 +597,14 @@ gantt
 | **Phase 2: 实验补充** | T16 ✅, T18 ✅, T17 ⏳ | 🔄 |
 | **Phase 3: 填充结果** | 写 §4.3-4.6, §5 Discussion, 画 Figure | ⏳ |
 | **Phase 4: 打磨** | Abstract, Conclusion, 全文校对 | ⏳ |
+
+---
+
+## 8. 技术口径索引
+
+为避免后续写作中再次混淆 “CellSAM 论文口径” 与 “本项目实现口径”，统一引用以下技术文档:
+
+- `docs/adapter_cellsam_tech_reference.md`
+  - Adapter 结构与训练集成方式
+  - CellSAM 数据集口径 (含 NeurIPS challenge 在论文中的角色)
+  - 本项目 Allen 数据口径与 CellSAM 口径的边界

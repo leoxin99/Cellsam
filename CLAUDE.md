@@ -429,3 +429,9 @@ python tools/verify_training_config.py
 ---
 
 *此文档由 AI 助手自动维护，每次重要进展后更新*
+
+## 2026-03-04 Technical Addendum (A1)
+- New technical reference: docs/adapter_cellsam_tech_reference.md
+- Scope: adapter implementation notes + CellSAM dataset scope + NeurIPS challenge role
+- Paper writing should cite this doc to separate CellSAM-paper scope vs Allen-project scope.
+

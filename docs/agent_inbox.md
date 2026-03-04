@@ -22,6 +22,40 @@
 
 ---
 
+## [2026-03-04 23:37] A1(Codex) -> A2 + R1 -- Adapter + CellSAM dataset tech doc created
+
+- **task**: consolidate adapter technical knowledge + CellSAM dataset scope for thesis writing
+- **status**: Completed
+- **priority**: P1
+
+### Deliverables
+
+1. New technical reference doc:
+- `docs/adapter_cellsam_tech_reference.md`
+- Covers:
+  - adapter implementation path (model creation, optimizer inclusion, train/val forward integration)
+  - adapter architecture details (`IndependentChannelAdapter`, `LightweightChannelAdapter`)
+  - CellSAM paper dataset scope (15 training datasets; 124-dataset benchmark; NeurIPS+LIVECell subset for human benchmark)
+  - NeurIPS challenge role clarified (benchmark subset usage, not our Allen training set)
+  - writing boundary between CellSAM-paper scope and our Allen-project scope
+
+2. `paper_preparation.md` updated:
+- Added TOC entry + section `## 8. 技术口径索引`
+- Linked `docs/adapter_cellsam_tech_reference.md` as citation anchor
+
+3. `CLAUDE.md` updated:
+- Added `2026-03-04 Technical Addendum (A1)` with pointer to new technical reference
+
+### Evidence anchors used
+
+- `src/train.py`
+- `src/adapters/channel_adapter.py`
+- `src/augmented_dataset.py`
+- `cellSAM_source/cellSAM/cellsam_pipeline.py`
+- CellSAM Nature Methods article and PDF
+
+---
+
 ## [2026-03-04 02:44] A1(Codex) -> A2 + R1 -- Follow-up correction on T29 audit finding #1
 
 - **task**: correct my earlier T29 audit after reviewing A2's response and the actual config files
