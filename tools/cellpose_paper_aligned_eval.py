@@ -17,7 +17,7 @@ Usage:
 
 References:
     - CellSAM eval: cellSAM_source/paper_evaluation/eval_main.py
-    - A1 plan: docs/t31_cellpose_baseline_rerun_plan_3.04.md
+    - A1 plan: docs/experiments/active/t31_cellpose_baseline_rerun_plan.md
 """
 
 import argparse
@@ -28,6 +28,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+import fastremap
 from tqdm import tqdm
 
 # ── Project imports ──────────────────────────────────────────
@@ -77,12 +78,16 @@ def load_gt_mask(image_id: str, processed_dir: str = "data/processed") -> np.nda
 def build_cellpose_input(img_3ch: np.ndarray) -> np.ndarray:
     """Build CellSAM paper-aligned input: [blank, DAPI, BF].
     
-    Input img_3ch layout: [BF, DAPI, Actn2] (H, W, 3)
+    Input img_3ch: processed 3-channel array (H, W, 3)
+      - Channel 0 = BF (Brightfield)
+      - Channel 1 = DAPI (nuclear stain)
+      - Channel 2 = Actn2 (not used here)
+    
     Output RGB: [blank, DAPI, BF] (H, W, 3)
     
-    Per A1 plan:
-      - R = 0 (blank)
-      - G = DAPI (nuclear)
+    Per CellSAM paper + A1 plan:
+      - R = 0 (blank, no whole-cell stain available)
+      - G = DAPI (nuclear marker)
       - B = BF (whole-cell proxy)
     """
     bf = img_3ch[:, :, 0]     # BF channel
@@ -184,7 +189,12 @@ def run_cellpose_eval(
     
     # ── Load Model ───────────────────────────────────────
     print("Loading Cellpose model...")
-    model = models.Cellpose(model_type=model_type, gpu=gpu)
+    # Use CellposeModel (compatible with cellpose 2.x/3.x)
+    try:
+        model = models.Cellpose(model_type=model_type, gpu=gpu)
+    except AttributeError:
+        # Fallback for cellpose versions without Cellpose wrapper
+        model = models.CellposeModel(model_type=model_type, gpu=gpu)
     
     # ── Evaluate ─────────────────────────────────────────
     per_sample = []
@@ -203,18 +213,30 @@ def run_cellpose_eval(
             rgb = build_cellpose_input(img_3ch)
             
             # Run Cellpose
-            masks, flows, styles, diams = model.eval(
+            result = model.eval(
                 rgb,
                 channels=channels,
                 diameter=diameter,
             )
+            # CellposeModel.eval() returns (masks, flows, styles)
+            # Cellpose.eval() returns (masks, flows, styles, diams)
+            if len(result) == 4:
+                masks, flows, styles, diams = result
+            else:
+                masks, flows, styles = result
+                diams = None
             
             # Project metrics (PQ, BM-Dice, AJI, etc.)
-            metrics = compute_all_metrics(masks, gt_mask)
+            # Renumber labels for consistency with CellSAM official eval
+            # (ref: cellSAM_source/paper_evaluation/eval_main.py:185-186)
+            masks_renumbered = fastremap.renumber(masks, in_place=False)[0].astype(np.int32)
+            gt_renumbered = fastremap.renumber(gt_mask, in_place=False)[0].astype(np.int32)
             
-            # Store for paper metrics
-            all_pred_masks.append(masks)
-            all_gt_masks.append(gt_mask)
+            metrics = compute_all_metrics(masks_renumbered, gt_renumbered)
+            
+            # Store renumbered masks for paper metrics
+            all_pred_masks.append(masks_renumbered)
+            all_gt_masks.append(gt_renumbered)
             
             sample_result = {
                 "image_id": img_id,
