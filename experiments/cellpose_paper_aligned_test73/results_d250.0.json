@@ -1,0 +1,45 @@
+{
+  "experiment": "T31_cellpose_paper_aligned",
+  "split": "test",
+  "n_samples": 73,
+  "n_valid": 73,
+  "model_type": "cyto3",
+  "channels": [
+    3,
+    2
+  ],
+  "input_encoding": "[blank, DAPI, BF]",
+  "diameter": 250.0,
+  "elapsed_seconds": 268.6,
+  "script": "tools/cellpose_paper_aligned_eval.py",
+  "project_metrics": {
+    "pq_mean": 0.1195099854488261,
+    "pq_std": 0.1628310995312719,
+    "sq_mean": 0.2745609178004996,
+    "sq_std": 0.31275668514661703,
+    "rq_mean": 0.1898035198037834,
+    "rq_std": 0.257321557659649,
+    "bm_1to1_dice_mean": 0.3616458914829775,
+    "bm_1to1_dice_std": 0.21240026978441828,
+    "bm_coverage_dice_mean": 0.36526090446965065,
+    "bm_coverage_dice_std": 0.2143933587745961,
+    "aji_mean": 0.18908085379990844,
+    "aji_std": 0.14552188880088798,
+    "semantic_dice_mean": 0.3834407386204151,
+    "semantic_dice_std": 0.2556451728611541,
+    "tp_total": 182.0,
+    "fp_total": 1088.0,
+    "fn_total": 548.0,
+    "n_pred_total": 1270,
+    "n_gt_total": 730
+  },
+  "paper_metrics": {
+    "f1_mean": 0.1898035198037834,
+    "f1_std": 0.257321557659649,
+    "recall_mean": 0.23082931707025178,
+    "recall_std": 0.3158945355004457,
+    "precision_mean": 0.1681629618931412,
+    "precision_std": 0.23392805323978186,
+    "ap_mean": 0.13154393434524536
+  }
+}
