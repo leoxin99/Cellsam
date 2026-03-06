@@ -1,7 +1,7 @@
 # CellSAM 实验记录 (Experiment Log)
 
 > **状态**: 🟢 Active — 实验流水账主文档  
-> **最后更新**: 2026-03-04  
+> **最后更新**: 2026-03-06
 > **事实来源**: 此文档为实验记录的 SSOT，按时间顺序记录所有实验  
 > **详细文档**: `docs/experiments/active/` (进行中) / `docs/experiments/completed/` (已完成)  
 > **完整历史存档**: [`experiments_log_archive.md`](experiments_log_archive.md)
@@ -118,7 +118,9 @@
 | **T29b** | **2026-03-03** | **Official 3ch [0,DAPI,BF]** | **PQ=0.665 (s42)** | **🔄 s123 running** |
 | **T29c** | **2026-03-03** | **Official 3ch+Actn2 [Actn2,DAPI,BF]** | **PQ=0.685 (s42)** | **🔄 s123 running** |
 | **T30** | **2026-03-04** | **[LoRA Q/V Encoder BF](experiments/active/T30_lora_qv_bf.md)** | **—** | **🔄 running** |
-| T31 | 2026-03-04 | [Cellpose paper-aligned rerun](experiments/active/T31_cellpose_paper_aligned.md) | — | 📋 planned |
+| **T31** | **2026-03-05** | **[Cellpose paper-aligned rerun](experiments/active/T31_cellpose_paper_aligned.md)** | **PQ=0.003, F1=0.005 (test73, auto)** | **✅ 完成 (待 v3 + d200 补充)** |
+| **T32** | **2026-03-06** | **[Stage2-like neck-only baseline](experiments/active/T32_stage2_like_neck_only_baseline.md)** | **方案已建 (50ep/cosine/GT boxes)** | **📋 planned** |
+| **T34** | **2026-03-06** | **[T27a 官方路径评估消融](experiments/active/T34_t27a_official_path_ablation.md)** | **A/B/C 三臂评估方案已建** | **📋 planned** |
 
 
 
@@ -770,6 +772,8 @@ E18 发现 Adaptive 方法 Precision 较低 (0.672)，怀疑边缘过滤过松�
 
 | ID | 实验名称 | 优先级 | 状态 |
 |----|---------|--------|------|
+| **T32** | **Stage2-like neck-only baseline (50ep/cosine/GT boxes)** | **P0** | **📋 planned** |
+| **T34** | **T27a 官方路径评估消融 (no clip + official path)** | **P0** | **📋 planned** |
 | ~~P2-D~~ | ~~lr=5e-5, epochs=50 (LR消融)~~ | — | ❌ 不再需要 (T12 完成了完整消融) |
 | ~~P2-E~~ | ~~lr=1e-4, epochs=80 (Epoch消融)~~ | — | ❌ 不再需要 (T12 完成了完整消融) |
 | ~~E-B1~~ | ~~Cellpose baseline~~ | — | ✅ T16 已完成 (PQ=0.073) |

@@ -34,6 +34,8 @@ training_pairs*/
 # EXPERIMENT OUTPUTS (Contains unpublished data)
 # ==========================================
 experiments/
+!docs/experiments/
+!docs/experiments/**
 
 # ==========================================
 # MODEL CHECKPOINTS (Too large + licensing)

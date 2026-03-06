@@ -1,8 +1,8 @@
-# CellSAM Project Blueprint
+﻿# CellSAM Project Blueprint
 
 > **Doc type**: Project overview (AI must-read)
-> **Last updated**: 2026-03-04
-> **Current phase**: T27a PQ=0.643, T28 PQ=0.684, T29 ablation done, T30 LoRA running
+> **Last updated**: 2026-03-06
+> **Current phase**: T27a/T28 completed, T31 completed (Cellpose paper-aligned), T32/T34 planned, T30 LoRA running
 
 ---
 
@@ -18,7 +18,9 @@
 | T29b | Official 3ch [0,DAPI,BF] | 0.665 (s42) | s123 running |
 | T29c | Official 3ch+Actn2 [Actn2,DAPI,BF] | 0.685 (s42) | s123 running |
 | T30 | LoRA Q/V on encoder (BF-only) | -- | running |
-| T31 | Cellpose paper-aligned baseline | -- | planned |
+| T31 | Cellpose paper-aligned baseline | 0.003 (test73, auto) | completed (needs v3+diameter200 supplement) |
+| T32 | Stage2-like neck-only baseline (50ep, GT boxes) | -- | planned |
+| T34 | T27a official-path eval ablation | -- | planned |
 
 **T12 Loss ablation** (completed): posw=10 >> 2 (+4.1pp), Contour harmful
 
@@ -66,6 +68,8 @@
 
 | 任务 | 执行者 | 状态 |
 |------|---------|------|
+| T32 Stage2-like neck-only baseline | A2 | 📋 方案已建, 待最小代码改动后执行 |
+| T34 官方路径评估消融 | A2 | 📋 方案已建, 待实现 A/B/C 三臂评估脚本 |
 | T18 三通道消融 | A2 | ✅ 5/6 done: T18-C PQ=**0.500** (best!), seed123 补跑 Job 1036799 |
 | T17 Training Curves | A2 | ✅ 工具完成, Phase1 图 ✅, 待下载 Best Config 日志 |
 | T20 Attention 可视化 | A1 | 🔄 脚本就绪, 待 T18 完成后执行 |
@@ -106,7 +110,7 @@ conda activate cellsam
 > - 不要 `source ~/miniconda3/...`，用 `eval "$(conda shell.bash hook)"`
 > - `set -eo pipefail` 放在最前面，`set -u` 放在 `conda activate` **之后**
 > - Login 节点能跑通的命令不代表 SLURM 脚本也能跑通（初始化路径不同）
-### 核心文档状态 (2026-02-15)
+### 核心文档状态 (2026-03-06)
 
 | 文档 | 状态 | 用途 |
 |------|------|------|
@@ -124,7 +128,10 @@ conda activate cellsam
 | [`docs/t11_lora_design.md`](docs/t11_lora_design.md) | 🟢 Active | **T11 LoRA Encoder 设计文档** (待 R1 审核) |
 | `docs/agent_management.md` | 🟢 Active | **多 Agent 协作管理规范 SSOT** |
 | `docs/agent_inbox.md` | 🟢 Active | **Agent 间异步通信信箱** |
-| [`docs/technical_qa_2.27.md`](docs/technical_qa_2.27.md) | 🟢 Active | **技术细节 Q&A** (SAM 架构、训练策略、CellSAM 设计) |
+| `docs/conversation_handover/HANDOVER_STANDARD.md` | 🟢 Active | **长对话窗口交接规范 SSOT** |
+| `docs/conversation_handover/A1/handover_001_2026-03-06.md` | 🟢 Active | **A1 最新交接快照** |
+| `docs/technical/README.md` | 🟢 Active | **技术文档统一入口** |
+| [`docs/technical/technical_qa_2.27.md`](docs/technical/technical_qa_2.27.md) | 🟢 Active | **技术细节 Q&A** (SAM 架构、训练策略、CellSAM 设计) |
 | [`docs/paper_preparation.md`](docs/paper_preparation.md) §2.1b | 🟢 Active | **CellSAM 架构分析**: model vs model_cp 权重对比, Prompt Encoder 结构与微调价值 |
 | `docs/temp_reviews/` | 🟠 Temp | 审核报告 (合并进 SSOT 后可删) |
 | `docs/codex_claude_seg.md` | 🟡 Historical | A1/A2 联合工作台 (Phase 0-2 全链路) |
@@ -220,6 +227,7 @@ conda activate cellsam
 | [naming_convention.md](docs/naming_convention.md) | **命名规范** (模型/实验/检测方案) ⭐ | 新方案时 |
 | [progress_timeline_2.13.md](docs/progress_timeline_2.13.md) | 导师汇报材料 + 2.13 时间线 | 里程碑更新时 |
 | [phase2_design.md](docs/phase2_design.md) | Phase 2 方案与实验路线 | Phase 2 变更时 |
+| [conversation_handover/HANDOVER_STANDARD.md](docs/conversation_handover/HANDOVER_STANDARD.md) | 对话窗口交接规范 + 关窗前检查 | 每次窗口切换前后 |
 | [phase1_design.md](docs/phase1_design.md) | Phase 1 实施记录 | 回溯 Phase 1 时 |
 | [boundary_enhancement_design.md](docs/boundary_enhancement_design.md) | Loss 函数设计文档 | 设计变更时 |
 | [code_inventory.md](docs/code_inventory.md) | 代码文件清单 + 版本记录 | 新增/修改代码时 |
@@ -261,8 +269,9 @@ src/
 
 tools/
 ├── smoke_test_e2e.py              # Oracle(val) 开发评估
-├── comprehensive_eval.py          # Oracle(test) 最终评估
+├── eval_ablation.py               # Oracle(test) 最终评估
 ├── evaluate_e2e.py                # E2E(test) 部署效果评估
+├── eval_t34_official_path.py      # 官方路径对照审计
 ├── test_unified_regression.py     # 10-test 回归测试
 ├── test_loss_gradients.py         # 12-test 梯度门禁 (Phase 2)
 └── run_inference.py               # [DEPRECATED] 旧推理入口，仅兼容提示
@@ -281,6 +290,7 @@ docs/
 ├── error_log_and_checklist.md   # ⭐ 错误归纳 + 训练前检查清单
 ├── alice_quick_reference.md     # ALICE HPC 快速参考
 ├── code_inventory.md            # 代码清单和归档状态
+├── technical/                   # 技术分析/技术问答统一目录
 └── archive/                     # 过时文档归档
 ```
 
@@ -345,9 +355,11 @@ docs/
 | **P0** | `CLAUDE.md` (本文件) | 项目总览、任务清单、关键决策 |
 | **P0** | [inference_standard.md](docs/inference_standard.md) | 推理与评估口径 SSOT |
 | **P0** | [code_inventory.md](docs/code_inventory.md) | 当前活跃代码入口速查 |
+| **P0** | [conversation_handover/HANDOVER_STANDARD.md](docs/conversation_handover/HANDOVER_STANDARD.md) | 新窗口交接规范 + 必读顺序 |
 | **P0** | [error_log_and_checklist.md](docs/error_log_and_checklist.md) | ⚠️ **训练前必读** - 错误归纳 + 检查清单 |
 | P1 | [claude_pipeline_analysis.md](docs/claude_pipeline_analysis.md) | 三通道设计详细方案 |
 | P1 | [dataset_parameters.md](docs/dataset_parameters.md) | 数据集统计和参数 |
+| P1 | [technical/README.md](docs/technical/README.md) | 技术分析文档统一入口 |
 | P2 | [design_decisions.md](docs/design_decisions.md) | 设计决策的"为什么" |
 | P2 | [experiments_log.md](docs/experiments_log.md) | 完整实验历史 |
 | P2 | [alice_quick_reference.md](docs/alice_quick_reference.md) | ALICE 登录/训练快速参考 |
@@ -394,8 +406,9 @@ python tools/verify_training_config.py
 | 工具 | 数据集 | 用途 |
 |------|--------|------|
 | `smoke_test_e2e.py` | val (30 samples) | 开发阶段快速验证 |
-| `comprehensive_eval.py` | **test** (73 samples) | Oracle 最终评估 |
+| `eval_ablation.py` | **test** (73 samples) | Oracle 最终评估 |
 | `evaluate_e2e.py` | **test** (73 samples) | E2E 最终评估 |
+| `eval_t34_official_path.py` | **test** (73 samples) | 官方路径对照审计 |
 | `test_unified_regression.py` | - | 10-test 回归 |
 
 ---
@@ -431,7 +444,8 @@ python tools/verify_training_config.py
 *此文档由 AI 助手自动维护，每次重要进展后更新*
 
 ## 2026-03-04 Technical Addendum (A1)
-- New technical reference: docs/adapter_cellsam_tech_reference.md
+- New technical reference: docs/technical/adapter_cellsam_tech_reference.md
 - Scope: adapter implementation notes + CellSAM dataset scope + NeurIPS challenge role
 - Paper writing should cite this doc to separate CellSAM-paper scope vs Allen-project scope.
+
 

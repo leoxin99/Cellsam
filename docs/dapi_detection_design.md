@@ -2,13 +2,19 @@
 
 > **维护者**: Research Documentation Architect
 > **创建日期**: 2026-01-31
+> **最后更新**: 2026-03-06
 > **代码位置**: `src/detection/dapi.py`
+> **当前 SSOT**: 统一评估/封板参数以 `src/detection/profiles.py` 的 `locked_eval` 为准；`src/detection/dapi.py` 仅代表运行时默认值
 
 ---
 
 ## 一、方案概述
 
 DAPI Only 方案通过 DAPI 核染色通道检测细胞核，为 SAM 分割模型提供边界框 prompt。
+
+> 当前项目存在两套参数口径:
+> 1. `runtime default`: `src/detection/dapi.py` 函数签名中的默认值，用于日常运行与开发
+> 2. `locked_eval`: `src/detection/profiles.py` 中的冻结参数，用于统一评估、阶段结论和 test 封板
 
 ### 核心流程
 
@@ -211,18 +217,16 @@ else:  # 椭圆核
 ### 3.1 锁定进展更新 (2026-02-14)
 
 > 为避免 test 泄漏，检测参数采用 `val(71) 调参 -> test(73) 单次封板` 协议。
-> 状态: ✅ E34b(val71) 与 test73 封板结果已回填到 SSOT 文档链路 (`CLAUDE.md`, `docs/task_backlog.md`, `docs/experiments_log.md`)。
+> 状态: ✅ 当前项目统一评估以 `locked_eval` 为准；test73 结果保留为冻结评估记录，不再反向改写参数。
 
 | 项目 | 当前状态 | 参数 | F1 | 说明 |
 |------|----------|------|----|------|
 | DAPI 默认运行参数 | 保留 | `min=200`, `max=10000`, `relative=True` | - | 运行时默认 (`src/detection/dapi.py`) |
-| DAPI val 锁定候选 | 已完成 | `min=1500`, `max=20000`, `relative_1.2x` | `0.7965` | `experiments/ablation_dapi_val/results.json` |
-| Adaptive val 锁定候选 | 已完成 | `radius=200`, `min_zlines=5`, `zline_threshold=0.01` | `0.7472` | `experiments/ablation_adaptive_val/results.json` |
-| Adaptive 半径重扫 (T3b) | 已完成 | `radius=[80,100,120,140,160,180]` -> best `160`, `min_zlines=5`, `zline_threshold=0.05` | `0.7800` | `experiments/ablation_adaptive_radius_val/results.json` |
-| 边缘/双核参数 val 重调 | 已完成 | `edge_margin=20`, `size_ratio_threshold=2.5`, `merge_coeff=1.4` | `0.8106` | E34b 联合消融最优 (`experiments/ablation_detection_e34b/results.json`) |
-| test 封板 | 已完成 | 固定候选参数，test 单次评估 | `0.8033` (DAPI) | DAPI > Adaptive，已封板 (`experiments/ablation_detection_lock/results.json`) |
+| DAPI `locked_eval` | 当前生效 | `min=1500`, `max=20000`, `edge=20`, `ratio=2.5`, `merge=1.4`, `relative_1.2x` | `0.8106` (val71) | 统一评估口径 (`src/detection/profiles.py`) |
+| Adaptive `locked_eval` | 当前生效 | `radius=160`, `min_zlines=5`, `zline_threshold=0.05`, `edge=20`, `ratio=2.5`, `merge=1.4` | `0.7800` (val71) | 统一评估口径 (`src/detection/profiles.py`) |
+| test 封板记录 | 历史冻结 | 固定 `locked_eval` 候选后单次评估 | `0.8033` (DAPI) | DAPI > Adaptive，保留追溯 (`experiments/ablation_detection_lock/results.json`) |
 
-> T4 更新 (2026-02-16): 检测评估脚本已接入 profile 防呆机制 (`runtime_default` / `locked_eval`)，并在运行时打印参数快照。实现见 `src/detection/profiles.py`。
+> T4 更新 (2026-02-16): 检测评估脚本已接入 profile 防呆机制；当前仅 `locked_eval` 作为活跃 profile，运行时默认值仅保留在 `dapi.py` 代码签名中供开发参考。实现见 `src/detection/profiles.py`。
 > T3b 更新 (2026-02-19): 半径重扫后 Adaptive 在 `val(71)` 上提升到 F1=0.7800，但该结果属于封板后诊断回合，`test(73)` 锁定结果不回写。
 
 ### 3.2 Adaptive 退化诊断补充 (T3, 2026-02-16)
@@ -365,7 +369,7 @@ def create_bounding_boxes(cell_groups, image_shape, ...):
 |------|----------|----------|--------|
 | 一、方案概述 | 默认运行与评测锁定区分不够显式 | 增加“运行默认值 vs 评测锁定值”提示，并指向 3.1 | High |
 | 二、版本演进历史 | 缺 E34 的 val 锁定与 test 封板节点 | 新增 v5.1 (E34-val) 与 v5.2 (E34-test lock) | High |
-| 三、参数 | 已拆默认与锁定，但未写“最终封板后覆盖规则” | 增加 3.2: 参数优先级 (code default < val lock < test lock) | High |
+| 三、参数 | 已拆默认与锁定，但需强调当前只以 `locked_eval` 为活跃口径 | 增加“code default vs locked_eval vs historical test record”优先级说明 | High |
 | 四、核心算法细节 | DAPI 与 Adaptive 共用参数面未集中说明 | 新增“共用参数表”: `min/max_nucleus_area`, `size_ratio_threshold`, `use_relative_distance`, `edge_margin` | High |
 | 五、评估指标 | 缺 E34 统一口径说明 | 明确 IoU=0.3, micro P/R/F1, val 调参 + test 单次锁定 | Medium |
 | 六、实验记录溯源 | 缺最新结果文件挂载 | 增补 `ablation_dapi_val` 与 `ablation_adaptive_val` 的结果路径 | High |

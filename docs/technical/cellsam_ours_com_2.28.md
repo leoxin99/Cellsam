@@ -1,4 +1,4 @@
-# CellSAM 官方方案 vs 我们项目方案对照 (Codex 整理, 2026-02-28)
+﻿# CellSAM 官方方案 vs 我们项目方案对照 (Codex 整理, 2026-02-28)
 
 > 作者: **Codex (A1)**  
 > 目的: 明确哪些部分沿用了官方 CellSAM, 哪些部分是本项目自定义设计, 并给出代码定位。  
@@ -739,7 +739,7 @@ self.model_cp = copy.deepcopy(self.model)
 | min-max 标准化 | 无单独显式层 | `anchorT.Standardize()` | 无 | 通过 `model.prep_2(...)` 使用官方实现 |
 | SAM 标准化 | `predict()` 内部走 `sam_preprocess(div_255=True)` | `sam_preprocess(div_255=True)` | `sam_preprocess(div_255=False)` | `official_preprocess_*()` 内部走 `sam_preprocess(div_255=True)` |
 | 编码器分支 | `model_cp` (`adv_mode=True`) | `model_cp` (`adv_mode=True`) | 历史上常是 `model.model` | 当前是 `model.model_cp` |
-| 代码位置 | `cellSAM_source/cellSAM/model.py:114` | `cellSAM_source/cellSAM/sam_inference.py:217`, `cellSAM_source/cellSAM/sam_inference.py:201` | 历史见 `docs/cellsam_update_predict_2.28.md:74`, `docs/cellsam_update_predict_2.28.md:258` | `src/official_preprocess.py:24`, `src/official_preprocess.py:59`, `src/train.py:261`, `src/inference/core.py:188` |
+| 代码位置 | `cellSAM_source/cellSAM/model.py:114` | `cellSAM_source/cellSAM/sam_inference.py:217`, `cellSAM_source/cellSAM/sam_inference.py:201` | 历史见 `docs/technical/cellsam_update_predict_2.28.md:74`, `docs/technical/cellsam_update_predict_2.28.md:258` | `src/official_preprocess.py:24`, `src/official_preprocess.py:59`, `src/train.py:261`, `src/inference/core.py:188` |
 
 ### 9.1 官方预处理流程图
 
@@ -778,9 +778,9 @@ AugmentedAllenDataset 输出 [0,1]
 
 对应历史证据:
 
-- `docs/cellsam_update_predict_2.28.md:74`
-- `docs/cellsam_update_predict_2.28.md:200`
-- `docs/cellsam_update_predict_2.28.md:258`
+- `docs/technical/cellsam_update_predict_2.28.md:74`
+- `docs/technical/cellsam_update_predict_2.28.md:200`
+- `docs/technical/cellsam_update_predict_2.28.md:258`
 
 ### 9.3 我们项目当前主线流程图
 
@@ -1391,3 +1391,4 @@ CellSAM
               = patch_embed + pos_embed + ViT blocks
               = model.image_encoder 去 neck 的同权重版本
 ```
+

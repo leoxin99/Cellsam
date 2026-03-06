@@ -5,7 +5,7 @@
 > **创建者**: A2 (Claude)  
 > **审核**: R1 + A1 (2026-02-25 20:45) — [审核报告](inbox/t11_review_r1a1.md)  
 > **优先级**: P1 — 缩小与 MedSAM 差距的主要技术路径  
-> **文献依据**: `docs/update_cellsam.md` §9
+> **文献依据**: `docs/technical/update_cellsam.md` §9
 
 ---
 
@@ -36,7 +36,7 @@
 
 LoRA 使 encoder 学到心肌细胞的长条形特征 → 两个潜在收益:
 1. **直接**: decoder 获得更好的特征 → mask 精度提升 → PQ 上升
-2. **间接**: 模型学会"框外抑制" → 减少对 box clipping 的依赖 (参照 `update_cellsam.md` §10.5)
+2. **间接**: 模型学会"框外抑制" → 减少对 box clipping 的依赖 (参照 `docs/technical/update_cellsam.md` §10.5)
 
 ---
 
@@ -310,3 +310,4 @@ def get_lora_state_dict(model):
 | 2026-02-25 19:20 | A2: 初版创建, 提交 R1 审核 |
 | 2026-02-25 20:45 | R1+A1: 审核通过 (有条件), 发现 2 P0 + 2 P1 + 1 P2 |
 | 2026-02-25 20:55 | A2: 整合审核反馈, 更新 §3.3 修复方案 + §3.4 代码修正 + §5 决策 + §6 验收标准 |
+

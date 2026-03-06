@@ -2,7 +2,7 @@
 
 > 状态: 🟢 Active  
 > 创建日期: 2026-02-15  
-> 最后更新: 2026-02-25  
+> 最后更新: 2026-03-06  
 > SSOT 级别: 本文件是多 Agent 协作的唯一权威参考  
 
 ---
@@ -196,6 +196,19 @@ Agent 之间**无法直接通信**（各自独立的 Antigravity 窗口）。通
 - 问题须明确、具体，列明已知信息和需要补充的信息
 - **不允许**在信息严重不足时默默执行并产出低质量结果
 
+### 3.6 长对话窗口交接规则
+
+> ⚠️ **强制规则**: 当旧窗口即将废弃（上下文过长或角色切换）时，必须先完成文档交接，禁止仅口头交接。
+
+执行步骤:
+1. 按 `docs/conversation_handover/HANDOVER_STANDARD.md` 执行关窗前检查。
+2. 在角色目录写入交接记录:
+   - `docs/conversation_handover/A1/`
+   - `docs/conversation_handover/A2/`
+   - `docs/conversation_handover/R1/`
+3. 向 `docs/agent_inbox.md` 追加通知，包含时间、交接编号、下一窗口入口。
+4. 新窗口必须按 `.agent/workflows/project-onboarding.md` 的交接顺序读取文档。
+
 ---
 
 ## 4. 文件与文档管理
@@ -217,6 +230,7 @@ Agent 之间**无法直接通信**（各自独立的 Antigravity 窗口）。通
 | `docs/dataset_parameters.md` | A1 (回填) | R1 (审核标记) | 数据集参数 SSOT |
 | `docs/agent_management.md` | R1 | — | 本文件 |
 | `docs/agent_status.md` | R1 (全局刷新) | A1/A2 (自行更新) | 实时状态板 |
+| `docs/conversation_handover/` | A1/A2/R1 (各自目录) | R1 (规范审计) | 窗口交接规范与记录 |
 | `docs/r1_handoff.md` | R1 | — | R1 移交文档 |
 | `docs/a2_handoff_*.md` | A2 | R1 (审核) | A2 移交文档 |
 | `.agent/workflows/` | R1 | 用户 | 工作流定义 |
@@ -295,6 +309,7 @@ Agent 之间**无法直接通信**（各自独立的 Antigravity 窗口）。通
 
 | 日期 | 内容 |
 |------|------|
+| **2026-03-06** | **A1**: 新增 §3.6 长对话窗口交接规则；新增 `docs/conversation_handover/` 文件所有权 |
 | **2026-03-01** | **R1**: 新增 §5b 代码文档规范 — 所有新脚本必须包含来源/目的 docstring |
 | **2026-02-25** | **R1**: 全局更新 — §1.2 职能边界改为 A1/A2 具体分工; §3.1 新增 inbox 规则 #5 引用; §4.1 文件所有权大幅更新 (inbox/archive/handoff/dataset_params); `agent_status.md` 全面刷新 |
 | 2026-02-17 | 新增 §2.2 审核意见回复模板（A1/A2 固定格式） |

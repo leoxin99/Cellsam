@@ -1,4 +1,4 @@
-# 技术细节 Q&A — 2026-02-27
+﻿# 技术细节 Q&A — 2026-02-27
 
 > **参与者**: User (Leo), A2 (Claude), A1 (Codex 校订)
 > **日期**: 2026-02-27
@@ -314,7 +314,7 @@ SAM 原始 mask 训练目标常写为三项组合：
 - `T22/T23`（IoU Head / Focal Loss）在历史移交/Inbox 有记录，但当前 `task_backlog.md` 主列表中未保留独立条目：
   - `docs/agent_inbox.md`
   - `docs/a2_handoff_20260225.md`
-  - `docs/update_cellsam.md` §5.3 / §5.4
+  - `docs/technical/update_cellsam.md` §5.3 / §5.4
 
 ---
 
@@ -322,3 +322,4 @@ SAM 原始 mask 训练目标常写为三项组合：
 
 > R1 和 A1 可以将其他与 User 讨论的技术问题写入此文档。
 > 包括但不限于: 代码设计决策、实验结果解读、论文写作策略等。
+

@@ -1,9 +1,9 @@
 ﻿# CellSAM 推理标准文档
 
 > **状态**: 🟢 Active — 推理与评估的唯一口径文档
-> **最后更新**: 2026-02-16
+> **最后更新**: 2026-03-06
 > **事实来源**: `src/inference/core.py` (InferenceConfig + segment_with_boxes)
-> **规则**: 所有推理/评估脚本必须调用 `core.py` 的函数，不允许硬编码参数
+> **规则**: 默认推理/评估脚本必须调用 `core.py` 的函数，不允许硬编码参数；若做官方路径对照实验，必须显式标注为非 SSOT 审计路径
 
 ---
 
@@ -19,7 +19,7 @@
 | `apply_box_clipping` | True | mask 裁剪到 box 区域 |
 | `box_expand` | 0.1 | box 扩展比例 |
 | `conflict_policy` | `"argmax_prob"` | 重叠像素归属策略 (argmax_prob/first_write/last_write) |
-| `apply_postprocess` | False | 是否启用面积过滤后处理 |
+| `apply_postprocess` | True | 是否启用面积过滤后处理 |
 | `validate_size` | False | 是否验证细胞面积范围 |
 | `min_cell_area` | 13884 | 细胞最小面积 (GT P1, 1024px) |
 | `max_cell_area` | 174735 | 细胞最大面积 (GT P99, 1024px) |
@@ -96,26 +96,29 @@ RQ (Recognition Quality) = TP / (TP + 0.5*FP + 0.5*FN)
 
 | 工具 | 用途 | Box 来源 | 说明 |
 |------|------|----------|------|
-| `tools/comprehensive_eval.py` | **已归档**  `tools/archive/`, 被 `eval_ablation.py --exp-dir` 取代 |  |  |
-| `tools/evaluate_e2e.py` | **E2E 评估** | DAPI 检测 | 含检测误差 |
-| `tools/test_unified_regression.py` | **回归测试** | GT boxes | 防止退化 |
-| `tools/smoke_test_e2e.py` | **冒烟测试** | GT boxes | 默认 30 样本 |
+| `tools/eval_ablation.py` | **Oracle 最终评估** | GT boxes | 自动从实验目录读取 `best_model.pt`，默认评估 test(73) |
+| `tools/evaluate_e2e.py` | **E2E 评估** | DAPI 检测 | 含检测误差，默认走 `locked_eval` 检测参数 |
+| `tools/smoke_test_e2e.py` | **Oracle 开发冒烟** | GT boxes | 默认 30 样本，用于快速比较 |
+| `tools/test_unified_regression.py` | **回归测试** | GT boxes | 防止推理/指标退化 |
+| `tools/eval_t34_official_path.py` | **官方路径对照审计** | GT boxes | 仅用于 T34 类“官方路径 vs 统一核心”对照，不是 SSOT 主入口 |
+
+归档:
+- `tools/archive/comprehensive_eval.py`
 
 ### 4.1 检测参数 Profile 机制 (T4, 2026-02-16)
 
-为降低“误用默认检测参数”风险，检测评估脚本统一支持两类 profile：
+为降低“误用默认检测参数”风险，检测评估脚本统一从 `src/detection/profiles.py` 读取检测参数。当前只有一个活跃 profile：
 
 | Profile | 用途 | 参数来源 |
 |---------|------|----------|
-| `runtime_default` | 日常运行/开发 | `src/detection/dapi.py` 默认参数 |
-| `locked_eval` | 统一评估/封板 | E34/E34b 锁定参数 |
+| `locked_eval` | 统一评估/封板 | E34/E34b (DAPI) + T3b (Adaptive) 锁定参数 |
 
 实现位置:
 - `src/detection/profiles.py`
 
 执行规则:
 1. 最终汇报、阶段结论、test 封板必须用 `locked_eval`。
-2. 仅在探索性实验中使用 `runtime_default`，且结果必须显式标注 profile。
+2. 若要测试 `dapi.py` 的运行时默认值，必须作为单独实验在脚本内显式硬编码并注明“非 SSOT / runtime default audit”。
 3. 关键脚本启动时会打印参数快照 (`profile + dapi/adaptive params`)。
 
 已接入脚本:
@@ -127,8 +130,8 @@ RQ (Recognition Quality) = TP / (TP + 0.5*FP + 0.5*FN)
 ### 使用方式
 
 ```bash
-# Oracle 评估 (需在脚本内修改 checkpoint 路径)
-python tools/comprehensive_eval.py
+# Oracle 评估 (推荐)
+python tools/eval_ablation.py --exp-dir checkpoints/EXP_DIR
 
 # E2E 评估
 python tools/evaluate_e2e.py \
@@ -144,6 +147,9 @@ python tools/test_unified_regression.py
 
 # 训练前完整验证
 python tools/verify_training_config.py --config src/config/CONFIG.yaml
+
+# 官方路径对照审计 (仅 T34 / 审计类实验使用)
+python tools/eval_t34_official_path.py --checkpoint checkpoints/EXP_DIR/best_model.pt
 ```
 
 ---
@@ -173,11 +179,11 @@ model, adapter, info = load_cellsam_checkpoint(
 | 2026-02-10 | Baseline (预训练) | 0.589 ± 0.237 | 0.337 ± 0.140 | 71 (val) |
 | 2026-02-10 | Phase 1 (L4 best) | 0.695 | 0.464 | 71 (val) |
 | 2026-02-11 | Phase 1 Test Locked | 0.6954 | 0.4641 | 73 (test) |
-| 2026-02-13 | Phase 2-A | 训练中... | — | — |
 
 ---
 
 ## 更新日志
 
+- 2026-03-06: 修正 `apply_postprocess=True` 默认值；更新评估工具分工与用法示例
 - 2026-02-13: 重写文档，以 `core.py` 为 SSOT，移除旧 API 引用
 - 2026-02-07: 创建文档，确立 Best-Match 为标准方法

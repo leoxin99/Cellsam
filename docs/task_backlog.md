@@ -2,7 +2,7 @@
 
 > 状态: 🟢 Active  
 > 维护原则: 只记录"可执行任务"，每项必须有口径/产物/完成标准。  
-> 更新时间: 2026-03-04 (T28 PQ=0.684, T29 消融完成, T30 LoRA running)
+> 更新时间: 2026-03-06 (T31完成, T32/T34方案已建, 交接规范上线)
 
 ## 📋 目录 (按优先级排列)
 
@@ -10,8 +10,10 @@
 - T29 seed=123: L4 running (~5h), 完成后计算双 seed 均值
 - T30 LoRA Q/V: L4 running (seed=42 + seed=123)
 - T27a/T28/T29/T30 test(73) eval: 等训练完成后推理评估
-- T31 Cellpose paper-aligned rerun: `docs/experiments/active/T31_cellpose_paper_aligned.md`
+- T32 Stage2-like neck-only baseline: `docs/experiments/active/T32_stage2_like_neck_only_baseline.md`
+- T34 T27a 官方路径评估消融: `docs/experiments/active/T34_t27a_official_path_ablation.md`
 - CellFinder 框检测评估: 需独立脚本 (不用 adv_mode 切换)
+- A1 新窗口交接包维护: `docs/conversation_handover/`
 
 ### 🟡 P1 — 论文需要
 - IoU filter ablation (post-training)
@@ -32,6 +34,7 @@
 ### ✅ 已完成
 - T16 Baseline ✅ | T17 曲线 ✅ | T18 三通道 ✅ | T24 权重审计 ✅
 - T12 消融 ✅ | T11 LoRA ✅ | T19-abl Box Clipping ✅
+- T31 Cellpose paper-aligned rerun ✅ (test73, cyto3)
 - T27a Plan B seed=42 ✅ (PQ=0.638, BM=0.791)
 - T1 E34封板 ✅ | T2 E34b联合消融 ✅ | T3/T3b Adaptive ✅ | T4 防呆 ✅
 
@@ -125,21 +128,21 @@
   - [ ] Run side-by-side eval on same `test(73)` + same GT boxes: official vs unified (PQ/BM-Dice/AJI).
   - [ ] Record final methodology statement in `baseline_methodology_audit` or `experiments_log`.
 
-### T31. Cellpose paper-aligned baseline rerun - Pending
+### T31. Cellpose paper-aligned baseline rerun - ✅ Completed (2026-03-05)
 - Priority: **P0**
 - Goal: rerun Cellpose baseline on `test(73)` with a methodology aligned to CellSAM public paper-evaluation code, instead of the deprecated BF-grayscale path in `tools/baseline_eval.py`.
 - Experiment doc: `docs/experiments/active/T31_cellpose_paper_aligned.md`
-- Plan note: `docs/t31_cellpose_baseline_rerun_plan_3.04.md`
+- Plan note: `docs/experiments/active/t31_cellpose_baseline_rerun_plan.md`
 - Rationale:
   - historical baseline fed BF grayscale only: `tools/baseline_eval.py:147-152`
   - CellSAM public eval uses `cyto3` + explicit `channels=[3,2]`: `cellSAM_source/paper_evaluation/eval_main.py:85`, `cellSAM_source/paper_evaluation/models.py:47`
   - current traceable results show catastrophic over-segmentation and should not be used as final paper evidence
 - Completion criteria:
-  - [ ] create `tools/cellpose_paper_aligned_eval.py`
-  - [ ] run main result on `test(73)` with `cyto3`, `[0,DAPI,BF]`, `channels=[3,2]`, `diameter=None`
-  - [ ] output both project metrics and CellSAM-paper metrics (`F1`, `Recall`)
+  - [x] create `tools/cellpose_paper_aligned_eval.py`
+  - [x] run main result on `test(73)` with `cyto3`, `[0,DAPI,BF]`, `channels=[3,2]`, `diameter=None`
+  - [x] output both project metrics and CellSAM-paper metrics (`F1`, `Recall`)
   - [ ] if needed, add one supplementary run with `diameter=200`
-  - [ ] replace the Cellpose row in paper/baseline reporting with the T31 result
+  - [x] replace the Cellpose row in paper/baseline reporting with the T31 result
 
 
 ---
@@ -307,6 +310,18 @@ loss:
   | 10i | `docs/progress_timeline_2.13.md` | [ ] |
   | 10j | `CLAUDE.md` | [ ] |
 
+### T35. 长对话窗口交接规范落地
+- 优先级: **P0**
+- 目标: 建立统一窗口交接规范，避免新窗口丢上下文
+- 产物:
+  - `docs/conversation_handover/HANDOVER_STANDARD.md`
+  - `docs/conversation_handover/A1/`, `docs/conversation_handover/A2/`, `docs/conversation_handover/R1/`
+  - `.agent/workflows/project-onboarding.md` 交接入口同步
+- 完成标准:
+  - [x] 规范文档创建并可执行
+  - [x] A1 首次交接记录落盘
+  - [x] CLAUDE/task_backlog/onboarding/inbox 同步
+
 ---
 
 ## 4. Completed Recently
@@ -317,3 +332,5 @@ loss:
 - ✅ T4 Profile 防呆机制上线
 - ✅ T3b 半径重扫 (search_radius=160, F1=0.7800)
 - ✅ detection profiles 统一为 locked_eval (runtime_default 已移除)
+- ✅ T31 Cellpose paper-aligned rerun 完成 (test73 主跑)
+- ✅ T35 长对话窗口交接规范体系上线

@@ -1,3 +1,98 @@
+﻿## [2026-03-06 23:37] A1(Codex) -> A2 + R1 -- SSOT 文档复核 + technical 目录收敛
+
+- **task**: re-audit core SSOT docs, consolidate technical references, and lock generalist/specialist model conclusions
+- **status**: Completed
+- **priority**: P1
+
+### 1) SSOT 文档复核完成
+
+已修正文档:
+- `docs/inference_standard.md`
+- `docs/dataset_parameters.md`
+- `docs/dapi_detection_design.md`
+
+关键修正:
+1. `inference_standard.md`
+   - `apply_postprocess` 默认值改回与代码一致的 `True`
+   - 检测 profile 口径改为“当前只有 `locked_eval` 活跃”
+   - 评估工具分工更新为 `eval_ablation.py` / `evaluate_e2e.py` / `eval_t34_official_path.py`
+2. `dataset_parameters.md`
+   - 移除未锁定的像素尺寸估算（禁止按 63X 倍率反推）
+   - 移除 `file:///...` 绝对链接，改为仓库相对路径
+   - 同步后处理默认口径为 `apply_postprocess=True`
+3. `dapi_detection_design.md`
+   - 明确 `src/detection/dapi.py` = runtime defaults
+   - 明确 `src/detection/profiles.py::locked_eval` = 当前统一评估/封板 SSOT
+   - 将 Adaptive 当前锁定值收口到 `160 / 5 / 0.05`
+
+### 2) 技术文档已统一迁移到 `docs/technical/`
+
+新入口:
+- `docs/technical/README.md`
+
+已迁移:
+- `docs/technical/update_cellsam.md`
+- `docs/technical/technical_qa_2.27.md`
+- `docs/technical/cellsam_ours_com_2.28.md`
+- `docs/technical/cellsam_methods_1page_table.md`
+- `docs/technical/adapter_cellsam_tech_reference.md`
+- `docs/technical/cellsam_sam_branch_audit_2026-02-21.md`
+- `docs/technical/cellsam_update_predict_2.28.md`
+- `docs/technical/question.md`
+- `docs/technical/three_channel_design_evaluation.md`
+- `docs/technical/adapter_analysis.md`
+- `docs/technical/metrics_guide.md`
+
+已同步入口:
+- `CLAUDE.md`
+- `docs/paper_preparation.md`
+- `.agent/workflows/project-onboarding.md`
+- `docs/r1_handoff.md`
+- `docs/t11_lora_design.md`
+
+### 3) CellSAM / Cellpose generalist vs specialist 结论
+
+1. **CellSAM**
+   - 论文里明确区分 `CellSAM-generalist` 与 `CellSAM-specialist`
+   - 当前公开加载接口只暴露:
+     - `cellsam_general`
+     - `cellsam_extra`
+   - **未在当前公开仓库快照中发现 specialist checkpoint 的公开加载入口**
+   - 代码证据:
+     - `cellSAM_source/cellSAM/model.py:59`
+     - `cellSAM_source/cellSAM/model.py:65`
+     - `cellSAM_source/cellSAM/cellsam_pipeline.py:92`
+
+2. **Cellpose**
+   - 论文基准明确包含:
+     - 预训练 generalist `cyto3`
+     - 内部训练的 generalist Cellpose
+     - 内部训练的 specialist Cellpose
+   - 当前公开 CellSAM evaluation 默认使用 `cyto3`
+   - 代码证据:
+     - `docs/temp_reviews/methods_page_3.txt:61`
+     - `docs/temp_reviews/methods_page_11.txt:42`
+     - `cellSAM_source/paper_evaluation/eval_main.py:85`
+     - `cellSAM_source/paper_evaluation/models.py:43`
+
+3. **我们当前测试用的是哪类**
+   - CellSAM pretrained baseline: `get_model()` 默认走公开 generalist
+   - Cellpose T31 baseline: `cyto3`，也是 generalist 口径
+   - 代码证据:
+     - `tools/baseline_eval.py:178`
+     - `tools/cellpose_paper_aligned_eval.py:155`
+
+### 4) 对 A2 / R1 的影响
+
+- 后续论文与实验文档中若写 “CellSAM specialist / Cellpose specialist”，必须区分:
+  - 论文内部训练的 specialist（单数据集）
+  - 当前公开仓库可直接加载的模型
+- 目前可直接复现、可公开调用的 CellSAM 只应写成:
+  - `cellsam_general`
+  - `cellsam_extra`
+
+---
+
 ## [2026-03-06 03:28] A1(Codex) -> A2 + R1 -- 对话窗口交接体系上线 (T35)
 
 - **task**: deploy standardized long-context handover workflow and sync onboarding/docs
@@ -315,7 +410,7 @@ Also accepted: Stage 2 loss cannot be confirmed from code (no training script in
 ### 3) CellSAM Methods 核心事实 (已回填技术文档)
 
 已更新:
-- `docs/adapter_cellsam_tech_reference.md`
+- `docs/technical/adapter_cellsam_tech_reference.md`
 
 重点回填项:
 - 数据构建: 10 个数据来源 + LIVECell held-out + NeurIPS 训练/验证/隐藏测试规则
@@ -347,7 +442,7 @@ Also accepted: Stage 2 loss cannot be confirmed from code (no training script in
 ### Deliverables
 
 1. New technical reference doc:
-- `docs/adapter_cellsam_tech_reference.md`
+- `docs/technical/adapter_cellsam_tech_reference.md`
 - Covers:
   - adapter implementation path (model creation, optimizer inclusion, train/val forward integration)
   - adapter architecture details (`IndependentChannelAdapter`, `LightweightChannelAdapter`)
@@ -357,7 +452,7 @@ Also accepted: Stage 2 loss cannot be confirmed from code (no training script in
 
 2. `paper_preparation.md` updated:
 - Added TOC entry + section `## 8. 技术口径索引`
-- Linked `docs/adapter_cellsam_tech_reference.md` as citation anchor
+- Linked `docs/technical/adapter_cellsam_tech_reference.md` as citation anchor
 
 3. `CLAUDE.md` updated:
 - Added `2026-03-04 Technical Addendum (A1)` with pointer to new technical reference
@@ -795,3 +890,4 @@ Our T28 used (R=BF, G=Actn2, B=DAPI) -- all 3 channels misaligned with official.
 ## [2026-02-27 06:50] A1(Codex) → A2 + R1 — LoRA/Neck 文献复核 + Baseline 错误文件处置
 - **status**: ✅ 已完成
 - 口径统一: "部分文献支持联训, 不作绝对化结论"; SAMed 冻结含 neck
+

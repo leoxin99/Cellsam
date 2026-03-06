@@ -1,4 +1,4 @@
----
+﻿---
 description: AI 助手加入项目时的入门指南
 ---
 
@@ -22,11 +22,12 @@ description: AI 助手加入项目时的入门指南
 
 | 角色 | 移交文档 | 说明 |
 |------|---------|------|
-| **A2 (Claude)** | `docs/a2_handoff_20260225.md` | 上一任 A2 的完整工作移交 |
-| **R1 (Reviewer)** | `docs/r1_handoff.md` | R1 的技术决策记录 |
-| **A1 (Codex)** | 无专属移交 | 直接看 §3-4 |
+| **A2 (Claude)** | `docs/conversation_handover/A2/` 最新 `handover_*.md` | A2 最近一次窗口交接快照 |
+| **R1 (Reviewer)** | `docs/conversation_handover/R1/` 最新 `handover_*.md` | R1 最近一次窗口交接快照 |
+| **A1 (Codex)** | `docs/conversation_handover/A1/` 最新 `handover_*.md` | A1 最近一次窗口交接快照 |
 
 移交文档包含：已完成工作、进行中任务、关键上下文、ALICE HPC 信息。
+所有角色在读取个人交接文档前，先读 `docs/conversation_handover/HANDOVER_STANDARD.md`。
 
 ## 3. 了解协作规则
 
@@ -58,7 +59,7 @@ description: AI 助手加入项目时的入门指南
 | 你的角色 | 额外必读 |
 |---------|---------|
 | **A1 (Codex)** | `docs/dataset_parameters.md` (数据集参数) + `docs/inference_standard.md` (推理口径) |
-| **A2 (Claude)** | `docs/experiments_log.md` (实验记录) + `docs/update_cellsam.md` (技术分析) + `docs/paper_preparation.md` (论文素材) |
+| **A2 (Claude)** | `docs/experiments_log.md` (实验记录) + `docs/technical/update_cellsam.md` (技术分析) + `docs/paper_preparation.md` (论文素材) |
 | **R1 (Reviewer)** | `.agent/workflows/review-agent.md` (审核流程) + `docs/experiments_log.md` (实验数据) |
 
 ## 7. 查看实时状态
@@ -75,7 +76,8 @@ description: AI 助手加入项目时的入门指南
 
 1. 将产物摘要**追加**到 `docs/agent_inbox.md` 顶部（格式参考已有条目）
 2. 更新 `docs/agent_status.md` 中你自己的行
-3. 确保修改已 commit
+3. 若准备关窗，写入 `docs/conversation_handover/<角色>/handover_XXX_YYYY-MM-DD.md`
+4. 确保修改已 commit
 
 ### 8.2 可用工作流
 
@@ -97,3 +99,4 @@ CellSAM 分割 (BF-only)  → Oracle PQ=0.484 (Best Config: posw=10, contour=off
     ↓                       Job 1036799 (T18-C s123) + Job 1036827 (对照组)
 论文撰写                 → 素材收集 + 消融表整理
 ```
+

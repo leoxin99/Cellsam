@@ -1,6 +1,6 @@
 ﻿# CellSAM 心肌细胞分割 — 论文准备材料
 
-> **更新日期**: 2026-03-02
+> **更新日期**: 2026-03-05
 > **论文类型**: 硕士论文 (Master's Thesis, 20-50 pages)
 > **答辩时间**: 2026 年 4-5 月
 
@@ -10,6 +10,7 @@
 
 - [1. 研究背景与动机](#1-研究背景与动机)
 - [2. 方法论](#2-方法论)
+  - [2.7 CellSAM Methods 一页证据表](#27-cellsam-methods-一页证据表)
 - [3. 实验结果汇总](#3-实验结果汇总)
 - [4. 论文待完成实验](#4-论文待完成实验)
 - [5. 建议论文结构](#5-建议论文结构)
@@ -335,6 +336,22 @@ LoRA 旁路: x → A(768→r) → B(r→768) → 加到 Q  (可训练)
 
 **论文定位**: Encoder 微调消融 — 验证低秩适应能否缩小与 MedSAM (PQ=0.576) 的差距
 
+### 2.7 CellSAM Methods 一页证据表
+
+> 来源: `docs/technical/cellsam_methods_1page_table.md`  
+> 证据范围: Nature Methods 论文 (`docs/Cellsam-nature.pdf`) + 公开代码可验证项。
+
+| 阶段 | 训练目标 | 训练模块 | 冻结模块 | Loss（可证据化口径） | 关键超参 | 主要指标 | 证据页码/代码 |
+|---|---|---|---|---|---|---|---|
+| Stage 1 (Detection) | 学到细胞检测能力（GT mask -> GT box） | CellFinder + SAM image encoder (ViT) | SAM mask decoder | 检测损失：分类 + 框回归 + 几何（公开实现对应 Focal CE + L1 + GIoU） | AdamW；CellFinder lr=`1e-4`；SAM-ViT backbone lr=`1e-5`；wd=`1e-4`；clip norm=`0.1`；step scheduler（1960 epoch 后降 10x）；2800 epochs；batch=4；8x H100 | COCO `mAP`、`AP50`（IoU 0.5:0.95，step 0.05；max detections=10,000） | Paper p3, p10, p11；`AnchorDETR/models/anchor_detr.py` (`loss_ce/loss_bbox/loss_giou`) |
+| Stage 2 (Seg alignment) | 在 GT boxes + segmentation labels 监督下对齐分割分支 | model neck（仅 neck 微调） | SAM-ViT + mask decoder | 论文写法为 segmentation supervision fine-tuning neck；公开仓库无可逐行复现的 Stage2 loss 公式/权重 | AdamW；lr=`1e-4`；wd=`1e-4`；不做 gradient clipping；50 epochs + cosine lr schedule | 分割主比较口径 `F1 error (1-F1)`；并给 Recall/Precision/F1 | Paper p3, p10, p11 |
+| Benchmark reporting | 统一比较 CellSAM 与 baselines | 检测与分割分开报告 | - | 检测侧看 COCO；分割侧主文强调 `1-F1` | - | `1-F1` + Recall/Precision/F1 | Paper p3-4, p11 |
+
+**证据边界 (写作约束)**  
+1. 可写死: 两阶段结构、训练超参范围、检测/分割指标口径。  
+2. 不可写死: Stage2 的具体 loss 组合和权重（例如“Dice+BCE 固定权重”）——公开论文与公开仓库都未提供可逐行复现实装脚本。  
+3. 因此论文表述建议为: Stage2 在分割监督下微调 neck，exact internal weighting not publicly specified。
+
 ---
 
 ## 3. 实验结果汇总
@@ -604,7 +621,8 @@ gantt
 
 为避免后续写作中再次混淆 “CellSAM 论文口径” 与 “本项目实现口径”，统一引用以下技术文档:
 
-- `docs/adapter_cellsam_tech_reference.md`
+- `docs/technical/adapter_cellsam_tech_reference.md`
   - Adapter 结构与训练集成方式
   - CellSAM 数据集口径 (含 NeurIPS challenge 在论文中的角色)
   - 本项目 Allen 数据口径与 CellSAM 口径的边界
+

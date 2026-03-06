@@ -1,4 +1,4 @@
-# CellSAM 心肌细胞分割优化方案 - Claude & Codex 联合版
+﻿# CellSAM 心肌细胞分割优化方案 - Claude & Codex 联合版
 
 > **创建日期**: 2026-02-09
 > **作者**: Claude (Antigravity) + Codex 5.3 协作
@@ -1193,7 +1193,7 @@ Codex 提出的 3 组实验（A 基线 / B 仅Size / C 仅Topology）+ 判定规
 当前文档已包含 Phase 0/1/2 全链路与多轮审查，建议转为“主文档 + 索引拆分”结构：
 
 1. 主文档仅保留：里程碑结论、当前生效配置、下一步决策。
-2. 过程细节拆分到：`docs/phase1_design.md`, `docs/phase2_design.md`, `docs/question.md`。
+2. 过程细节拆分到：`docs/phase1_design.md`, `docs/phase2_design.md`, `docs/technical/question.md`。
 3. 在主文档新增“变更索引表”（章节 -> 文件 -> 生效日期 -> 状态）。
 4. 对已失效方案加统一状态标记（`deprecated/superseded/active`），避免后续 AI 混用旧方案。
 
@@ -1442,3 +1442,4 @@ if overlap_computable:
 - `docs/dapi_detection_design.md`: 已写入 val(71) 锁定候选（DAPI 与 Adaptive）与 test 封板状态。
 - `docs/experiments_log.md`: 已写入 E34 进行中状态、val(71) 最优参数、以及“已回写 dapi_detection_design/CLAUDE”说明。
 - `docs/dataset_parameters.md`: 已拆 Active/Historical 口径并补章节更新方案。
+

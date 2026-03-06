@@ -2,7 +2,7 @@
 
 > **状态**: 🟢 Active — 数据集参数参考文档
 > **数据集**: Allen Segmented Fields (Full, 478 张)
-> **最后更新**: 2026-02-25
+> **最后更新**: 2026-03-06
 
 ---
 
@@ -14,7 +14,7 @@
 | **细胞总数** | 5173 个 | E17 统计 |
 | **图像尺寸** | 1736 × 1776 像素 | TIFF 检查 (2026-02-05 验证) |
 | **通道数** | 10 个 | TIFF 检查 |
-| **像素大小** | ~0.108 μm/px | 63X 物镜估算 |
+| **像素大小** | 未锁定 | 项目 SSOT 未记录原始 TIFF metadata，禁止按物镜倍率估算 |
 | **位深度** | 16-bit | TIFF 检查 |
 
 ---
@@ -210,8 +210,8 @@
 
 | 阶段 | Config 文件 | 关键改动 |
 |------|-----------|----------|
-| **Phase 1** | [`phase1_rebalance_l4.yaml`](file:///d:/AI/paper/CellSam/src/config/phase1_rebalance_l4.yaml) | `pos_weight` 10→2, `boundary_weight` 0.5→1.5, `contour_weight` 0.1→0.3, PQ early stop ON |
-| **Phase 2A (fix1)** | [`phase2a_neighbor_overlap.yaml`](file:///d:/AI/paper/CellSam/src/config/phase2a_neighbor_overlap.yaml) | +Neighbor(0.3) +Overlap(0.1), checkpoint=P1 best |
+| **Phase 1** | `src/config/phase1_rebalance_l4.yaml` | `pos_weight` 10→2, `boundary_weight` 0.5→1.5, `contour_weight` 0.1→0.3, PQ early stop ON |
+| **Phase 2A (fix1)** | `src/config/phase2a_neighbor_overlap.yaml` | +Neighbor(0.3) +Overlap(0.1), checkpoint=P1 best |
 
 | 不变参数 | 值 | 说明 |
 |---------|-----|------|
@@ -225,8 +225,8 @@
 ## 11. 后处理参数 (SSOT: `inference_standard.md`)
 
 > 推理 SSOT 在 `docs/inference_standard.md`。  
-> 当前统一评估默认 `apply_postprocess=False`（即**默认不开启面积后处理**）。  
-> 仅当显式开启 `apply_postprocess=True` 或 `validate_size=True` 时，下面面积阈值才生效。
+> 当前统一评估默认 `apply_postprocess=True`（即**默认启用面积后处理**）。  
+> 当显式关闭 `apply_postprocess=False` 时，下面面积阈值不会参与后处理；`validate_size=True` 则额外启用面积合法性检查。
 
 | 参数 | 旧值 (1736px) | 新值 (1024px) | 说明 |
 |------|--------------|---------------|------|
@@ -252,7 +252,7 @@
 | 8. Z-线检测参数 | ✅ 已更新 | 同步 T3b 锁定值 `160/5/0.05`，保留 E34 历史口径 | ~~Medium~~ Done |
 | 9. 框扩展参数 | ✅ 已更新 | 拆分 DAPI / Adaptive / 共用上游参数 | ~~Medium~~ Done |
 | 10. 训练相关参数 | ✅ 已改为索引 | ~~缩减为索引~~ → 已改为 config YAML 索引表 | ~~Medium~~ Done |
-| 11. 后处理参数 | ✅ 已更新 | 补充 `apply_postprocess=False` 默认关闭声明 + SSOT 指向 | ~~Medium~~ Done |
+| 11. 后处理参数 | ✅ 已更新 | 补充 `apply_postprocess=True` 默认开启声明 + SSOT 指向 | ~~Medium~~ Done |
 
 ---
 
@@ -260,6 +260,7 @@
 
 | 日期 | 更新内容 |
 |------|--------|
+| **2026-03-06** | 移除未锁定像素尺寸估算；修正 config 索引链接为仓库相对路径；同步 `apply_postprocess=True` 默认口径 |
 | **2026-02-25** | T9 完成：§6/§7/§8/§9/§11 按 `locked_eval` 与 E34/T3b 结果回填；补全 Active/Historical 双口径 |
 | **2026-02-14b** | §4 换算系数补充几何均值说明；§5 核参数改为三级体系表；§8 加 val 候选 + B2/B3 不敏感; §10 改为 config 索引 |
 | **2026-02-14** | 增加 Active/Historical 口径说明；新增章节更新方案；补充边缘/双核参数历史口径警示 |

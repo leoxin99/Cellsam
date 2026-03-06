@@ -1,4 +1,4 @@
-# R1 (Reviewer) 交接文档
+﻿# R1 (Reviewer) 交接文档
 
 > **生成时间**: 2026-02-25 04:20  
 > **用途**: 如果 R1 对话窗口需要重开，新 R1 读此文档快速上手  
@@ -21,9 +21,9 @@
 
 | 决策 | 结论 | 记录位置 |
 |------|------|---------|
-| Neck-only 训练 (A1 提案) | ⛔ 不推荐 — CellSAM Stage2 的 neck 对齐动机不适用于我们 | `update_cellsam.md` §8 |
-| LoRA 微调 encoder | ✅ 推荐 (P1) — 小数据场景文献最优解，~4.5M 参数 | `update_cellsam.md` §9 |
-| 微调 CellFinder | ⚠️ P3 优先级 — 可行但风险高 (~1-2 周), 训练管道需从零构建 | `update_cellsam.md` §11 |
+| Neck-only 训练 (A1 提案) | ⛔ 不推荐 — CellSAM Stage2 的 neck 对齐动机不适用于我们 | `docs/technical/update_cellsam.md` §8 |
+| LoRA 微调 encoder | ✅ 推荐 (P1) — 小数据场景文献最优解，~4.5M 参数 | `docs/technical/update_cellsam.md` §9 |
+| 微调 CellFinder | ⚠️ P3 优先级 — 可行但风险高 (~1-2 周), 训练管道需从零构建 | `docs/technical/update_cellsam.md` §11 |
 
 ### Loss 设计
 
@@ -47,8 +47,8 @@
 
 | 决策 | 结论 | 记录位置 |
 |------|------|---------|
-| Box Clipping | 保留 — with_clip PQ=0.466 > no_clip 0.437 | `update_cellsam.md` §10 |
-| 优化方向 | LoRA 是最有希望的路径 (让模型学会自然框外抑制) | `update_cellsam.md` §10.5 |
+| Box Clipping | 保留 — with_clip PQ=0.466 > no_clip 0.437 | `docs/technical/update_cellsam.md` §10 |
+| 优化方向 | LoRA 是最有希望的路径 (让模型学会自然框外抑制) | `docs/technical/update_cellsam.md` §10.5 |
 
 ### T16 Baseline
 
@@ -98,7 +98,7 @@
 ## 5. 必读文档 (按优先级)
 
 1. **`CLAUDE.md`** — 项目总览 + 当前指标 + 工作重点
-2. **`docs/update_cellsam.md`** — CellSAM 技术分析 (R1 的核心产出)
+2. **`docs/technical/update_cellsam.md`** — CellSAM 技术分析 (R1 的核心产出)
 3. **`docs/agent_inbox.md`** — 当前活跃消息存根 + 归档链接
 4. **`docs/task_backlog.md`** — 按优先级排列的任务清单
 5. **`docs/experiments_log.md`** — 实验记录 (T12 消融, Best Config, T18)
@@ -112,4 +112,5 @@
 - **inbox 归档**: 审核+执行完毕后缩为存根，完整内容在 `inbox_archive/`
 - **backlog 更新**: 修改任务时必须同步更新顶部目录
 - **Agent 规则**: 信息不足时 Agent 须主动索要 (`agent_management.md` §3.5)
-- **evidence 口径**: 论文事实 vs 代码可证事实 分开标注 (`update_cellsam.md` Appendix B)
+- **evidence 口径**: 论文事实 vs 代码可证事实 分开标注 (`docs/technical/update_cellsam.md` Appendix B)
+
