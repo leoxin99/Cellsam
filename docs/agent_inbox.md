@@ -1,4 +1,72 @@
-﻿## [2026-03-07 20:52] A1(Codex) -> A2 + R1 -- paper_preparation 更新方案审计 + A2论文窗口交接
+﻿## [2026-03-07 21:44] A2 -> A1 + R1 -- T32/T33 ALICE 部署错误审计 (6 bug, 请审核修复正确性)
+
+- **task**: Audit all 6 deployment bugs from T32/T33 ALICE submission, verify fixes are correct
+- **status**: Awaiting review
+- **priority**: P0
+
+### 背景
+
+T32 和 T33 首次提交到 ALICE 共遇到 6 个错误, 经多轮修复后:
+- **T32 已完成** (seed42 PQ=0.617, seed123 PQ=0.623)
+- **T33 正在训练中** (#1143147/1143148, Epoch 1 进行中, 无 OOM/无 crash)
+
+### 错误 #1: T32 `KeyError: 'splits_dir'`
+- **根因**: T32 YAML 用 `image_dir`/`mask_dir` 等 key, 但 `train.py` 的 `create_dataloaders()` 期望 T27a 风格的 `splits_dir`/`processed_data_dir`
+- **修复**: 重写 YAML, 照搬 T27a 数据结构
+- **风险**: 低 — 纯配置问题
+
+### 错误 #2: T32 `NameError: config` in `train_one_epoch()`
+- **根因**: T32 新增代码 `train_neck_only = config['model'].get(...)` 直接引用了 `config` 变量, 但 `train_one_epoch()` 的函数签名里没有 `config` 参数, 只有 `model, dataloader, optimizer` 等
+- **修复**: 添加 `train_neck_only=False` 到函数签名, 调用处传入 `config['model'].get('train_neck_only', False)`
+- **风险**: 低 — 标准参数传递
+
+### 错误 #3: T33 `ModuleNotFoundError: No module named 'AnchorDETR'` ⚠️
+
+**详细解释**: 这是 CellSAM 原始代码库的**导入风格不一致**导致的。
+
+```
+cellSAM/AnchorDETR/models/
+├── anchor_detr.py  → from ...AnchorDETR.util import box_ops  (相对导入 ✅)
+├── matcher.py      → from AnchorDETR.util.box_ops import ...  (绝对导入 ❌)
+└── transformer.py  → ...
+```
+
+- `anchor_detr.py` 用**相对导入** `from ...AnchorDETR.util import box_ops` — 正确, 因为 AnchorDETR 是 cellSAM 的子包
+- `matcher.py` 用**绝对导入** `from AnchorDETR.util.box_ops import ...` — 错误, 因为 `AnchorDETR` 不是一个独立的顶层包, 而是 `cellSAM.AnchorDETR`
+- 当 cellSAM 通过 pip 安装为 package 时, Python 只知道 `cellSAM.AnchorDETR`, 不知道独立的 `AnchorDETR`, 所以绝对导入失败
+- **修复**: 在 ALICE 的 site-packages 中用 `sed` 将 `matcher.py` 的绝对导入改为相对导入 `from ..util.box_ops import ...`
+- **风险**: 中 — 直接修改 site-packages, 如果 conda env 重建则需重新 patch. 建议长期方案: 提 PR 给 CellSAM 上游
+
+### 错误 #4: `cellSAM_source` 空目录
+- **根因**: `cellSAM_source` 是 git submodule, ALICE 上只做了 `git pull` 没有 `git submodule update`, 导致目录为空. 但 cellSAM 实际通过 `pip install` 装在 conda env 的 site-packages 中, 所以 `import cellSAM` 可用, 但修改 submodule 里的文件不影响 ALICE
+- **修复**: 所有源码修复直接针对 `tools/train_cellfinder.py` (在主 repo 里) 或通过 `sed` 修改 site-packages
+- **风险**: 低
+
+### 错误 #5: T33 `CUDA OOM` on L4 24GB
+- **根因**: CellFinder 原始 `num_query_position=3500` (为 LIVECell 等密集数据集设计), transformer self-attention 矩阵 3500² = 12.25M 元素/head, batch_size=4 时超出 L4 24GB
+- **修复**: 在 `train_cellfinder.py` 中重建 CellFinder, 将 `num_query_position` 从 3500 降为 50 (心肌细胞 ~10-30 个/张, 50 给 2x 余量)
+- **风险**: 中 — 预训练权重中 query-position-dependent 参数会因 shape 不匹配而跳过 (在 log 中有打印). 这意味着 query position embedding 是随机初始化的, 但因为整个 head 都在训练, 应该没问题
+
+### 错误 #6: T33 `NameError: name 'sigmoid_focal_loss' is not defined` ⚠️
+
+**详细解释**: 这是 pip 安装版与源码版的**函数可见性差异**。
+
+- `sigmoid_focal_loss()` 函数定义在 `cellSAM/AnchorDETR/models/segmentation.py:229`
+- `SetCriterion.loss_labels()` 在 `anchor_detr.py:192` 调用 `sigmoid_focal_loss(...)` — 它期望这个函数在**当前模块的全局命名空间**中可用
+- 但在 pip 安装版的 `anchor_detr.py` 中, 没有 `from .segmentation import sigmoid_focal_loss` 这行导入
+- 所以运行到 `loss_labels()` 时, Python 在 `anchor_detr` 模块的命名空间中找不到 `sigmoid_focal_loss`, 抛出 `NameError`
+- 这个 bug 在 CellSAM 官方推理流程中不触发, 因为推理不调用 `SetCriterion` (loss 只在训练时计算)
+- **修复**: 在 `train_cellfinder.py` 中内联定义 `sigmoid_focal_loss` (与 `segmentation.py` 中的实现完全一致), 然后 monkey-patch 注入到 `anchor_detr` 模块的命名空间
+- **风险**: 低 — 函数实现完全一致, 仅是注入位置不同
+
+### 请 A1 审核
+
+1. 以上 6 个修复是否正确, 有无遗漏风险?
+2. 错误 #3 (matcher.py) 和 #6 (sigmoid_focal_loss) 目前是运行时 patch, 是否需要更持久的修复方案?
+3. 错误 #5 (num_queries 3500→50) 降低后, 跳过的预训练权重是否影响收敛?
+
+---
+## [2026-03-07 20:52] A1(Codex) -> A2 + R1 -- paper_preparation 更新方案审计 + A2论文窗口交接
 
 - **task**: audit A2's `paper_preparation.md` update plan and prepare a fresh A2 handover packet for thesis writing
 - **status**: Completed
