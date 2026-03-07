@@ -1,8 +1,8 @@
 ﻿# CellSAM Project Blueprint
 
 > **Doc type**: Project overview (AI must-read)
-> **Last updated**: 2026-03-06
-> **Current phase**: T27a/T28 completed, T31 completed (Cellpose paper-aligned), T32/T34 planned, T30 LoRA running
+> **Last updated**: 2026-03-07
+> **Current phase**: T29/T30 结果整理中, T31 已完成并锁定 paper-aligned 口径, T32/T34 待执行
 
 ---
 
@@ -14,11 +14,11 @@
 |------------|------------|:-------:|:------:|
 | T27a | Plan B BF-only decoder-only | **0.643** | completed |
 | T28 | Plan B 3ch [BF,Actn2,DAPI] | **0.684** | completed |
-| T29a | Official BF [0,0,BF] | 0.642 (s42) | s123 running |
-| T29b | Official 3ch [0,DAPI,BF] | 0.665 (s42) | s123 running |
-| T29c | Official 3ch+Actn2 [Actn2,DAPI,BF] | 0.685 (s42) | s123 running |
-| T30 | LoRA Q/V on encoder (BF-only) | -- | running |
-| T31 | Cellpose paper-aligned baseline | 0.003 (test73, auto) | completed (needs v3+diameter200 supplement) |
+| T29a | Official BF [0,0,BF] | 0.642 (s42) | seed42 completed, seed123 待汇总 |
+| T29b | Official 3ch [0,DAPI,BF] | 0.665 (s42) | seed42 completed, seed123 待汇总 |
+| T29c | Official 3ch+Actn2 [Actn2,DAPI,BF] | 0.685 (s42) | seed42 completed, seed123 待汇总 |
+| T30 | LoRA on Q/V attention (BF-only) | -- | in progress |
+| T31 | Cellpose paper-aligned baseline | 0.273 (test73, v3.1.1 d=250) | completed |
 | T32 | Stage2-like neck-only baseline (50ep, GT boxes) | -- | planned |
 | T34 | T27a official-path eval ablation | -- | planned |
 
@@ -33,7 +33,7 @@
 
 | Method | Type | PQ | BM-Dice | AJI |
 |--------|------|----|---------|-----|
-| Cellpose v4 | E2E | 0.000 | 0.053 | 0.025 |
+| Cellpose (paper-aligned, T31 best) | E2E | 0.273 | 0.505 | 0.285 |
 | SAMCell | E2E | 0.000 | 0.008 | 0.004 |
 | CellSAM (pretrained) | Oracle | 0.434 | 0.682 | 0.499 | ⚠️ T24 修正: 官方推理路径 |
 | SAM ViT-B | Oracle | 0.286 | 0.631 | 0.440 |
@@ -42,7 +42,7 @@
 | **Ours (T27a Plan B)** | **Oracle** | **0.638** | **0.791** | **—** | **🏆 超越 MedSAM** |
 | Ours | E2E | 0.180 | 0.567 | 0.338 |
 
-> ⚠️ MedSAM Oracle > Ours Oracle — 但 MedSAM 无检测能力，Ours 是唯一 E2E 方案
+> 注: 旧的 `Cellpose v4 auto` / BF-only baseline 已弃用；论文与对外汇报统一引用 T31 的 paper-aligned 结果。
 
 **Box Clipping 消融 (T19-abl)**: with_clip PQ=0.466 > no_clip PQ=0.437 (-6.2%) → clipping 有防御价值
 
@@ -68,14 +68,14 @@
 
 | 任务 | 执行者 | 状态 |
 |------|---------|------|
+| T29 官方通道编码实验 | A2 | 🔄 seed42 已完成, seed123 结果待统一回填 |
+| T30 LoRA on Q/V | A2 | 🔄 训练/评估结果待汇总 |
 | T32 Stage2-like neck-only baseline | A2 | 📋 方案已建, 待最小代码改动后执行 |
 | T34 官方路径评估消融 | A2 | 📋 方案已建, 待实现 A/B/C 三臂评估脚本 |
-| T18 三通道消融 | A2 | ✅ 5/6 done: T18-C PQ=**0.500** (best!), seed123 补跑 Job 1036799 |
-| T17 Training Curves | A2 | ✅ 工具完成, Phase1 图 ✅, 待下载 Best Config 日志 |
-| T20 Attention 可视化 | A1 | 🔄 脚本就绪, 待 T18 完成后执行 |
-| T12 消融 + Best Config | A2 | ✅ 完成 |
-| T16 Baseline 对比 | A2 | ✅ 完成 |
-| **T11 LoRA Encoder** | **A2** | **⏳ 设计完成, 待 R1 审核 → 实施** |
+| T20 Attention 可视化 | A1 | 🔄 脚本就绪, 待主线实验状态稳定后执行 |
+| T31 Cellpose paper-aligned | A2 | ✅ 完成并锁定当前论文口径 |
+| T18 三通道消融 | A2 | ✅ 完成, 最佳单跑 PQ=0.500 |
+| T11 LoRA 实验族 | A2 | ✅ 第一轮完成, 后续以 T30 继续 |
 | 论文文档合并 | A1 | ✅ paper_writing_plan → paper_preparation §7 |
 
 ### ⚠️ 已修复: GT 框面积过滤 Bug (2026-02-13)
@@ -125,7 +125,7 @@ conda activate cellsam
 | `docs/task_backlog.md` | 🟢 Active | 短期/长期待办与完成标准 |
 | `docs/progress_timeline_2.13.md` | 🟢 Active | 导师汇报时间线 + 后续计划 |
 | `docs/phase2_design.md` | 🟢 Active | Phase 2 设计与执行计划 |
-| [`docs/t11_lora_design.md`](docs/t11_lora_design.md) | 🟢 Active | **T11 LoRA Encoder 设计文档** (待 R1 审核) |
+| [`docs/t11_lora_design.md`](docs/t11_lora_design.md) | 🟢 Active | **LoRA / T11-T30 设计与实现参考** |
 | `docs/agent_management.md` | 🟢 Active | **多 Agent 协作管理规范 SSOT** |
 | `docs/agent_inbox.md` | 🟢 Active | **Agent 间异步通信信箱** |
 | `docs/conversation_handover/HANDOVER_STANDARD.md` | 🟢 Active | **长对话窗口交接规范 SSOT** |
@@ -217,20 +217,8 @@ conda activate cellsam
 
 ## 关键文档链接 📚
 
-| 文档 | 用途 | 更新频率 |
-|------|------|----------|
-| [codex_claude_seg.md](docs/codex_claude_seg.md) | **Codex+Claude 联合文档 (持续更新)** ⭐ | 每阶段 |
-| [error_log_and_checklist.md](docs/error_log_and_checklist.md) | 历史错误归纳 + 训练前检查清单 | 每次发现错误 |
-| [experiments_log.md](docs/experiments_log.md) | 实验记录 (E1-E30+ & Phase1) | 每次实验 |
-| [dataset_parameters.md](docs/dataset_parameters.md) | 数据集统计参数 (分辨率、阈值) | 参数变化时 |
-| [inference_standard.md](docs/inference_standard.md) | **推理标准** (Best-Match Dice) ⭐ | 推理方法变更时 |
-| [naming_convention.md](docs/naming_convention.md) | **命名规范** (模型/实验/检测方案) ⭐ | 新方案时 |
-| [progress_timeline_2.13.md](docs/progress_timeline_2.13.md) | 导师汇报材料 + 2.13 时间线 | 里程碑更新时 |
-| [phase2_design.md](docs/phase2_design.md) | Phase 2 方案与实验路线 | Phase 2 变更时 |
-| [conversation_handover/HANDOVER_STANDARD.md](docs/conversation_handover/HANDOVER_STANDARD.md) | 对话窗口交接规范 + 关窗前检查 | 每次窗口切换前后 |
-| [phase1_design.md](docs/phase1_design.md) | Phase 1 实施记录 | 回溯 Phase 1 时 |
-| [boundary_enhancement_design.md](docs/boundary_enhancement_design.md) | Loss 函数设计文档 | 设计变更时 |
-| [code_inventory.md](docs/code_inventory.md) | 代码文件清单 + 版本记录 | 新增/修改代码时 |
+> 为避免和上方“核心文档状态”重复维护，这里不再保留第二份全量清单。  
+> 当前入口以“核心文档状态”表 + `docs/technical/README.md` + `docs/task_backlog.md` 为准。
 
 ---
 
@@ -239,11 +227,8 @@ conda activate cellsam
 ```
 src/
 ├── detection/           # ✅ 已完成
-│   └── dapi.py          # Hybrid DAPI+Actn2 检测 (v4)
-│                        # - detect_nuclei (default: min/max=200/10000)
-│                        # - merge_close_nuclei (1.2x diameter)
-│                        # - detect_with_adaptive_box (default search_radius=256)
-│                        # - DAPI/Adaptive 参数待 val→test 统一锁定
+│   ├── dapi.py          # DAPI / Adaptive 检测实现
+│   └── profiles.py      # 检测参数 SSOT (当前仅 `locked_eval` 活跃)
 ├── inference/           # ✅ 已完成
 │   ├── core.py          # 统一推理核心 (segment_with_boxes)
 │   ├── postprocess.py   # 6步边界平滑
@@ -277,20 +262,22 @@ tools/
 └── run_inference.py               # [DEPRECATED] 旧推理入口，仅兼容提示
 
 scripts/
-├── train_phase1_full.sh   # ALICE A100 SLURM 脚本
-├── train_phase1_l4.sh     # ALICE L4 SLURM 脚本
-├── train_phase2a.sh       # 🔄 P2-A L4 SLURM 脚本 (含 gradient gate)
-└── train_phase2a_a100.sh  # 🔄 P2-A A100 对照 SLURM 脚本
+├── README.md              # Active / legacy 脚本索引 SSOT
+├── train_t27a_*.sh        # 主线 Plan B 训练脚本
+├── train_t29*.sh          # 官方通道编码实验脚本
+├── train_t30_*.sh         # LoRA Q/V 训练脚本
+└── train_phase1*.sh       # Phase 1 / 历史脚本
 
 docs/
-├── claude_pipeline_analysis.md  # 三通道设计方案 ⭐
+├── technical/                   # 技术分析/技术问答统一目录
+│   ├── README.md                # 技术文档入口
+│   └── adapter_cellsam_tech_reference.md  # Adapter / 通道映射 / CellSAM 数据说明
 ├── dataset_parameters.md        # 数据集参数
 ├── design_decisions.md          # 设计决策
 ├── troubleshooting.md           # 常见问题
 ├── error_log_and_checklist.md   # ⭐ 错误归纳 + 训练前检查清单
 ├── alice_quick_reference.md     # ALICE HPC 快速参考
 ├── code_inventory.md            # 代码清单和归档状态
-├── technical/                   # 技术分析/技术问答统一目录
 └── archive/                     # 过时文档归档
 ```
 
@@ -335,14 +322,14 @@ docs/
 | 决策 | 选择 | 理由 | 来源 |
 |------|------|------|------|
 | **检测方案** | Hybrid DAPI+Actn2 | 定位+形状 | `dapi.py` |
-| **边缘过滤** | 50px | 误删 1.3% | `analyze_stats_final.py` |
+| **边缘过滤** | `edge_margin=20` | 当前 `locked_eval` 统一检测口径 | `src/detection/profiles.py` |
 | **双核合并** | 1.2x 直径 | 防止误合并邻居 | `dapi.py` |
 | **核面积阈值 (DAPI)** | 默认 200/10000；评测锁定 1500/20000 + relative_1.2x | 默认用于运行；锁定参数用于统一评测（已封板） | `dapi.py`, `experiments/ablation_dapi_val/results.json`, `experiments/ablation_detection_lock/results.json` |
-| **Adaptive 锁定参数** | radius=200, min_zlines=5, zline_threshold=0.01 | test73 对比参数（已封板） | `experiments/ablation_adaptive_val/results.json`, `experiments/ablation_detection_lock/results.json` |
+| **Adaptive 锁定参数** | radius=160, min_zlines=5, zline_threshold=0.05 | T3b + test 锁定后的当前口径 | `src/detection/profiles.py`, `experiments/ablation_adaptive_val/results.json`, `experiments/ablation_detection_lock/results.json` |
 | **检测参数最终锁定** | E34b(val71) + test73 单次封板 | 避免 test 泄漏，统一对比口径；当前 winner 为 DAPI | `experiments/ablation_detection_e34b/results.json`, `experiments/ablation_detection_lock/results.json` |
-| **三通道输入** | 语义映射+Adapter | 适配预训练 ViT | `claude_pipeline_analysis.md` |
+| **三通道输入** | 语义映射 + Adapter | 适配预训练 ViT，技术说明已迁入 `docs/technical/` | `docs/technical/adapter_cellsam_tech_reference.md` |
 | 训练框 | GT 框 | 解耦训练 | `design_decisions.md` |
-| 冻结策略 | 仅训练 Decoder | 防过拟合 | `design_decisions.md` |
+| 冻结策略 | 主线为 decoder-only；其他实验按各自方案文档执行 | 保持主线与对照实验可分辨 | `design_decisions.md`, `docs/experiments/active/` |
 
 ---
 
@@ -357,7 +344,7 @@ docs/
 | **P0** | [code_inventory.md](docs/code_inventory.md) | 当前活跃代码入口速查 |
 | **P0** | [conversation_handover/HANDOVER_STANDARD.md](docs/conversation_handover/HANDOVER_STANDARD.md) | 新窗口交接规范 + 必读顺序 |
 | **P0** | [error_log_and_checklist.md](docs/error_log_and_checklist.md) | ⚠️ **训练前必读** - 错误归纳 + 检查清单 |
-| P1 | [claude_pipeline_analysis.md](docs/claude_pipeline_analysis.md) | 三通道设计详细方案 |
+| P1 | [technical/adapter_cellsam_tech_reference.md](docs/technical/adapter_cellsam_tech_reference.md) | 三通道 / Adapter / CellSAM 数据技术说明 |
 | P1 | [dataset_parameters.md](docs/dataset_parameters.md) | 数据集统计和参数 |
 | P1 | [technical/README.md](docs/technical/README.md) | 技术分析文档统一入口 |
 | P2 | [design_decisions.md](docs/design_decisions.md) | 设计决策的"为什么" |
@@ -384,7 +371,7 @@ docs/
 | **T19-abl** | 02-22 | Box Clipping 消融 | clip PQ=0.466 > no-clip 0.437 ✅ |
 | **T12** | 02-23 | Loss 消融 (7组×2seed) | posw=10 (+4.1pp), contour有害 (+2.3pp) ⭐ |
 | **BestCfg** | 02-24 | Best Config 验证 (4 runs) | **PQ=0.484** (+3.1pp vs Phase1) ⭐ |
-| **T18** | 02-24 | 三通道消融 (2ch/3ch/no-adapter) | 🔄 训练中 (ALICE) |
+| **T18** | 02-24~25 | 三通道消融 (2ch/3ch/no-adapter) | ✅ 完成, 最佳单跑 PQ=0.500 |
 
 > 完整记录: [experiments_log.md](docs/experiments_log.md)
 
@@ -417,7 +404,9 @@ python tools/verify_training_config.py
 
 | 日期 | 内容 |
 |------|------|
-| 2026-02-24 | **T12 消融完成** (posw=10+contour=off 高置信); **Best Config 验证** PQ=0.484; **T18 三通道部署** (ALICE训练中); 通道顺序改 R=BF/G=Actn2/B=DAPI; 文档同步 |
+| 2026-03-07 | `CLAUDE.md` 口径清洗: 修正 T31 / T18 / 检测锁定参数 / 技术文档入口，删除重复且易过期的旧摘要 |
+| 2026-03-05 | **T31 完成**: Cellpose paper-aligned baseline 锁定当前可追溯结果；补充 Cellpose 版本差异注意事项 |
+| 2026-02-24 | **T12 消融完成** (posw=10+contour=off 高置信); **Best Config 验证** PQ=0.484; **T18 三通道实验启动** (后续已完成); 通道顺序改 R=BF/G=Actn2/B=DAPI; 文档同步 |
 | 2026-02-22 | **T16 Baseline 完成** (6 methods); Box Clipping 消融; Cellpose d=200 补充 |
 | 2026-02-19 | T3b Adaptive radius 重扫完成; 文档优化 (TOC + 早期实验归档) |
 | 2026-02-16 | P2-A Fix3 审核完成, **P2-A 终止** |

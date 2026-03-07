@@ -2,7 +2,12 @@
 
 > **状态**: 🟢 Active — 数据集参数参考文档
 > **数据集**: Allen Segmented Fields (Full, 478 张)
-> **最后更新**: 2026-03-06
+> **最后更新**: 2026-03-07
+
+> **阅读优先级**:
+> 1. 当前有效 split: 第 2.1 节 (`train/val/test = 334/71/73`)
+> 2. 当前统一检测参数: 第 6-9 节中标记为 `locked_eval` 的 active 口径
+> 3. Dev50 / split_v1 / 早期统计: 仅用于历史追溯，不作为当前实验默认值
 
 ---
 
@@ -75,7 +80,7 @@
 
 ---
 
-## 5. 细胞核统计 (DAPI, Dev Set 50 张)
+## 5. 细胞核统计 (DAPI, Dev Set 50 张, Historical for parameter derivation)
 
 > ⚠️ **分辨率换算**: 训练使用 1024×1024。下表为两种分辨率对比。  
 > 说明: 此处原始分辨率表头曾误写为 1608px，已按 2026-02-05 结论统一为 1736×1776 口径。
@@ -204,14 +209,14 @@
 
 ---
 
-## 10. 训练相关参数
+## 10. 训练相关参数 (Index / Historical Reference)
 
 > 训练参数的 SSOT 为 config YAML 文件，本节仅作索引。
 
 | 阶段 | Config 文件 | 关键改动 |
 |------|-----------|----------|
 | **Phase 1** | `src/config/phase1_rebalance_l4.yaml` | `pos_weight` 10→2, `boundary_weight` 0.5→1.5, `contour_weight` 0.1→0.3, PQ early stop ON |
-| **Phase 2A (fix1)** | `src/config/phase2a_neighbor_overlap.yaml` | +Neighbor(0.3) +Overlap(0.1), checkpoint=P1 best |
+| **Phase 2A (terminated)** | `src/config/phase2a_neighbor_overlap.yaml` | 历史负结果路线，已终止，不作为当前主线 |
 
 | 不变参数 | 值 | 说明 |
 |---------|-----|------|

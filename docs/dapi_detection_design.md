@@ -2,9 +2,16 @@
 
 > **维护者**: Research Documentation Architect
 > **创建日期**: 2026-01-31
-> **最后更新**: 2026-03-06
+> **最后更新**: 2026-03-07
 > **代码位置**: `src/detection/dapi.py`
 > **当前 SSOT**: 统一评估/封板参数以 `src/detection/profiles.py` 的 `locked_eval` 为准；`src/detection/dapi.py` 仅代表运行时默认值
+
+> **阅读优先级**:
+> 1. 当前统一评估/封板口径: `src/detection/profiles.py::locked_eval`
+> 2. 当前运行时默认值: 本文第 3 节 + `src/detection/dapi.py`
+> 3. 历史调参与诊断记录: 本文第 2 节 / 第 6.2 节 / 第 8 节
+>
+> 除非明确写“Historical”或“诊断回合”，否则不要把早期参数表述为当前 active 设置。
 
 ---
 
@@ -229,7 +236,7 @@ else:  # 椭圆核
 > T4 更新 (2026-02-16): 检测评估脚本已接入 profile 防呆机制；当前仅 `locked_eval` 作为活跃 profile，运行时默认值仅保留在 `dapi.py` 代码签名中供开发参考。实现见 `src/detection/profiles.py`。
 > T3b 更新 (2026-02-19): 半径重扫后 Adaptive 在 `val(71)` 上提升到 F1=0.7800，但该结果属于封板后诊断回合，`test(73)` 锁定结果不回写。
 
-### 3.2 Adaptive 退化诊断补充 (T3, 2026-02-16)
+### 3.2 Adaptive 退化诊断补充 (T3, 2026-02-16, Historical Diagnosis)
 
 > 目标: 判断 B2/B3 不敏感是“参数本身不敏感”还是“fallback 掩盖差异”。
 
@@ -244,7 +251,9 @@ else:  # 椭圆核
   - `mean_zlines` 仍较高（B2 均值约 `1425.4`，B3 区间约 `1070.0-1571.2`）
 - 诊断结论:
   - `cause_code = zline_saturated`
-  - 当前 `search_radius=200` 下，Adaptive 始终走自适应分支，B2/B3 的阈值变化无法有效改变框生成，故表现为“近似平坦”。
+  - 该结论针对 **当时 E34 候选参数** `search_radius=200` 的诊断回合成立；
+  - 后续 T3b 已将当前锁定值更新为 `search_radius=160`, `min_zlines=5`, `zline_threshold=0.05`；
+  - 因此本节只用于解释“为何 E34 的 B2/B3 看起来不敏感”，不是当前 active 参数说明。
 
 ---
 
@@ -353,10 +362,10 @@ def create_bounding_boxes(cell_groups, image_shape, ...):
 
 ---
 
-## 七、待改进
+## 七、待改进 / 当前限制
 
 1. **早期实验无结果文件**: E03 参数来源不可追溯（历史遗留）
-2. **Adaptive 方案需迭代**: 当前 test73 F1=0.7502，落后 DAPI 的 0.8033
+2. **Adaptive 方案仍落后 DAPI**: 历史 test 封板记录中 Adaptive F1=0.7502，落后 DAPI 0.8033；T3b 已改善 val71，但尚未形成新的 test 锁定
 3. **参数治理需持续**: 保持 runtime default 与 locked eval 的双轨并避免混用
 
 ---
