@@ -1,56 +1,68 @@
 # T32: Stage2-like Neck-Only Baseline
-# Purpose: Surrogate for CellSAM's Stage2 training approach
+#
+# Purpose: Surrogate for CellSAM's Stage2 training approach.
 # Only the encoder neck is trainable; everything else is frozen.
 # This tests whether neck alignment alone can improve segmentation.
-
-output:
-  experiment_name: "T32_NeckOnly_Baseline"
-  checkpoint_dir: "checkpoints"
-
-model:
-  # Freeze everything except neck
-  freeze_encoder: true       # Freeze entire encoder (including neck initially)
-  freeze_decoder: true       # Freeze decoder (pure neck-only baseline)
-  train_neck_only: true      # Then unfreeze only neck params
-  use_lora: false
-  use_adapter: false
-  # no checkpoint — start from pretrained CellSAM
-  checkpoint: null
+#
+# Based on T27a YAML structure, only changes:
+#   1. freeze_decoder: true (T27a: false)
+#   2. train_neck_only: true (T27a: N/A)
+#   3. Simplified loss: BCE only (no Focal/Boundary/AJI/IoU Head)
+#   4. epochs: 50 (T27a: 80)
 
 data:
-  image_dir: "data/processed/images"
-  mask_dir: "data/processed/masks"
-  train_ids: "data/splits/train_ids.txt"
-  val_ids: "data/splits/val_ids.txt"
-  image_size: 1024
-  num_workers: 4
+  splits_dir: "data/splits"
+  raw_data_dir: "data/raw/allen_segmented_fields_full"
+  processed_data_dir: "data/processed"
+  target_size: [1024, 1024]
+  max_boxes_per_image: 30
+  use_bf_only: true
+  use_semantic_mapping: false
+
+model:
+  checkpoint: null
+  freeze_encoder: true
+  freeze_decoder: true
+  train_neck_only: true
+  use_adapter: false
+  use_lora: false
 
 training:
-  batch_size: 4
   epochs: 50
-  lr: 1e-4
-  weight_decay: 1e-4
+  batch_size: 4
+  learning_rate: 0.0001
+  weight_decay: 0.0001
   warmup_epochs: 5
+  early_stop_patience: 15
+  use_pq_early_stop: true
   seed: 42
-  use_amp: true
-  patience: 15                # PQ early stopping
-  iou_weight: 0.0            # No IoU head loss (decoder frozen, IoU head not learning)
-  optimizer: "adamw"
-  scheduler: "cosine"
+  iou_weight: 0.0
 
 loss:
-  pos_weight: 1.0             # Neutral BCE weight (Stage2-like conservative)
+  type: "combined"
+  pos_weight: 1.0
   boundary_weight: 0.0
   use_boundary: false
-  aji_weight: 0.0
   use_aji: false
-  use_focal: false
+  aji_weight: 0.0
+  box_expand: 0.1
+  use_topology: false
+  topology_weight: 0.0
+  use_size: false
+  size_weight: 0.0
   use_contour: false
-  # Pure BCE + Dice only — Stage2-like surrogate baseline
+  contour_weight: 0.0
+  use_focal: false
+  focal_weight: 0.0
+  focal_alpha: 0.25
+  focal_gamma: 2.0
 
-augmentation:
-  random_rotate90: true
-  horizontal_flip: true
-  vertical_flip: true
-  shift_scale_rotate: true
-  brightness_contrast: true
+optimizer:
+  type: "adamw"
+  scheduler: "cosine_warmup"
+
+output:
+  checkpoint_dir: "checkpoints"
+  save_every: 5
+  keep_last_checkpoints: 3
+  experiment_name: "T32_NeckOnly_Baseline"

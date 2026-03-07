@@ -24,7 +24,7 @@ eval "$(conda shell.bash hook)"
 conda activate cellsam
 set -u
 
-export PYTHONPATH="${HOME}/CellSam/src:${HOME}/CellSam:${PYTHONPATH:-}"
+export PYTHONPATH="${HOME}/CellSam/src:${HOME}/CellSam:${HOME}/CellSam/cellSAM_source:${HOME}/CellSam/cellSAM_source/cellSAM:${PYTHONPATH:-}"
 cd ~/CellSam
 mkdir -p logs checkpoints
 
