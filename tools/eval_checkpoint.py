@@ -20,6 +20,7 @@ import sys
 import time
 from pathlib import Path
 
+import yaml
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
@@ -27,11 +28,17 @@ from torch.utils.data import DataLoader
 # Add project paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
+sys.path.insert(0, str(PROJECT_ROOT / "cellSAM_source"))
 
-from data.dataset import AllenCellDataset, load_config
+from augmented_dataset import AugmentedAllenDataset, collate_fn, load_split_ids
 from inference.core import segment_with_boxes, InferenceConfig
 from metrics.instance_metrics import compute_all_metrics
-from model_utils import create_model
+from cellSAM import get_model
+
+
+def load_config(config_path):
+    with open(config_path) as f:
+        return yaml.safe_load(f)
 
 
 def evaluate_split(model, dataloader, device, box_expand=0.1, split_name="val"):
@@ -107,6 +114,10 @@ def evaluate_split(model, dataloader, device, box_expand=0.1, split_name="val"):
 
 
 def main():
+    import numpy as np
+    import torch
+    from torch.utils.data import DataLoader
+
     parser = argparse.ArgumentParser(description="Evaluate checkpoint with full metrics")
     parser.add_argument("--checkpoint", required=True, help="Path to best_model.pt")
     parser.add_argument("--config", required=True, help="Path to training YAML config")
@@ -120,9 +131,11 @@ def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     config = load_config(args.config)
 
-    # Load model
+    # Load model (same as train.py)
     print(f"Loading checkpoint: {args.checkpoint}")
-    model = create_model(config, device)
+    model = get_model()
+    model.adv_mode = True
+    model = model.to(device)
     checkpoint = torch.load(args.checkpoint, map_location=device, weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'], strict=False)
     model.eval()
@@ -142,24 +155,24 @@ def main():
         print(f"Evaluating split: {split}")
         print(f"{'='*60}")
 
-        # Create dataset for this split
-        split_file = Path(config['data']['splits_dir']) / f"{split}.txt"
-        if not split_file.exists():
-            print(f"  Skip: {split_file} not found")
+        # Load split IDs
+        split_ids = load_split_ids(split, config['data']['splits_dir'])
+        if not split_ids:
+            print(f"  Skip: no IDs for split '{split}'")
             continue
 
-        ds = AllenCellDataset(
-            splits_dir=config['data']['splits_dir'],
-            raw_data_dir=config['data']['raw_data_dir'],
-            processed_data_dir=config['data']['processed_data_dir'],
-            split=split,
+        # Create dataset (no augmentation for eval)
+        ds = AugmentedAllenDataset(
+            data_dir=config['data']['processed_data_dir'],
+            sample_ids=split_ids,
             target_size=tuple(config['data']['target_size']),
             max_boxes_per_image=config['data'].get('max_boxes_per_image', 30),
             use_bf_only=config['data'].get('use_bf_only', True),
             use_semantic_mapping=config['data'].get('use_semantic_mapping', False),
+            is_training=False,
         )
         loader = DataLoader(ds, batch_size=args.batch_size, shuffle=False,
-                           num_workers=4, pin_memory=True)
+                           num_workers=4, pin_memory=True, collate_fn=collate_fn)
         print(f"  Dataset: {len(ds)} images")
 
         t0 = time.time()
@@ -204,3 +217,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

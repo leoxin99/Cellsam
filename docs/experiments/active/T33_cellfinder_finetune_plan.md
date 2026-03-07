@@ -74,17 +74,19 @@ CellFinder 输入通过 `sam_bbox_preprocessing` 预处理（`cellSAM_source/cel
 | lr (decoder head) | 1e-4 | 与论文一致 |
 | lr (backbone) | 0 (冻结) | 数据量不足 |
 | batch_size | 4 | GPU 内存限制 |
-| early stop | val mAP patience=20 | |
-| num_queries | 300 | 工程假设: 每张最多 ~40 cells (注: 官方 CellFinder=3500, 此处缩减是非论文一致的工程决策) |
+| early stop | val F1@0.5 patience=20 | 实际实现为 F1 监控 (COCO mAP 未实现) |
+| num_queries | 50 | 心肌细胞数据 ~10-30 cells/image, 50 给 2x 余量 (注: 原 CellFinder=3500, 方案文档写的 300 已改为 50) |
 | scheduler | CosineAnnealingWarmRestarts | |
 | Loss | Focal CE + L1 + GIoU | 与论文一致 |
 
-### 2.5 评估指标
+### 2.5 评估指标 (实际实现)
 
-- COCO mAP (IoU 0.5:0.95)
-- AP@0.5
-- AP@0.75
-- per-class precision/recall
+- F1 @ IoU=0.5 (主指标, 用于早停)
+- Precision @ IoU=0.5
+- Recall @ IoU=0.5
+
+> [!NOTE]
+> 方案文档原设计的 COCO mAP / AP50 / AP75 未实现。当前代码使用 F1 监控。
 
 ### 2.6 需要的代码修改
 
@@ -92,7 +94,7 @@ CellFinder 输入通过 `sam_bbox_preprocessing` 预处理（`cellSAM_source/cel
    - 使用 `SetCriterion` + Hungarian matcher
    - 数据加载: 从 processed data 读取, mask→box 转换
    - 冻结 backbone, 训练 decoder head
-   - 验证集评估: COCO mAP
+   - 验证集评估: F1/Precision/Recall @ IoU=0.5
 
 2. **数据格式适配**:
    - AnchorDETR 期望: `targets = [{"labels": int_tensor, "boxes": float_tensor(cx,cy,w,h)}]`

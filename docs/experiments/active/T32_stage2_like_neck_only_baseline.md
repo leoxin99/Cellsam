@@ -99,9 +99,9 @@ CellSAM 论文 Stage2 文字描述是“冻结 SAM-ViT 与 mask decoder，仅微
 | `freeze_decoder: true` | mask_decoder 全冻结 | ✅ |
 | Encoder forward WITH gradients | `train_one_epoch()` L328: `use_lora or train_neck_only` 条件 | ✅ |
 | Trainable audit | ALICE log: `[T32] Neck-only mode: unfroze 787,456 neck parameters` | ✅ |
-| Loss: BCE only | `use_boundary/aji/focal/contour = false`, `pos_weight=1.0` | ✅ |
+| Loss: Dice+BCE base (all extras off) | `CombinedLoss` base = 0.5*Dice + 0.5*BCE, extras disabled | ✅ |
 | pos_weight: 1.0 | YAML confirmed | ✅ |
-| 训练轮次: 50 epochs | 两个 seed 均跑满 50/50 | ✅ |
+| 训练轮次: 50 epochs | 两个 seed 均跑满 50/50 (已升至 80 重跑) | ✅ |
 
 > ALICE Log 确认: `[FROZEN] cellfinder: 0 / 102,122,590 trainable`, `encoder: 787,456 / 89,670,912 trainable`
 
@@ -114,20 +114,25 @@ CellSAM 论文 Stage2 文字描述是“冻结 SAM-ViT 与 mask decoder，仅微
 
 **Seed 42 最终 epoch**: Train Loss=0.2658, BM-1to1=0.7813, PQ=0.6148, Sem=0.8182
 
-### 与参照实验对比
+### 与参照实验对比 (val-only, 待 test73 补充)
 
-| 实验 | 方法 | Best PQ | Best Dice | 可训练参数 |
-|------|------|:-------:|:---------:|:---------:|
-| CellSAM 原始 (test73) | 无训练 (baseline) | 0.491 | 0.723 | 0 |
-| **T32 s42** | **Neck-only** | **0.617** | **0.783** | **787K** |
-| **T32 s123** | **Neck-only** | **0.623** | **0.787** | **787K** |
-| T27a s42 | Decoder-only | 0.617 | 0.783 | ~4.1M |
+| 实验 | 方法 | Val PQ | Val BM-Dice | 可训练参数 |
+|------|------|:------:|:-----------:|:---------:|
+| CellSAM 原始 (val71) | 无训练 (baseline) | 0.649 | 0.798 | 0 |
+| **T32 s42** | **Neck-only (50ep)** | **0.617** | **0.783** | **787K** |
+| **T32 s123** | **Neck-only (50ep)** | **0.623** | **0.787** | **787K** |
+| T27a s42 | Decoder-only (80ep) | 0.649 | 0.798 | ~4.1M |
+
+> [!WARNING]
+> T32(50ep) vs T27a(80ep) 非同口径比较。T32 已升至 80 epochs 重跑 (#1143155/6)。
+> CellSAM baseline 数值已改用 val71 口径 (非 test73)。
 
 ### 初步结论
 
-1. **Neck-only 可行**: 787K 参数即可将 PQ 从 0.491 提升至 0.62，相当显著
-2. **与 T27a 对比惊人接近**: T32 PQ ≈ T27a PQ (0.617 vs 0.617)，尽管 T32 仅有 T27a ~19% 的参数量
-3. **两 seed 一致性极好**: PQ 差异仅 0.006 (0.617 vs 0.623)
+1. **Neck-only 可行**: 787K 参数即可达到 PQ ≈ 0.62 (val), 显著高于随机
+2. **与 T27a 仍有差距**: T32(50ep) PQ ≈ 0.62 vs T27a(80ep) PQ ≈ 0.65, 差 ~0.03. 需 80ep 重跑后再对比
+3. **两 seed 一致性好**: PQ 差异仅 0.006 (0.617 vs 0.623)
+4. **Loss 类型修正**: 实际使用 Dice+BCE base loss (非纯 BCE), extras (boundary/aji/focal/contour) 全关
 4. **未触发 early stopping**: 50 epoch 全跑完，可能仍有提升空间
 
 > ⚠️ 待 A1 审核: (1) T27a 正式对齐口径确认 (2) T32 是否需要 val=71 + test=73 评估 (3) 这些 PQ 值是否包含 F1/Precision/Recall
