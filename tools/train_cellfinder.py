@@ -29,6 +29,24 @@ from cellSAM.model import get_model
 from cellSAM.AnchorDETR.models.anchor_detr import SetCriterion
 from cellSAM.AnchorDETR.models.matcher import HungarianMatcher
 
+# Fix: pip-installed anchor_detr.py may lack sigmoid_focal_loss in module scope.
+# SetCriterion.loss_labels() calls it as a bare name at line 192.
+# Define inline (avoids segmentation.py import chain issues) and inject.
+import cellSAM.AnchorDETR.models.anchor_detr as _anchor_detr_mod
+if not hasattr(_anchor_detr_mod, 'sigmoid_focal_loss'):
+    import torch.nn.functional as _F
+    def sigmoid_focal_loss(inputs, targets, num_boxes, alpha=0.25, gamma=2):
+        prob = inputs.sigmoid()
+        ce_loss = _F.binary_cross_entropy_with_logits(inputs, targets, reduction="none")
+        p_t = prob * targets + (1 - prob) * (1 - targets)
+        loss = ce_loss * ((1 - p_t) ** gamma)
+        if alpha >= 0:
+            alpha_t = alpha * targets + (1 - alpha) * (1 - targets)
+            loss = alpha_t * loss
+        return loss.mean(1).sum() / num_boxes
+    _anchor_detr_mod.sigmoid_focal_loss = sigmoid_focal_loss
+    print("[T33] Patched sigmoid_focal_loss into anchor_detr module")
+
 
 # ================================================================
 # Dataset
