@@ -2,7 +2,7 @@
 #SBATCH --job-name=t32_s42_l4
 #SBATCH --partition=gpu-l4-24g
 #SBATCH --gres=gpu:1
-#SBATCH --time=12:00:00
+#SBATCH --time=20:00:00
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=8
 #SBATCH --output=logs/t32_s42_l4_%j.log

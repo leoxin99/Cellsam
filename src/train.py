@@ -587,6 +587,9 @@ def validate(model, dataloader, criterion, device, adapter=None, use_pq=False, b
     total_pq = 0.0
     total_semantic_dice = 0.0
     total_conflict_pixels = 0
+    total_tp = 0
+    total_fp = 0
+    total_fn = 0
     num_samples = 0
     
     # 统一推理配置 (单一来源, 仅 override box_expand from training config)
@@ -634,6 +637,9 @@ def validate(model, dataloader, criterion, device, adapter=None, use_pq=False, b
                 total_pq += metrics['pq']
                 total_semantic_dice += metrics['semantic_dice']
                 total_conflict_pixels += result.conflict_pixels
+                total_tp += metrics['tp']
+                total_fp += metrics['fp']
+                total_fn += metrics['fn']
                 num_samples += 1
     
     n = max(num_samples, 1)
@@ -644,6 +650,11 @@ def validate(model, dataloader, criterion, device, adapter=None, use_pq=False, b
     avg_conflict = total_conflict_pixels / n
     avg_gap = avg_bm_coverage - avg_bm_1to1
     
+    # Detection metrics: F1 (=RQ), Precision, Recall
+    precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 0.0
+    recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    
     # 返回完整诊断信息
     return {
         'bm_1to1': avg_bm_1to1,
@@ -652,6 +663,12 @@ def validate(model, dataloader, criterion, device, adapter=None, use_pq=False, b
         'pq': avg_pq,
         'semantic_dice': avg_semantic_dice,
         'conflict': avg_conflict,
+        'f1': f1,
+        'precision': precision,
+        'recall': recall,
+        'tp': total_tp,
+        'fp': total_fp,
+        'fn': total_fn,
     }
 
 
@@ -784,6 +801,9 @@ def main():
         val_coverage = val_metrics['bm_coverage']
         val_gap = val_metrics['gap']
         val_conflict = val_metrics['conflict']
+        val_f1 = val_metrics['f1']
+        val_precision = val_metrics['precision']
+        val_recall = val_metrics['recall']
         scheduler.step()
         
         # Select metric for early stopping
@@ -800,6 +820,7 @@ def main():
               f"Train Loss: {train_loss:.4f}, "
               f"BM-1to1: {val_dice:.4f}, BM-Cov: {val_coverage:.4f}, Gap: {val_gap:.4f}, "
               f"PQ: {val_pq:.4f}, Sem: {val_semantic_dice:.4f}, "
+              f"F1: {val_f1:.4f}, P: {val_precision:.4f}, R: {val_recall:.4f}, "
               f"Conflict: {val_conflict:.0f}, LR: {scheduler.get_last_lr()[0]:.6f}")
         
         # Save best model (including adapter if present)
