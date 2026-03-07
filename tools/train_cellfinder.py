@@ -101,8 +101,14 @@ def collate_fn(batch):
 # Model Setup
 # ================================================================
 
-def setup_model(device, freeze_backbone=True):
-    """Load CellSAM, extract CellFinder, freeze backbone."""
+def setup_model(device, freeze_backbone=True, num_queries=50):
+    """Load CellSAM, extract CellFinder, freeze backbone.
+    
+    Args:
+        num_queries: Override CellFinder's num_query_position (default 3500 → 50).
+                     Allen cardiomyocyte data has ~10-30 cells per image,
+                     so 50 queries is sufficient (2x headroom).
+    """
     model = get_model()
     model.adv_mode = True
     model = model.to(device)
@@ -110,6 +116,44 @@ def setup_model(device, freeze_backbone=True):
     cellfinder = model.cellfinder
     if cellfinder is None:
         raise RuntimeError("CellSAM model has no cellfinder — check get_model()")
+
+    # Rebuild CellFinder with reduced num_queries if needed
+    original_nq = cellfinder.args.num_query_position
+    if num_queries != original_nq:
+        print(f"[T33] Rebuilding CellFinder: num_queries {original_nq} → {num_queries}")
+        # Save pretrained weights
+        old_state = cellfinder.state_dict()
+        # Patch args and rebuild
+        cellfinder.args.num_query_position = num_queries
+        from cellSAM.AnchorDETR.models.anchor_detr import AnchorDETR
+        from cellSAM.AnchorDETR.models.backbone import SAMBackbone
+        from cellSAM.AnchorDETR.models.transformer import build_transformer
+        backbone = SAMBackbone("SAM", train_backbone=False, return_interm_layers=False,
+                               dilation=False, only_neck=False, freeze_backbone=False, sam_vit="vit_b")
+        transformer = build_transformer(cellfinder.args)
+        new_decode_head = AnchorDETR(backbone, transformer,
+                                      num_feature_levels=cellfinder.args.num_feature_levels, aux_loss=True)
+        from cellSAM.AnchorDETR.models.anchor_detr import PostProcess
+        new_postprocessors = {"bbox": PostProcess()}
+        cellfinder.decode_head = new_decode_head
+        cellfinder.postprocessors = new_postprocessors
+        # Load compatible weights (skip shape-mismatched params)
+        new_state = cellfinder.state_dict()
+        compatible = {}
+        skipped = []
+        for k, v in old_state.items():
+            if k in new_state and v.shape == new_state[k].shape:
+                compatible[k] = v
+            else:
+                skipped.append(k)
+        cellfinder.load_state_dict(compatible, strict=False)
+        if skipped:
+            print(f"[T33] Skipped {len(skipped)} params (query-dependent shape mismatch):")
+            for s in skipped:
+                print(f"  - {s}: {old_state[s].shape} → {new_state.get(s, 'missing')}")
+        cellfinder = cellfinder.to(device)
+        model.cellfinder = cellfinder
+        print(f"[T33] CellFinder rebuilt with {num_queries} queries")
 
     # Freeze backbone (ViT encoder inside CellFinder's SAMBackbone)
     if freeze_backbone:
@@ -351,6 +395,8 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--patience", type=int, default=20)
+    parser.add_argument("--num-queries", type=int, default=50,
+                        help="CellFinder num_query_position (default=50 for ~10-30 cells/image)")
     parser.add_argument("--output-dir", type=str, default=None)
     args = parser.parse_args()
 
@@ -404,7 +450,7 @@ def main():
     print(f"Train: {len(train_ds)}, Val: {len(val_ds)}")
 
     # Model
-    model, cellfinder = setup_model(device, freeze_backbone=True)
+    model, cellfinder = setup_model(device, freeze_backbone=True, num_queries=args.num_queries)
 
     # Criterion
     criterion, weight_dict = setup_criterion(device, num_classes=2)
