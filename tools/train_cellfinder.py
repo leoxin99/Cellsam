@@ -27,8 +27,10 @@ sys.path.insert(0, str(PROJECT_ROOT / "cellSAM_source"))
 sys.path.insert(0, str(PROJECT_ROOT / "cellSAM_source" / "cellSAM"))
 
 from cellSAM.model import get_model
-from cellSAM.AnchorDETR.models.anchor_detr import SetCriterion
-from cellSAM.AnchorDETR.models.matcher import HungarianMatcher
+# Import SetCriterion and HungarianMatcher directly from AnchorDETR
+# (not via cellSAM package) to avoid absolute import issues in matcher.py
+from AnchorDETR.models.anchor_detr import SetCriterion
+from AnchorDETR.models.matcher import HungarianMatcher
 
 
 # ================================================================
@@ -285,7 +287,7 @@ def evaluate(model, cellfinder, criterion, weight_dict, dataloader, device):
 
 def compute_simple_ap(preds, targets, iou_thresh=0.5):
     """Simple AP@0.5 — not full COCO AP but sufficient for monitoring."""
-    from cellSAM.AnchorDETR.util.box_ops import box_cxcywh_to_xyxy
+    from AnchorDETR.util.box_ops import box_cxcywh_to_xyxy
 
     all_tp = 0
     all_fp = 0

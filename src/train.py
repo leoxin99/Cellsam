@@ -292,7 +292,7 @@ def create_optimizer(model, config: dict, adapter=None):
     return optimizer, scheduler
 
 
-def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None, adapter=None, box_expand=0.1, use_lora=False, iou_weight=0.0):
+def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None, adapter=None, box_expand=0.1, use_lora=False, iou_weight=0.0, train_neck_only=False):
     """Train one epoch with optional mixed precision (AMP) and instance-level training.
     
     Key improvements:
@@ -324,7 +324,6 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
         # P0-1 fix: LoRA requires gradient flow through encoder
         # T32 fix: Neck-only also requires gradient flow (neck is inside encoder)
         from official_preprocess import official_preprocess_only, official_preprocess_and_encode
-        train_neck_only = config['model'].get('train_neck_only', False)
         if use_lora or train_neck_only:
             # LoRA/Neck-only: encoder forward WITH gradients
             # (LoRA params or neck params need autograd through the encoder graph)
@@ -777,7 +776,7 @@ def main():
         # Fix3: Update N/O loss weights based on delay schedule
         criterion.set_epoch(epoch)
         iou_weight = config['training'].get('iou_weight', 0.0)
-        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device, scaler=scaler, adapter=adapter, box_expand=box_expand, use_lora=config['model'].get('use_lora', False), iou_weight=iou_weight)
+        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device, scaler=scaler, adapter=adapter, box_expand=box_expand, use_lora=config['model'].get('use_lora', False), iou_weight=iou_weight, train_neck_only=config['model'].get('train_neck_only', False))
         val_metrics = validate(model, val_loader, criterion, device, adapter=adapter, use_pq=use_pq_early_stop, box_expand=box_expand)
         val_dice = val_metrics['bm_1to1']
         val_pq = val_metrics['pq']
