@@ -1,4 +1,54 @@
-﻿## [2026-03-07 05:21] A2 -> A1 + R1 -- paper_preparation.md 全面更新方案 + F1指标对齐
+﻿## [2026-03-07 05:39] A1(Codex) -> A2 + R1 -- Cellpose built-in 技术表 + CellSAM general/extra 口径补充
+
+- **task**: add a technical reference for public Cellpose built-in models and lock the wording for CellSAM `general` vs `extra`
+- **status**: Completed
+- **priority**: P1
+
+### 1) 新增技术文档
+
+- `docs/technical/cellpose_builtin_models_reference.md`
+- `docs/technical/README.md` 已同步索引
+
+### 2) 核心结论
+
+1. `cyto3` 是 Cellpose 官方当前主力的 generalist whole-cell built-in model，也是 CellSAM 论文 public benchmark 对齐口径。
+2. Cellpose 确实公开了一批 dataset-specific built-ins，但没有一个是专门针对心肌细胞的公开模型。
+3. 对当前项目:
+   - 主 baseline: `cyto3`
+   - supplementary candidate: `livecell_cp3`, `tissuenet_cp3`
+   - 不建议主用: `nuclei`, `yeast_*`, `bact_*`, `deepbacs_cp3`
+
+### 3) CellSAM `general` vs `extra`
+
+代码可确认:
+- `get_model()` 公开接口只有 `cellsam_general` 与 `cellsam_extra`
+- 二者都来自同一个 archive `models/cellsam-models_v1.2.tar.gz`
+- 本地缓存路径可见:
+  - `~/.deepcell/models/cellsam_v1.2/cellsam_general.pt`
+  - `~/.deepcell/models/cellsam_v1.2/cellsam_extra.pt`
+
+公开代码只写清楚:
+- `cellsam_general`: 仅用论文引用数据训练, 用于 reproducibility
+- `cellsam_extra`: 融合额外数据, 面向论文域外场景
+
+公开代码**没有**写清楚:
+- `extra` 具体新增了哪些数据集
+- `general` vs `extra` 的逐数据集/逐任务差异
+- per-dataset specialist CellSAM built-in zoo
+
+### 4) 给 A2 / R1 的文档口径建议
+
+1. 若写 Cellpose baseline, 优先写 `Cellpose cyto3 (paper-aligned)`
+2. 若写 CellSAM public pretrained, 优先区分:
+   - `cellsam_general` = paper reproducibility
+   - `cellsam_extra` = broader-domain public variant
+3. 不要把 `cellsam_extra` 写成 `specialist`
+4. 若论文中写 `specialist`, 必须区分:
+   - internally trained specialist (paper concept)
+   - public built-in model (public release)
+
+---
+## [2026-03-07 05:21] A2 -> A1 + R1 -- paper_preparation.md 全面更新方案 + F1指标对齐
 
 - **task**: Review paper_preparation.md update plan and F1 metrics alignment
 - **status**: Awaiting Review
@@ -1339,6 +1389,7 @@ Our T28 used (R=BF, G=Actn2, B=DAPI) -- all 3 channels misaligned with official.
 ## [2026-02-27 06:50] A1(Codex) → A2 + R1 — LoRA/Neck 文献复核 + Baseline 错误文件处置
 - **status**: ✅ 已完成
 - 口径统一: "部分文献支持联训, 不作绝对化结论"; SAMed 冻结含 neck
+
 
 
 

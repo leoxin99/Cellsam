@@ -1,7 +1,7 @@
 # 技术文档索引
 
 > **状态**: 🟢 Active
-> **最后更新**: 2026-03-06
+> **最后更新**: 2026-03-07
 > **用途**: 统一收纳项目技术分析、CellSAM 对照、训练策略问答与专题审计文档
 
 ---
@@ -34,6 +34,7 @@
 | `docs/technical/three_channel_design_evaluation.md` | 三通道设计与评估专题 |
 | `docs/technical/adapter_analysis.md` | Adapter 早期分析记录 |
 | `docs/technical/metrics_guide.md` | 指标说明与口径补充 |
+| `docs/technical/cellpose_builtin_models_reference.md` | Cellpose built-in models、适用域与心肌细胞适配性说明 |
 
 ---
 
@@ -44,6 +45,7 @@
 3. `docs/technical/technical_qa_2.27.md`
 4. `docs/technical/adapter_cellsam_tech_reference.md`
 5. `docs/technical/cellsam_methods_1page_table.md`
+6. `docs/technical/cellpose_builtin_models_reference.md`
 
 ---
 
