@@ -1,10 +1,12 @@
-# T33: CellFinder Fine-Tuning on Allen Cardiomyocyte Data
+# T33: CellFinder Allen-Specific Adaptation (Head-Only)
 
 ## 1. Background
 
 CellSAM Stage 1 jointly trains ViT backbone + CellFinder on object detection.
-We want to evaluate whether fine-tuning CellFinder on our Allen cardiomyocyte data
-improves detection, following the CellSAM paper Stage 1 methodology.
+We want to evaluate whether fine-tuning CellFinder's detection head on our Allen cardiomyocyte data
+improves detection. This is a **resource-constrained Allen adaptation inspired by Stage 1**,
+not a faithful reproduction of the paper's full Stage 1 (which jointly trains backbone + CellFinder
+on ~1.2M cells across multiple datasets).
 
 ### CellSAM Paper Stage 1 Training
 
@@ -60,7 +62,7 @@ def masks_to_boxes(instance_mask):
 
 ### 2.3 输入通道
 
-CellFinder 输入通过 `prep_2` 预处理（`cellsam_pipeline.py`中的`sam_bbox_preprocessing`）:
+CellFinder 输入通过 `sam_bbox_preprocessing` 预处理（`cellSAM_source/cellSAM/sam_inference.py:168`）:
 - 使用 CellSAM 官方通道编码: `[blank, DAPI, BF]`
 - 归一化到 [0,1] 后 resize to target_size
 
@@ -73,7 +75,7 @@ CellFinder 输入通过 `prep_2` 预处理（`cellsam_pipeline.py`中的`sam_bbo
 | lr (backbone) | 0 (冻结) | 数据量不足 |
 | batch_size | 4 | GPU 内存限制 |
 | early stop | val mAP patience=20 | |
-| num_queries | 300 | 每张最多 ~40 cells |
+| num_queries | 300 | 工程假设: 每张最多 ~40 cells (注: 官方 CellFinder=3500, 此处缩减是非论文一致的工程决策) |
 | scheduler | CosineAnnealingWarmRestarts | |
 | Loss | Focal CE + L1 + GIoU | 与论文一致 |
 
@@ -101,4 +103,5 @@ CellFinder 输入通过 `prep_2` 预处理（`cellsam_pipeline.py`中的`sam_bbo
 
 1. 数据量太小（310张 vs 论文的 100K+），即使只训练 head 也可能过拟合
 2. 心肌细胞形态与 CellSAM 训练集差异大（大细胞 vs 小圆细胞）
-3. num_queries=300 可能不够（但每张最多 ~40 cells 应该足够）
+3. num_queries=300 与官方 3500 不一致 — 此为工程降规假设, 需单独论证合理性
+4. **与论文 Stage 1 的关键差异**: 论文联训 backbone+CellFinder, 我们冻结 backbone 只训 head。论文 specialist 是按数据子集重训所有模块得到的, 不是简单调阈值。本方案更接近 head-only continuation 而非完整 Stage 1 复现。

@@ -1,0 +1,56 @@
+# T32: Stage2-like Neck-Only Baseline
+# Purpose: Surrogate for CellSAM's Stage2 training approach
+# Only the encoder neck is trainable; everything else is frozen.
+# This tests whether neck alignment alone can improve segmentation.
+
+output:
+  experiment_name: "T32_NeckOnly_Baseline"
+  checkpoint_dir: "checkpoints"
+
+model:
+  # Freeze everything except neck
+  freeze_encoder: true       # Freeze entire encoder (including neck initially)
+  freeze_decoder: true       # Freeze decoder (pure neck-only baseline)
+  train_neck_only: true      # Then unfreeze only neck params
+  use_lora: false
+  use_adapter: false
+  # no checkpoint — start from pretrained CellSAM
+  checkpoint: null
+
+data:
+  image_dir: "data/processed/images"
+  mask_dir: "data/processed/masks"
+  train_ids: "data/splits/train_ids.txt"
+  val_ids: "data/splits/val_ids.txt"
+  image_size: 1024
+  num_workers: 4
+
+training:
+  batch_size: 4
+  epochs: 50
+  lr: 1e-4
+  weight_decay: 1e-4
+  warmup_epochs: 5
+  seed: 42
+  use_amp: true
+  patience: 15                # PQ early stopping
+  iou_weight: 0.0            # No IoU head loss (decoder frozen, IoU head not learning)
+  optimizer: "adamw"
+  scheduler: "cosine"
+
+loss:
+  pos_weight: 1.0             # Neutral BCE weight (Stage2-like conservative)
+  boundary_weight: 0.0
+  use_boundary: false
+  aji_weight: 0.0
+  use_aji: false
+  use_focal: false
+  use_contour: false
+  # Pure BCE + Dice only — Stage2-like surrogate baseline
+
+augmentation:
+  random_rotate90: true
+  horizontal_flip: true
+  vertical_flip: true
+  shift_scale_rotate: true
+  brightness_contrast: true

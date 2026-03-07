@@ -176,11 +176,39 @@ def create_model(config: dict, device):
             param.requires_grad = False
         print("Froze mask decoder")
     
+    # T32: Neck-only training (Stage2-like surrogate)
+    train_neck_only = config['model'].get('train_neck_only', False)
+    if train_neck_only:
+        # Unfreeze ONLY the neck within the (already frozen) encoder
+        for param in model.model_cp.image_encoder.neck.parameters():
+            param.requires_grad = True
+        neck_params = sum(p.numel() for p in model.model_cp.image_encoder.neck.parameters())
+        print(f"[T32] Neck-only mode: unfroze {neck_params:,} neck parameters")
+        
+        # If freeze_decoder is also set, decoder stays frozen
+        # If NOT set, decoder is trainable alongside neck
+        if config['model']['freeze_decoder']:
+            print("[T32] Decoder FROZEN — pure neck-only baseline")
+        else:
+            print("[T32] Decoder TRAINABLE — neck + decoder mode")
+    
     # Plan B: Always freeze prompt encoder (512 params, pure positional encoding)
     # Literature consensus: FSAM, ProMISe, Sam2Rad, MedSAM all freeze PE
     for param in model.model_cp.prompt_encoder.parameters():
         param.requires_grad = False
     print("Froze prompt encoder (model_cp, 512 params)")
+    
+    # Trainable parameter audit (always print for verification)
+    trainable_params = {n: p.numel() for n, p in model.named_parameters() if p.requires_grad}
+    total_trainable = sum(trainable_params.values())
+    total_all = sum(p.numel() for p in model.parameters())
+    print(f"\n{'='*60}")
+    print(f"Trainable parameters: {total_trainable:,} / {total_all:,} ({100*total_trainable/total_all:.2f}%)")
+    if train_neck_only:
+        print("[T32 AUDIT] Expected: only neck params trainable (+ decoder if unfrozen)")
+        for name, count in sorted(trainable_params.items()):
+            print(f"  {name}: {count:,}")
+    print(f"{'='*60}\n")
     
     # Step 2: Apply LoRA BEFORE loading checkpoint (M3 fix)
     # This creates LoRA layers so checkpoint's LoRA keys have matching targets
@@ -294,9 +322,12 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler=None
         
         # Plan B: Use official preprocessing pipeline (prep_2 + forward)
         # P0-1 fix: LoRA requires gradient flow through encoder
+        # T32 fix: Neck-only also requires gradient flow (neck is inside encoder)
         from official_preprocess import official_preprocess_only, official_preprocess_and_encode
-        if use_lora:
-            # LoRA: encoder forward WITH gradients (LoRA params need autograd)
+        train_neck_only = config['model'].get('train_neck_only', False)
+        if use_lora or train_neck_only:
+            # LoRA/Neck-only: encoder forward WITH gradients
+            # (LoRA params or neck params need autograd through the encoder graph)
             if use_amp:
                 with autocast():
                     img_preprocessed = official_preprocess_only(model, images)

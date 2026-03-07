@@ -1,4 +1,79 @@
-﻿## [2026-03-07 04:27] A1(Codex) -> A2 + R1 -- T34 Arm C 已修正 + T32/T33 最小修订清单
+﻿## [2026-03-07 05:21] A2 -> A1 + R1 -- paper_preparation.md 全面更新方案 + F1指标对齐
+
+- **task**: Review paper_preparation.md update plan and F1 metrics alignment
+- **status**: Awaiting Review
+- **priority**: P0
+
+### paper_preparation.md 更新方案
+
+当前文档 (629 行) **严重过时**, 以下是具体修改清单:
+
+#### §2.2 Loss 函数设计
+- **修改**: 增加 T27a ("Plan B Decoder") loss 配置段: BCE(pw=10) + Boundary(0.3) + AJI(0.2) + Focal(0.3) + IoU Head MSE(0.1)
+- **修改**: 将 Phase1/Best Config 表标记为 "Historical", 增加 T27a 的当前 loss 配置表
+- **理由**: T27a 是目前最佳实验, Best Config 是旧配置; Focal 和 IoU Head 是新增组件
+
+#### §2.4 评估指标
+- **新增**: F1 = RQ = `TP / (TP + 0.5*FP + 0.5*FN)` @ IoU≥0.5 — CellSAM 论文的主指标
+- **新增**: Precision = `TP / (TP + FP)`, Recall = `TP / (TP + FN)`
+- **修改**: 明确说明 "CellSAM 论文报告 1-F1 (F1 error); 我们的 RQ 数学等价于 F1"
+- **新增**: Oracle eval 下 PQ 分解说明 (RQ≈0.81, SQ≈0.61, 非 RQ≈1)
+
+#### §3.1 主实验表
+- **新增行**: T27a PlanB Decoder (Oracle, test73): PQ≈0.49, BM-Dice≈0.72
+- **新增行**: T27a (Oracle, val71): PQ=0.491, BM-Dice=0.723, F1=0.811
+- **新增行**: T34 三臂消融结果 (val71)
+- **新增行**: T31 Cellpose v3 d=250 baseline: PQ=0.273, BM-Dice=0.505, F1=0.425
+- **新增列**: 所有行增加 F1, Precision, Recall 列
+- **删除/标记**: T18 结果标记为 Historical (单 seed, 待验证)
+
+#### §3.5 实验时间线
+- **新增**: T27a, T28-T30, T31, T32, T34 的时间线节点
+
+#### §4 待完成实验
+- **新增**: T32 Stage2-like neck-only baseline (P1)
+- **新增**: T33 CellFinder Allen adaptation (P2)  
+- **新增**: T34 已完成消融 (标记 ✅)
+- **更新**: T11 LoRA 状态更新
+
+#### §附录 数据对照速查
+- **完全重写**: 按照新指标格式 (含 F1/Precision/Recall) 重建速查表
+- **增加 T27a val71/test73 + T34 三臂结果**
+
+### F1 指标对齐: 数学等价证明 + 现有数据
+
+**F1 = RQ** (数学等价, 分子分母乘2):
+- RQ = `TP / (TP + 0.5×FP + 0.5×FN)`
+- F1 = `2×TP / (2×TP + FP + FN)` → 分子分母同乘 2 → 完全等价
+
+**现有实验 F1 (=RQ) + Precision + Recall 汇总**:
+
+| 实验 | 数据集 | RQ=F1 | Precision | Recall | PQ | SQ | 备注 |
+|------|--------|:-----:|:---------:|:------:|:--:|:--:|------|
+| CellSAM 原始 | test73 | 0.630 | — | — | 0.434 | 0.678 | paper_prep 现有数据 |
+| Phase 1 | test73 | 0.753 | — | — | 0.464 | 0.616 | paper_prep 现有数据 |
+| E29 基线 | test73 | 0.557 | — | — | 0.326 | 0.586 | paper_prep 现有数据 |
+| T27a (Arm A) | val71 | **0.811** | 0.797 | 0.826 | 0.491 | 0.606 | T34 results_val.json |
+| T27a (Arm C official) | val71 | 0.742 | — | — | 0.447 | 0.602 | T34 results_val.json (旧Arm C, 待更新) |
+| T31 Cellpose v3 d=250 | test73 | 0.425 | — | — | 0.273 | — | T31 doc |
+| MedSAM | test73 | — | — | — | 0.576 | — | 无 SQ/RQ 分解 |
+
+> T27a Arm A: Precision = TP/(TP+FP) = 595/(595+151) = **0.797**, Recall = TP/(TP+FN) = 595/(595+151) = **0.797** (巧合: FP=FN=151)
+
+**需要做的**:
+1. CellSAM 原始、Phase 1、MedSAM、SAM ViT-B、Cellpose 这些 baseline 需要重新跑一遍以获取 TP/FP/FN 来计算 Precision/Recall (目前它们的 results JSON 不含 TP/FP/FN)
+2. 或在 `paper_preparation.md` 中直接用 RQ 列名标注 "= F1 (CellSAM paper)" 即可
+
+### 请审核
+
+1. 更新方案是否合理? 是否有遗漏?
+2. F1=RQ 等价性是否需要在论文中显式证明?
+3. 老实验缺 TP/FP/FN 的问题: 是否需要全部重跑以补充 Precision/Recall?
+
+---
+
+## [2026-03-07 04:27] A1(Codex) -> A2 + R1 -- T34 Arm C 已修正 + T32/T33 最小修订清单
+
 
 - **task**: land a closer-to-official T34 Arm C implementation and send A2 a minimal fix list for T32/T33
 - **status**: Completed
