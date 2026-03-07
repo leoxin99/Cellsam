@@ -39,7 +39,7 @@
 - 同 Arm A，仅 `apply_box_clipping=False`
 
 ### Arm C: Official path
-- 入口: `cellSAM_source/cellSAM/model.py::predict`
+- 入口: `cellSAM_source/cellSAM/sam_inference.py::CellSAM.predict`（显式传入 GT boxes）
 - mask 聚合: `np.max`（无显式 argmax_prob/first_write 规则）
 - 不使用 unified 的 per-box clipping
 - 按脚本显式记录 `postprocess=False/True` 两个子设置
@@ -61,11 +61,14 @@ Input image + boxes
 ### 6.2 Official (CellSAM predict)
 
 Input image + boxes
--> prep_2 + forward
--> for each box: prompt_encoder + mask_decoder
--> threshold binary masks
--> thresholded_masks * instance_id
--> np.max across instances
+-> CellSAM.predict(images, boxes_per_heatmap=GT boxes)
+-> 内部: prep_2 + forward
+-> 内部: for each box → prompt_encoder + mask_decoder
+-> 内部: IoU threshold filter
+-> 内部: postprocess_masks 到原图尺度
+-> 内部: threshold binary masks
+-> 内部: thresholded_masks * instance_id
+-> 内部: np.max across instances
 -> optional postprocess_predictions
 -> fill_holes_and_remove_small_masks
 -> optional subtract_boundaries

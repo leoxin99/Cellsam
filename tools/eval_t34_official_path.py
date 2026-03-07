@@ -26,7 +26,7 @@ from inference.core import (
 
 # ── CellSAM official path imports ──
 from cellSAM.model import postprocess_predictions
-from cellSAM.utils import fill_holes_and_remove_small_masks, subtract_boundaries
+from cellSAM.utils import fill_holes_and_remove_small_masks
 
 # ── Metrics ──
 from metrics.instance_metrics import compute_all_metrics
@@ -104,9 +104,7 @@ def arm_b_unified_noclip(model, samples, device):
 
 
 def arm_c_official(model, samples, device, use_postprocess=True):
-    """Arm C: Official CellSAM path using model.predict()"""
-    import torch.nn.functional as F
-    from official_preprocess import official_preprocess_and_encode
+    """Arm C: official CellSAM predict() path with GT boxes."""
     
     preds = []
     for s in tqdm(samples, desc=f"Arm C (official, pp={use_postprocess})"):
@@ -125,42 +123,21 @@ def arm_c_official(model, samples, device, use_postprocess=True):
             C = img.shape[0]
         
         img_tensor = torch.from_numpy(img).float().unsqueeze(0).to(device)
-        
+        boxes_tensor = torch.tensor(boxes, dtype=torch.float32).unsqueeze(0)
+
         with torch.no_grad():
-            # Official preprocess + encode
+            # Route through official predict() so thresholding, IoU filtering,
+            # postprocess_masks and instance aggregation match CellSAM.
             model.adv_mode = True
-            image_embedding = official_preprocess_and_encode(model, img_tensor, device)
-            
-            # Per-box: prompt encode + mask decode + threshold
+            segmentation_predictions, _, _, _ = model.predict(
+                img_tensor,
+                boxes_per_heatmap=boxes_tensor,
+            )
+
+        if segmentation_predictions is None:
             all_masks = np.zeros((H, W), dtype=np.int32)
-            
-            for idx, box in enumerate(boxes):
-                box_tensor = torch.tensor([box], dtype=torch.float32).unsqueeze(0).to(device)
-                
-                sparse_emb, dense_emb = model.model_cp.prompt_encoder(
-                    points=None, boxes=box_tensor, masks=None
-                )
-                
-                low_res_masks, iou_pred = model.model_cp.mask_decoder(
-                    image_embeddings=image_embedding,
-                    image_pe=model.model_cp.prompt_encoder.get_dense_pe(),
-                    sparse_prompt_embeddings=sparse_emb,
-                    dense_prompt_embeddings=dense_emb,
-                    multimask_output=False,
-                )
-                
-                # Upsample to original size
-                upscaled = F.interpolate(
-                    low_res_masks, size=(H, W),
-                    mode="bilinear", align_corners=False
-                )
-                
-                # Official path: threshold then assign instance ID
-                binary_mask = (torch.sigmoid(upscaled[0, 0]) > 0.5).cpu().numpy().astype(np.uint8)
-                
-                # Official: np.max aggregation (last-write-wins for overlaps)
-                instance_mask = binary_mask * (idx + 1)
-                all_masks = np.maximum(all_masks, instance_mask)
+        else:
+            all_masks = segmentation_predictions.astype(np.int32)
         
         # Official postprocessing
         if use_postprocess:

@@ -1,4 +1,79 @@
-﻿## [2026-03-07 03:33] A1(Codex) -> A2 + R1 -- T32/T34/T33 审计 + 检测文档再清洗
+﻿## [2026-03-07 04:27] A1(Codex) -> A2 + R1 -- T34 Arm C 已修正 + T32/T33 最小修订清单
+
+- **task**: land a closer-to-official T34 Arm C implementation and send A2 a minimal fix list for T32/T33
+- **status**: Completed
+- **priority**: P0
+
+### 1) T34 Arm C 代码已修正
+
+已更新:
+- `tools/eval_t34_official_path.py`
+- `docs/experiments/active/T34_t27a_official_path_ablation.md`
+
+核心改动:
+1. Arm C 不再手写 pseudo-official per-box decoder 路径
+2. 改为直接调用 `CellSAM.predict(images, boxes_per_heatmap=GT boxes)`
+3. 因此以下关键逻辑回到官方实现:
+   - `mask_threshold=0.4`
+   - `iou_threshold=0.5`
+   - `self.model.postprocess_masks(...)`
+   - `thresholded_masks * instance_id -> np.max(axis=0)`
+
+这解决了上一轮审计里的三个高优先级问题:
+- 0.5 阈值错误
+- 缺少 IoU filter
+- 手工 `F.interpolate` 与官方 `postprocess_masks` 不一致
+
+验证:
+- `python -m py_compile tools/eval_t34_official_path.py` ✅
+- 单样本 smoke 在当前 shell 环境被外部依赖阻断: `ModuleNotFoundError: segment_anything`
+  - 这发生在导入 `cellSAM.model` 时, 属于环境缺依赖, 不是本次 T34 改动引入的问题
+
+### 2) A2 需复核的 T34 点
+
+1. 重新跑 val71 三臂结果, 更新结论表
+2. 文档中 Arm C 表述可从 `official-like` 提升为 `official predict() path with GT boxes`
+3. 若数值仍与 Unified 有差距, 当前主因应解释为:
+   - 冲突归属/clip 机制差异
+   - 以及 official predict path 与 unified path 的后处理差异
+   - 而不是此前那种 “GT box 紧贴细胞所以 clip 完全无影响” 的强解释
+
+### 3) T32 最小修订清单
+
+A2 在编码前需补以下 4 项:
+1. 在 `create_model()` 增加 trainable-param audit
+   - 启动时打印全部 `requires_grad=True` 参数
+   - 必须证明 only neck trainable
+2. 在 `train_one_epoch()` 中让 neck 路径脱离 `no_grad`
+3. 文档统一写法改为 `Stage2-like surrogate`, 不写 `CellSAM Stage2 official loss`
+4. 显存说明改为保守口径
+   - neck-only 仍会保留整条 ViT 图到 backward
+   - 先本地 smoke, 再上 ALICE
+
+### 4) T33 最小修订清单
+
+A2 需至少改这 4 项:
+1. 标题/定位改写
+   - 从“following CellSAM paper Stage 1 methodology”
+   - 改为 “resource-constrained Allen adaptation inspired by CellSAM Stage 1”
+2. 检测输入链路改写
+   - 把 `prep_2` 改成 `sam_bbox_preprocessing`
+3. `num_queries=300` 改为显式非论文一致的工程假设
+   - 不能再写成与当前公开 CellFinder 架构一致
+4. specialist 说明补一句
+   - 论文 specialist 是按数据子集重训得到, 不是调阈值
+
+### 5) 来源和责任划分
+
+- T33 方案来源: A2
+- 首次落库 commit: `f8f4a1f`
+- A1 本轮动作:
+  - 修正 T34 Arm C 实现
+  - 给出 T32/T33 最小修订清单
+  - 等 A2 按清单回改后再做第二轮审计
+
+---
+## [2026-03-07 03:33] A1(Codex) -> A2 + R1 -- T32/T34/T33 审计 + 检测文档再清洗
 
 - **task**: audit A2's recent T32/T34 proposals, re-audit T33 CellFinder fine-tuning plan, and clean remaining stale wording in detection SSOT docs
 - **status**: Completed
@@ -1189,5 +1264,6 @@ Our T28 used (R=BF, G=Actn2, B=DAPI) -- all 3 channels misaligned with official.
 ## [2026-02-27 06:50] A1(Codex) → A2 + R1 — LoRA/Neck 文献复核 + Baseline 错误文件处置
 - **status**: ✅ 已完成
 - 口径统一: "部分文献支持联训, 不作绝对化结论"; SAMed 冻结含 neck
+
 
 
