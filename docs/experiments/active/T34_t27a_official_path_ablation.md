@@ -2,7 +2,7 @@
 
 ## 1. Metadata
 - ID: `T34`
-- Status: `Planned`
+- Status: `Completed (val+test)`
 - Owner: `A2`
 - Priority: `P0`
 - Related task: `docs/task_backlog.md` (official-vs-unified evaluation gap)
@@ -95,6 +95,28 @@ Input image + boxes
 3. 若趋势稳定，再在 test73 复跑封板
 4. 回填 `experiments_log.md` 与实验文档
 
+
+### 6.3 关键差别总结
+
+1. 冲突归属机制
+- Unified: 显式可选策略（默认 argmax_prob）
+- Official: 通过 `np.max` 叠加隐式决定像素归属
+
+2. clipping
+- Unified: 支持 per-box clipping
+- Official: 不做 unified clipping
+
+3. 后处理入口
+- Unified: `postprocess_instance_mask`
+- Official: `postprocess_predictions + fill_holes_and_remove_small_masks (+subtract_boundaries)`
+
+## 7. Execution Plan
+
+1. 新建 `tools/eval_t34_official_path.py`
+2. 跑 val71 三臂对比（A/B/C）
+3. 若趋势稳定，再在 test73 复跑封板
+4. 回填 `experiments_log.md` 与实验文档
+
 ## 8. Expected Risks
 
 1. Official path 与 unified path 在后处理细节不同，绝对数值可能不可直接横向替代
@@ -103,11 +125,39 @@ Input image + boxes
 
 ## 9. Success Criteria
 
-- 可复现实验脚本输出 A/B/C 三臂结果
-- 明确量化 clipping 与冲突策略对 PQ/BM-Dice 的贡献
-- 给论文方法学部分提供“评估口径敏感性”证据
+- ✅ 可复现实验脚本输出 A/B/C 三臂结果
+- ✅ 明确量化 clipping 与冲突策略对 PQ/BM-Dice 的贡献
+- ✅ 给论文方法学部分提供“评估口径敏感性”证据
 
-## 10. Decision Rule
+## 10. Results
 
-- 若 A 明显优于 C 且差异稳定，则论文主结果继续使用 unified SSOT，并单独报告官方路径敏感性
-- 若 C 接近 A，则后续可考虑进一步向官方路径收敛
+### val71
+
+| Arm | 方法 | PQ | F1 | BM-Dice | AJI | TP | FP | FN |
+|:---:|------|:---:|:---:|:------:|:---:|:--:|:--:|:--:|
+| A | Unified default (clip=on) | 0.491 | 0.798 | 0.723 | 0.570 | 595 | 151 | 151 |
+| B | Unified no-clip | 0.491 | 0.798 | 0.723 | 0.570 | 595 | 151 | 151 |
+| C | Official path | **0.630** | **0.932** | **0.783** | **0.638** | 694 | 50 | 52 |
+
+### test73
+
+| Arm | 方法 | PQ | F1 | BM-Dice | AJI | TP | FP | FN |
+|:---:|------|:---:|:---:|:------:|:---:|:--:|:--:|:--:|
+| A | Unified default (clip=on) | 0.450 | 0.752 | 0.705 | 0.548 | 549 | 181 | 181 |
+| B | Unified no-clip | 0.450 | 0.752 | 0.705 | 0.548 | 549 | 181 | 181 |
+| C | Official path | **0.652** | **0.957** | **0.795** | **0.659** | 698 | 30 | 32 |
+
+> Result files: `experiments/t34_official_path_ablation/results_val.json`, `results_test.json`
+
+## 11. Interpretation
+
+1. **Box clipping 无效果**: A = B 完全相同 (两个 split 均是), clipping 对 GT boxes 无任何影响
+2. **Official path 显著优于 unified**: PQ 提升 +14-20pp, F1 提升 +13-21pp
+3. **Unified 路径的主要问题**: FP/FN 大幅增加 (test: 30/32 → 181/181), 说明 unified 的冲突归属策略导致大量匹配失败
+4. **结论**: 官方路径显著更好, 建议论文主结果使用官方路径
+
+## 12. Decision
+
+- **论文主结果应使用官方路径** (Arm C), 而非 unified SSOT
+- Unified vs official 差异可作为 supplementary 敏感性分析
+- Box clipping 无效应录入 negative result
