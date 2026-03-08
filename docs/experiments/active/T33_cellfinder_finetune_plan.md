@@ -105,5 +105,46 @@ CellFinder 输入通过 `sam_bbox_preprocessing` 预处理（`cellSAM_source/cel
 
 1. 数据量太小（310张 vs 论文的 100K+），即使只训练 head 也可能过拟合
 2. 心肌细胞形态与 CellSAM 训练集差异大（大细胞 vs 小圆细胞）
-3. num_queries=300 与官方 3500 不一致 — 此为工程降规假设, 需单独论证合理性
+3. num_queries=50 与官方 3500 不一致 — 工程降规假设 (心肌数据 ~10-30 cells/image, 50 给 2x 余量)
 4. **与论文 Stage 1 的关键差异**: 论文联训 backbone+CellFinder, 我们冻结 backbone 只训 head。论文 specialist 是按数据子集重训所有模块得到的, 不是简单调阈值。本方案更接近 head-only continuation 而非完整 Stage 1 复现。
+
+## 3. Results (ALICE, 2026-03-07)
+
+| Seed | Best F1 | Early Stop Epoch | Total Epochs |
+|:----:|:-------:|:----------------:|:------------:|
+| 42 | **0.5550** | Epoch 39 | 39/200 |
+| 123 | **0.5573** | Epoch 39 | 39/200 |
+| **Mean** | **0.5562** | | |
+
+- **Checkpoint**: `checkpoints/T33_CellFinder_HeadOnly_seed{42,123}_20260307_213750/`
+- **监控指标**: F1 @ IoU=0.5 (非 COCO mAP)
+- **早停**: patience=20, 两 seed 均在 epoch 39 触发
+- **环境**: ALICE L4 GPU, `num_queries=50`, `batch_size=4`
+
+### 3.1 与其他方法对比
+
+| 方法 | F1 | 说明 |
+|------|:---:|------|
+| T27a (GT boxes) | 0.944 | CellSAM decoder, Oracle detection |
+| **T33 CellFinder** | **0.556** | AnchorDETR head-only, 自动检测 |
+| DAPI Z 线 + T27a | 0.507 | 传统检测 + CellSAM 分割 |
+| DAPI 核检测 + T27a | 0.434 | 传统检测 + CellSAM 分割 |
+
+> T33 F1 是检测 F1 (box matching)，CellFinder > DAPI 传统方法 (+5-12%)。
+
+### 3.2 与 CellSAM 论文 CellFinder 训练方案的差异
+
+| 方面 | CellSAM 论文 | 我们 (T33) | 影响评估 |
+|------|:----------:|:---------:|:-------:|
+| 训练范围 | ViT backbone + CellFinder 联训 | 冻结 backbone, 仅训 head | ⚠️ 高 |
+| num_queries | 3500 | 50 | ⚠️ 中 (数据密度不同) |
+| 数据量 | ~1.2M cells, 多数据集 | ~310 images, 单数据集 | ⚠️ 高 |
+| Epochs | 2800 | 200 (early stop at 39) | ✅ 合理 |
+| LR schedule | StepLR, decay@1960 | CosineAnnealingWarmRestarts | ⚠️ 低 |
+| Loss | Focal CE + L1 + GIoU | 同 (SetCriterion) | ✅ 一致 |
+| Matcher | Hungarian | 同 | ✅ 一致 |
+| 监控指标 | COCO mAP + AP50 | F1 @ IoU=0.5 | ⚠️ 中 |
+| backbone lr | 1e-5 | 0 (冻结) | ⚠️ 高 |
+
+> [!WARNING]
+> T33 与论文的 3 个最大差异: (1) backbone 冻结, (2) 数据量差 4 个数量级, (3) 监控指标用 F1 而非 COCO mAP。建议未来补充 COCO mAP evaluator 以论文一致口径汇报。
