@@ -2,7 +2,7 @@
 
 ## 1. Metadata
 - ID: T30
-- Status: 🔄 Running on L4 (both seeds)
+- Status: ✅ Completed (both seeds)
 - Owner: A2
 - Priority: P1
 - Related config: `src/config/t30_lora_qv_bf.yaml`
@@ -51,14 +51,18 @@ T30 在 T27a 基础上仅添加 LoRA (rank=4), 测试 encoder 微调对 PQ 的�
 
 ## 8. Results
 
-| Seed | Val PQ | Val Dice | Runtime | Status |
-|:----:|:------:|:--------:|:-------:|:------:|
-| 42 | — | — | — | 🔄 PENDING/RUNNING |
-| 123 | — | — | — | 🔄 PENDING/RUNNING |
+| Seed | Val PQ | Val Dice | Status |
+|:----:|:------:|:--------:|:------:|
+| 42 | **0.6770** | 0.8136 | ✅ |
+| 123 | **0.6699** | 0.8093 | ✅ |
+| **Mean** | **0.6735** | **0.8115** | |
 
 ## 9. Interpretation
 
-待结果
+- T30 (LoRA+Decoder) PQ=0.674 vs T27a (Decoder-only) PQ=0.643: **LoRA 提供 +3.1pp 增益**
+- 仅增加 147K LoRA 参数 (4.06M → 4.21M, +3.6%), 却获得显著提升
+- 双 seed 一致性好 (std < 0.5pp)
 
 ## 10. Decision
-- 待结果。如果有增益, 后续测 rank=8 和 三通道+LoRA 组合
+- **LoRA rank=4 已证实有效**, 后续可考虑 rank=8 或三通道+LoRA 组合
+- T30 PQ=0.674 接近 T28 (3ch) PQ=0.686, 但仅用了 BF 单通道

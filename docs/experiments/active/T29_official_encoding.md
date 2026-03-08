@@ -2,7 +2,7 @@
 
 ## 1. Metadata
 - ID: T29a / T29b / T29c
-- Status: ✅ Seed=42 completed; 🔄 Seed=123 running on L4
+- Status: ✅ Completed (both seeds)
 - Owner: A2
 - Priority: P0
 - Related configs:
@@ -58,23 +58,30 @@ T29 系列测试对齐官方编码的效果。
 | T29b | 0 | DAPI | BF | 0.6648 | 0.8051 | 8h18m |
 | T29c | Actn2 | DAPI | BF | 0.6849 | 0.8195 | 5h16m |
 
-### Seed=123 (L4, running ~5h)
+### Seed=123 (L4, completed)
 
-| 实验 | Val PQ | Status |
-|------|:------:|:------:|
-| T29a s123 | — | 🔄 RUNNING |
-| T29b s123 | — | 🔄 RUNNING |
-| T29c s123 | — | 🔄 RUNNING |
+| 实验 | Val PQ | Val Dice |
+|------|:------:|:--------:|
+| T29a s123 | 0.6411 | 0.7948 |
+| T29b s123 | 0.6548 | 0.8020 |
+| T29c s123 | 0.6783 | 0.8127 |
+
+### Dual-Seed Average
+
+| 实验 | R | G | B | Mean PQ | Mean Dice |
+|------|---|---|---|:-------:|:---------:|
+| T29a | 0 | 0 | BF | **0.642** | 0.795 |
+| T29b | 0 | DAPI | BF | **0.660** | 0.804 |
+| T29c | Actn2 | DAPI | BF | **0.682** | 0.816 |
 
 ## 9. Interpretation
 
-1. **BF-only**: [0,0,BF] PQ=0.642 ≈ [BF,BF,BF] PQ=0.638 → 无显著差异 (+0.4pp)
-2. **3ch 官方**: [0,DAPI,BF] PQ=0.665 < [BF,Actn2,DAPI] PQ=0.686 → 旧编码更高 (-2.1pp)
-3. **Actn2 贡献**: [Actn2,DAPI,BF] PQ=0.685 追平 T28 → **Actn2 提供 +2pp** (单 seed, 待验证)
-4. **T28 vs T29b config 已验证完全一致 (仅通道不同)**, 是有效消融
-
-> 注: Actn2 +2pp 结论需 seed=123 确认 (A1 审核建议)
+1. **BF-only**: [0,0,BF] PQ=0.642 ≈ [BF,BF,BF] PQ=0.643 → 无显著差异 (-0.1pp)
+2. **3ch 官方**: [0,DAPI,BF] PQ=0.660 < [BF,Actn2,DAPI] PQ=0.686 → 旧编码更高 (-2.6pp)
+3. **Actn2 贡献**: [Actn2,DAPI,BF] PQ=0.682 追平 T28 → **Actn2 提供 +2.2pp** (双 seed 确认)
+4. **双 seed 一致性良好**: 所有子实验 std < 0.6pp
 
 ## 10. Decision
-- 等 seed=123 出结果后计算双 seed 均值
-- 通道编码选择: 旧编码与官方+Actn2 效果持平, 最终选择需考虑论文表述
+- 通道编码选择: Actn2+DAPI+BF (T29c) 与旧编码 T28 效果持平, 而官方 2ch (T29b) 略低
+- **BF-only 不受编码方式影响** (T29a ≈ T27a)
+- 最终编码选择取决于论文表述需求

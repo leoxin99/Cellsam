@@ -232,8 +232,9 @@ def main():
 
         split_results = {}
 
+        # --- Default (clip ON) ---
         # Method A: DAPI nucleus detection
-        print(f"\n  --- Method A: DAPI Nucleus Detection ---")
+        print(f"\n  --- Method A: DAPI Nucleus Detection (clip=on) ---")
         t0 = time.time()
         res_a = evaluate_with_detection(
             model, dataset, device, detect_dapi_boxes,
@@ -247,7 +248,7 @@ def main():
         print(f"  TP/FP/FN: {res_a['tp_total']}/{res_a['fp_total']}/{res_a['fn_total']}")
 
         # Method B: Z-line adaptive detection
-        print(f"\n  --- Method B: Z-line Adaptive Detection ---")
+        print(f"\n  --- Method B: Z-line Adaptive Detection (clip=on) ---")
         t0 = time.time()
         res_b = evaluate_with_detection(
             model, dataset, device, detect_zline_boxes,
@@ -260,11 +261,39 @@ def main():
         print(f"  Detected/GT: {res_b['avg_detected_per_image']}/{res_b['avg_gt_per_image']} per image")
         print(f"  TP/FP/FN: {res_b['tp_total']}/{res_b['fp_total']}/{res_b['fn_total']}")
 
+        # --- Box clipping OFF ---
+        infer_cfg_noclip = InferenceConfig.default()
+        infer_cfg_noclip.apply_box_clipping = False
+
+        # Method C: DAPI nucleus (no clip)
+        print(f"\n  --- Method C: DAPI Nucleus Detection (clip=off) ---")
+        t0 = time.time()
+        res_c = evaluate_with_detection(
+            model, dataset, device, detect_dapi_boxes,
+            "DAPI_nucleus_noclip", infer_cfg_noclip, use_bf_only=True
+        )
+        res_c['elapsed_seconds'] = round(time.time() - t0, 1)
+        split_results['dapi_nucleus_noclip'] = res_c
+        print(f"\n  PQ={res_c['pq_mean']:.4f}, F1={res_c['f1']:.4f}, P={res_c['precision']:.4f}, R={res_c['recall']:.4f}")
+        print(f"  BM-Dice={res_c['bm_1to1_dice_mean']:.4f}, AJI={res_c['aji_mean']:.4f}")
+
+        # Method D: Z-line adaptive (no clip)
+        print(f"\n  --- Method D: Z-line Adaptive Detection (clip=off) ---")
+        t0 = time.time()
+        res_d = evaluate_with_detection(
+            model, dataset, device, detect_zline_boxes,
+            "zline_adaptive_noclip", infer_cfg_noclip, use_bf_only=True
+        )
+        res_d['elapsed_seconds'] = round(time.time() - t0, 1)
+        split_results['zline_adaptive_noclip'] = res_d
+        print(f"\n  PQ={res_d['pq_mean']:.4f}, F1={res_d['f1']:.4f}, P={res_d['precision']:.4f}, R={res_d['recall']:.4f}")
+        print(f"  BM-Dice={res_d['bm_1to1_dice_mean']:.4f}, AJI={res_d['aji_mean']:.4f}")
+
         results[split] = split_results
 
     results['metadata'] = {
         'checkpoint': str(Path(args.checkpoint).resolve()),
-        'methods': ['dapi_nucleus', 'zline_adaptive'],
+        'methods': ['dapi_nucleus', 'zline_adaptive', 'dapi_nucleus_noclip', 'zline_adaptive_noclip'],
         'splits': args.splits,
         'detection_profile': 'locked_eval',
         'script': 'tools/eval_dapi_detection.py',

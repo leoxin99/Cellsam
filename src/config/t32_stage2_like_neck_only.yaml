@@ -7,8 +7,8 @@
 # Based on T27a YAML structure, only changes:
 #   1. freeze_decoder: true (T27a: false)
 #   2. train_neck_only: true (T27a: N/A)
-#   3. Simplified loss: BCE only (no Focal/Boundary/AJI/IoU Head)
-#   4. epochs: 50 (T27a: 80)
+#   3. Simplified loss: Dice+BCE base (no Focal/Boundary/AJI/IoU Head)
+#   4. epochs: 80 (originally 50, extended to match T27a)
 
 data:
   splits_dir: "data/splits"

@@ -3,8 +3,11 @@
 Unified checkpoint evaluator.
 
 Evaluates a trained checkpoint on val and/or test splits,
-outputting all standard metrics: PQ, SQ, RQ(=F1), Precision, Recall, AJI,
+outputting all standard metrics: PQ, SQ, RQ (per-image macro avg),
+F1/Precision/Recall (global micro from TP/FP/FN), AJI,
 BM-1to1 Dice, BM-Coverage Dice, Semantic Dice.
+
+Note: RQ (macro) and F1 (micro) are related but numerically different.
 
 Usage:
   python tools/eval_checkpoint.py \

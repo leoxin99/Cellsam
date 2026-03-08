@@ -1,6 +1,6 @@
 ﻿# CellSAM 心肌细胞分割 — 论文准备材料
 
-> **更新日期**: 2026-03-08
+> **更新日期**: 2026-03-05
 > **论文类型**: 硕士论文 (Master's Thesis, 20-50 pages)
 > **答辩时间**: 2026 年 4-5 月
 
@@ -8,7 +8,6 @@
 
 ## 📋 目录
 
-- [0. 写作口径说明](#0-写作口径说明)
 - [1. 研究背景与动机](#1-研究背景与动机)
 - [2. 方法论](#2-方法论)
   - [2.7 CellSAM Methods 一页证据表](#27-cellsam-methods-一页证据表)
@@ -18,16 +17,6 @@
 - [6. 关键图表清单](#6-关键图表清单)
 - [7. 写作规划](#7-写作规划) *(merged from paper_writing_plan.md)*
 - [8. 技术口径索引](#8-技术口径索引)
-
----
-
-## 0. 写作口径说明
-
-- **正式正文主线**: `T27a` (`test73` 主结果) + `T31` (`test73` paper-aligned Cellpose baseline) + `T34` (`val71` 路径审计, 暂非最终 test 结论)
-- **split 必须显式标注**: `val71` 与 `test73` 不得在同一主表中无标注混排
-- **当前仅可作审计证据的结果**: `T34` 目前只有 `val71`, 可用于讨论 unified vs official path, 不能写成最终 `test73` 结论
-- **需标 provisional 的结果**: `T18` 当前仍是 single-seed 结果, 若进入正文必须标注 `provisional`
-- **历史结果的定位**: `Phase 1` / `Best Config` / `T11` 保留为内部演进或附录证据, 不再作为当前论文主结果
 
 ---
 
@@ -70,10 +59,11 @@
     │
     └── 分割分支: CellSAM (ViT-B Encoder 冻结 + Decoder 微调)
             │
-            ├── BF-only 主线: BF 灰度 → 复制 3ch → model_cp 分支 (T27a, 当前主线)
-            ├── 三通道探索: R=BF, G=Actn2, B=DAPI → Adapter → ViT-B (T18, provisional)
+            ├── BF-only 模式: BF 灰度 → 复制 3ch → ViT-B (Phase 1, Best Config)
+            ├── 三通道模式: R=BF, G=Actn2, B=DAPI → Adapter → ViT-B (T18, 实验中)
             ├── Prompt: 单细胞 GT 框 (扩展 10%)
-            └── 输出: 单细胞二值 mask → 实例组装
+            ├── 输出: 单细胞二值 mask
+            └── 后处理: 6 步边界平滑 → 实例组装 (argmax_prob)
 ```
 
 ### 2.1b CellSAM 模型架构与冻结策略分析
@@ -213,54 +203,36 @@ Prompt Encoder 的 box→embedding 过程是纯位置编码 + 查表, **无复�
 - **ProMISe** (arXiv, 2024): 冻结全部 SAM 参数, 通过外部模块适配
 - **Sam2Rad** (NIH/PMC, 2024): 冻结全部 SAM 模块, 避免 "feature damage"
 - **MedSAM** (Nature Communications, 2024): 冻结 image encoder + prompt encoder, 只微调 decoder
-- **本项目当前主线 (T27a)**: prompt encoder 冻结；早期实验曾默认随 decoder 一起训练，但这不是当前论文主线
+- **本项目**: Prompt encoder 未显式冻结但参数极少 (512), 对结果影响可忽略
 
-### 2.2 Loss 函数设计 (当前主线: T27a)
+### 2.2 Loss 函数设计 (核心创新)
 
-当前论文主线 `T27a` 的训练目标由两部分组成:
-
-```
-L_total = L_combined + λ_iou · L_iou
-其中 λ_iou = 0.1
-```
-
-其中 `L_combined` 为归一化加权多组件损失:
+**CombinedLoss** = 归一化加权多组件损失:
 
 ```
-L_combined =
-  (0.3 / W) · L_base +
-  (0.3 / W) · L_boundary +
-  (0.2 / W) · L_aji +
-  (0.3 / W) · L_focal
-
-W = 0.3 + 0.3 + 0.2 + 0.3 = 1.1
-L_base = 0.5 · Dice + 0.5 · BCE(pos_weight=10)
+total_loss = (base/W) × L_base + (w_b/W) × L_boundary + (w_a/W) × L_aji + (w_c/W) × L_contour
+其中 W = base + w_b + w_a + w_c  (归一化防止尺度偏移)
 ```
 
-| 组件 | 当前 T27a 配置 | 作用 | 归一化占比 |
-|------|---------------|------|:----------:|
-| **L_base** | Dice + BCE (`pos_weight=10`) | 前景/背景分类 | 27.3% |
-| **L_boundary** | ON, `boundary_weight=0.3` | 边界像素对齐 | 27.3% |
-| **L_aji** | ON, `aji_weight=0.2` | 实例级重叠质量 | 18.2% |
-| **L_focal** | ON, `focal_weight=0.3`, `alpha=0.25`, `gamma=2.0` | 强化 hard pixels | 27.3% |
-| `L_contour` | OFF | 历史尝试, 当前主线禁用 | 0 |
-| `L_topology`, `L_size` | OFF | 备用项, 当前未启用 | 0 |
-| **L_iou** | `MSE(iou_pred, actual_iou)` | 约束 IoU head 质量预测 | **在 `CombinedLoss` 外单独加权** |
+| 组件 | 公式简述 | 作用 | Phase 1 权重 | 有效占比 |
+|------|---------|------|:-----------:|:-------:|
+| **L_base** | 0.5×Dice + 0.5×BCE(pos_weight=2) | 前景/背景分类 | base=0.3 | 13.0% |
+| **L_boundary** | 边界区域 BCE + 边界 Dice | 边界像素对齐 | 1.5 | **65.2%** |
+| **L_aji** | 1 - soft_IoU + FP/FN penalty | 实例分割精度 | 0.2 | 8.7% |
+| **L_contour** | 距离场加权 pred + 边界漏检 | 抑制远离边界的膨胀 | 0.3 | 13.0% |
 
 **vs 原始 CellSAM Loss** (证据边界说明):
 - CellSAM 论文与公开仓库可确认其 Stage2 为分割监督训练，但公开快照缺少可逐行复现的 Stage2 训练脚本。
 - 因此原始 Stage2 的具体 loss 组合/权重不应写死为 "Dice+BCE" 或其他固定公式，除非有作者补充代码证据。
-- 我们当前可证据化的写法是: `T27a` 使用 `Dice+BCE + Boundary + AJI + Focal` 的 `CombinedLoss`，并在训练循环中额外加入 `IoU Head MSE`
+- 我们: 增加 BoundaryLoss 改善边界精度; ContourLoss 经 T12 消融验证**有害** (PQ +2.3pp when removed)，Best Config 已移除
 
-**从历史主线到当前主线的演进**:
-
-| 阶段 | `pos_weight` | `boundary` | `aji` | `contour` | `focal` | `IoU head` | 论文定位 |
-|------|:------------:|:----------:|:-----:|:---------:|:-------:|:----------:|----------|
-| Phase 1 | 2 | 1.5 | 0.2 | 0.3 | OFF | OFF | 历史基线 |
-| Best Config | 10 | 1.5 | 0.2 | OFF | OFF | OFF | T12 后的历史最佳配置 |
-| **T27a** | **10** | **0.3** | **0.2** | **OFF** | **ON (0.3)** | **ON (0.1, external)** | **当前论文主线** |
-
-> 写作建议: 正文方法部分应以 `T27a current training loss` 为主口径; `Phase 1` / `Best Config` 更适合作为方法演进或附录表。
+**关键改动动机** (Phase 1→Best Config 演进):
+| 参数 | E29 | Phase 1 | Best Config | T12 消融结论 |
+|------|:---:|:-------:|:-----------:|-------------|
+| pos_weight | 10 | 2 | **10** | posw=10 PQ +4.1pp ⬆️ (降到2是错误决策) |
+| boundary_weight | 0.5 | 1.5 | **1.5** | 移除后影响不显著 (±0.15pp) |
+| contour_weight | OFF | 0.3 | **OFF** | 有害，移除后 PQ +2.3pp ⬆️ |
+| PQ 早停 | OFF | ON | **ON** | 移除后影响不显著 (±0.65pp) |
 
 ### 2.3 检测管线
 
@@ -292,28 +264,22 @@ DAPI 通道 → Otsu 阈值 → 连通域分析 → 面积过滤 (1500-20000 px�
 | SQ | Segmentation Quality (匹配对的平均 IoU) | 辅助 |
 | RQ | Recognition Quality (检出率×精确度) | 辅助 |
 
-> 注: 在使用同一 `TP/FP/FN` 定义时，`RQ` 与 `F1` 数学上等价；但本项目部分脚本同时输出 `per-image mean RQ` 与 `global micro-F1`，若两者同时出现，正文必须显式标注聚合方式。
-
 ### 2.5 训练设定
 
 | 参数 | 值 |
 |------|-----|
-| 当前主线模型 | CellSAM `model_cp` 分支 |
-| 冻结策略 | image encoder + prompt encoder 冻结, mask decoder 微调 |
-| 输入 | BF-only `[BF, BF, BF]` |
+| 模型 | CellSAM (ViT-B encoder + mask decoder) |
+| 冻结策略 | Encoder 冻结, Decoder 微调 (~4M 参数) |
 | 图像大小 | 1024×1024 |
 | Batch size | 4 |
 | Optimizer | AdamW (lr=1e-4, weight_decay=1e-4) |
 | Scheduler | Cosine warmup (5 epochs) |
-| Epochs | 80 (PQ 早停, patience=15) |
+| Epochs | 80 (PQ 早停, patience=15; Phase 1 用 50) |
 | 训练方式 | Instance-level (每框一个 GT 细胞 mask) |
-| Loss | `CombinedLoss + IoU Head MSE (λ_iou=0.1)` |
 | 数据增强 | RandomRotate90, HFlip, VFlip, ShiftScaleRotate, BrightnessContrast |
-| 平台 | ALICE HPC (L4 GPU), 本地负责评估 |
+| 平台 | ALICE HPC (L4 GPU) |
 
 ### 2.6 LoRA Encoder 微调 (T11)
-
-> 说明: 本节记录 `T11` 的历史 LoRA 探索。当前正式主线仍是 `T27a` decoder-only；若正文篇幅有限，LoRA 可下放至附录或 future work。
 
 #### 文献依据: SAMed (ICLR 2024)
 
@@ -327,7 +293,7 @@ SAMed (*Customized Segment Anything Model for Medical Image Segmentation*, Zhang
 
 **SAMed 结论**: 在小数据 (<1000样本) 医学分割场景, LoRA on Q/V 是参数效率和性能的最佳平衡。FSAM, S-SAM 等后续工作也验证了此策略。
 
-**与我们场景的对应**: Allen train split 仅 334 张图像, 仍属于小数据场景。T11 的设计初衷是验证 decoder-only 历史基线之上是否还能通过低秩适配继续提升。
+**与我们场景的对应**: Allen 数据集 (~200张) 属于极小数据场景, Best Config 的 decoder-only 策略 (PQ=0.484) 正对应 SAMed 中 "decoder-only 有上限" 的结论。LoRA 是突破该上限的自然下一步。
 
 #### 为什么只改 Q 和 V, 不改 K?
 
@@ -353,9 +319,9 @@ LoRA 旁路: x → A(768→r) → B(r→768) → 加到 Q  (可训练)
 | T11-r4 | 4 | 147,456 | 0.17% |
 | T11-r8 | 8 | 294,912 | 0.33% |
 
-**初始化**: A 矩阵 Kaiming init, B 矩阵零初始化 → LoRA 输出初始为 0, 模型起点 = Best Config (历史 decoder-only baseline)
+**初始化**: A 矩阵 Kaiming init, B 矩阵零初始化 → LoRA 输出初始为 0, 模型起点 = Best Config
 
-#### T11 vs Best Config 对比 (历史对照)
+#### T11 vs Best Config 对比
 
 | 维度 | Best Config | T11 LoRA |
 |------|------------|----------|
@@ -390,37 +356,28 @@ LoRA 旁路: x → A(768→r) → B(r→768) → 加到 Q  (可训练)
 
 ## 3. 实验结果汇总
 
-### 3.1 主实验: 已锁定 `test73` 结果
+### 3.1 主实验: 分割性能 (Oracle, test73)
 
-| 方法 | PQ | BM-Dice | AJI | RQ/F1 | 备注 |
-|------|:--:|:-------:|:---:|:-----:|------|
-| Cellpose v3.1.1 (`d=250`) | 0.273 | 0.505 | 0.285 | F1=0.425 | `T31`, paper-aligned baseline |
-| SAM ViT-B | 0.286 | 0.631 | 0.440 | — | 无细胞微调 |
-| CellSAM 原始 | 0.434 | 0.682 | 0.499 | RQ=0.630 | 官方推理路径 (`T24` 修正) |
-| MedSAM | 0.576 | 0.771 | 0.634 | — | 强外部基线 |
-| **T27a Plan B Decoder-Only** | **0.659** | **0.800** | **0.669** | **F1=0.960** | **当前最佳 `test73` 单 checkpoint** |
+| 方法 | PQ | BM-Dice | AJI | 备注 |
+|------|:--:|:-------:|:---:|------|
+| CellSAM 原始 | 0.434 | 0.682 | 0.499 | 官方推理路径 (T24 修正) |
+| SAM ViT-B | 0.286 | 0.631 | 0.440 | 无细胞微调 |
+| Phase 1 (posw=2) | 0.464 | 0.695 | 0.519 | 50 ep |
+| **Best Config** (posw=10) | **0.484** | **0.720** | **0.570** | 80 ep, 4 runs mean |
+| T11 LoRA r4 | 0.483 | 0.720 | 0.569 | 2 seeds mean, ≈Best Config |
+| **T11 LoRA r8** | **0.494** | **0.725** | **0.578** | **2 seeds mean, +1.0pp** |
+| T18-A (BF+Actn2) | 0.496* | 0.724 | 0.573 | 🔄 seed42 only |
+| T18-B (3ch) | 0.498* | 0.725 | 0.574 | 🔄 seed42 only |
+| MedSAM | 0.576 | 0.771 | 0.634 | 上限参考 |
 
-> `T27a` 主表数值来自 `experiments/t27a_eval/results.json` 的 `test73` 单 checkpoint 评估，不是两 seed mean。`T18` 由于仍是 single-seed provisional，暂不放入主表。
+> \*T18 结果为单 seed (42)，待 seed=123 完成后取 mean。
 
-### 3.1b 官方路径对照审计 (`T34`, `val71` only)
+**E2E 评估 (test73, DAPI 检测)**:
 
-| Arm | PQ | BM-Dice | AJI | RQ | 备注 |
-|-----|:--:|:-------:|:---:|:--:|------|
-| Arm A | 0.491 | 0.723 | 0.570 | 0.811 | unified default |
-| Arm B | 0.491 | 0.723 | 0.570 | 0.811 | unified no-clip |
-| **Arm C** | **0.630** | **0.783** | **0.638** | **0.934** | **official path** |
-
-> `T34` 目前只有 `val71` 新结果，因此它是**路径选择审计证据**，不是最终 `test73` 结论。正文若引用，必须显式写 `val71`。
-
-**E2E 评估 (`T27a`, `test73`)**:
-
-| 设置 | PQ | F1 | BM-Dice | 备注 |
-|------|:--:|:--:|:-------:|------|
-| Oracle (GT boxes) | 0.659 | 0.960 | 0.800 | 主结果参照 |
-| DAPI 核检测 | 0.252 | 0.433 | 0.599 | `locked_eval` |
-| Adaptive Z-line | 0.293 | 0.497 | 0.612 | 当前 E2E 更优检测分支 |
-
-> 当前 Oracle→E2E 的主要瓶颈仍在检测而非分割。
+| 指标 | Phase 1 | Oracle→E2E Gap |
+|------|:-------:|:-----------:|
+| BM-1to1 Dice | 0.545 | -0.150 |
+| PQ@0.5 | 0.172 | -0.292 |
 
 ### 3.2 关键发现: Semantic vs Instance Dice (E29 之前)
 
@@ -472,16 +429,12 @@ gantt
     section 检测锁定
     E34 DAPI/Adaptive 封板         :done, 2026-02-13, 2026-02-14
     T3b Adaptive 重扫              :done, 2026-02-19, 2026-02-19
-    section 论文主线
+    section 论文实验
     T16 Baseline 对比              :done, 2026-02-20, 2026-02-22
     T12 Loss 消融                  :done, 2026-02-20, 2026-02-23
     Best Config 验证               :done, 2026-02-23, 2026-02-24
-    T18 三通道实验 (single-seed)   :done, 2026-02-24, 2026-02-26
+    T18 三通道实验                 :active, 2026-02-24, 2026-02-26
     T19 Box Clipping 消融          :done, 2026-02-22, 2026-02-22
-    T27a Plan B 主线               :done, 2026-03-01, 2026-03-02
-    T31 Cellpose paper-aligned     :done, 2026-03-04, 2026-03-05
-    T32 Neck-only (val-only)       :done, 2026-03-07, 2026-03-07
-    T34 官方路径审计 (val71)       :done, 2026-03-07, 2026-03-07
 ```
 
 ---
@@ -492,73 +445,68 @@ gantt
 
 | 实验 | 内容 | 预计产出 | 状态 |
 |------|------|---------|:----:|
-| **T34 `test73`** | 复跑 official path 对照，确认 Arm C 提升能否在 test 维持 | 最终路径选择结论 | ⏳ |
-| **T18 第二个 seed 或降级为附录** | 若保留通道消融主文，需补 mean；否则在正文中保持 provisional 标记 | 稳定的通道消融表 | ⏳ |
-| **主表图文对齐** | 按 `T27a/T31/T34` 重画主表与 caption，避免沿用 Best Config 旧口径 | 可直接入正文的 Result 小节 | ⏳ |
+| **T16 Baseline 对比** | Cellpose/StarDist/MedSAM/SAMCell vs Ours | 论文 Table: 方法对比 | ✅ 完成 |
+| **Best Config 验证** | posw=10, contour=off, 4 runs | 论文 Main Result | ✅ PQ=0.484 |
+| **T17 Training Curves** | Epoch vs loss/PQ 曲线 (train+val) | 论文 Figure: 训练曲线 | ⏳ |
+| **T18 三通道实验** | BF vs BF+Actn2 vs BF+DAPI+Actn2 + BF 继训对照 | 论文 Table: 通道消融 | ✅ 完成 (PQ=0.500, 净+0.9pp) |
 
 ### 🟡 P1 — 论文建议包含
 
 | 实验 | 内容 | 预计产出 | 状态 |
 |------|------|---------| :--: |
 | T21 CellSAM 原始 loss | 对比原始 vs 我们的 loss 设计 | 论文 §Method motivation | ⏳ |
-| **T12 Loss 消融** | 7 组 × 2 seeds, 解释为何主线选 `posw=10` / `contour=off` | 正文 Ablation table | ✅ 完成 |
-| **T17 Training Curves** | 基础图已生成，后续可补 mean±std 阴影带与 caption 打磨 | Figure polish | 🟡 基础图已有 |
-| **T32 Neck-only** | 当前仅 `val-only`，若正文要写只能作为 control / appendix | 结构性对照 | 🔄 val-only |
-| T19 框外像素策略 | Box Clipping 消融 | 讨论/appendix | ✅ 完成 |
+| **T11 LoRA Encoder** | SAM ViT-B Q/V LoRA (rank=4/8), 缩小 MedSAM 差距 | 论文 Table: Encoder 微调消融 | 🔄 实现完成, 审核中 [设计](t11_lora_design.md) |
+| **T12 Loss 消融** | **7 组 × 2 seeds 消融** | **论文 Table: Ablation** | **✅ 完成** |
+| T19 框外像素策略 | Box Clipping 消融 | 论文亮点 | ✅ 完成 |
 
 ### 🟢 P2 — 有时间就做
 
 | 实验 | 说明 |
 |------|------|
 | T20 Grad-CAM | 多通道注意力可视化 |
-| T11/T30 LoRA | Encoder 适配探索，当前不作为论文主结果 |
+| T11 LoRA | Encoder LoRA 微调探索 |
 
 ---
 
 ## 5. 建议论文结构
 
-### Master's Thesis (~20-50 pages)
+### Conference Paper (~8 pages)
 
 ```
 1. Introduction
-   - hiPSC-CM 实例分割的重要性与挑战
-   - 为什么选择 CellSAM 作为起点
-   - 本文贡献与证据边界
+   - 心肌细胞分割的重要性和挑战
+   - CellSAM 基础 + 微调动机
+   - 贡献列表 (3-4 点)
 
-2. Background and Related Work
-   - CellSAM / SAM / MedSAM / Cellpose
-   - 细胞实例分割评估口径
-   - 医学图像中参数高效微调与 boundary-aware loss
+2. Related Work
+   - 细胞分割: Cellpose, StarDist, MedSAM, SAMCell
+   - SAM 在医学图像中的应用
+   - Loss 函数设计 (boundary-aware losses)
 
-3. Dataset and Evaluation Protocol
-   3.1 Allen hiPSC-CM 数据集
-   3.2 Train/Val/Test 划分
-   3.3 指标定义: BM-Dice / PQ / AJI / RQ(F1)
-   3.4 Oracle vs E2E 设置
+3. Method
+   3.1 Overview (整体管线)
+   3.2 Detection Pipeline (DAPI 检测)
+   3.3 Loss Function Design (CombinedLoss 4 组件)
+   3.4 Training Strategy (Instance-level, Decoder-only)
+   3.5 LoRA Encoder Fine-tuning (Optional, if T11 succeeds)
 
-4. Method
-   4.1 CellSAM checkpoint audit: `model` vs `model_cp`
-   4.2 Detection pipeline
-   4.3 `T27a` training objective
-   4.4 Training setup and implementation details
+4. Experiments
+   4.1 Dataset & Setup
+   4.2 Main Results (Phase 1 vs Baseline 表)
+   4.3 Comparison with Existing Methods (T16 表)
+   4.4 Ablation Study
+       - Loss 组件消融 (T12 表)
+       - 输入通道消融 (T18 表)
+       - 检测参数消融 (E34)
+   4.5 Multi-channel Analysis (T18)
+   4.6 Negative Result: N/O Exclusion Loss (P2-A)
 
-5. Results
-   5.1 Locked `test73` main comparison (`T27a` / `T31` / baselines)
-   5.2 Official-path audit (`T34`, `val71`)
-   5.3 Oracle vs E2E gap
-   5.4 Ablations and exploratory results (`T12`, `T18`, `T19`, `P2-A`)
+5. Discussion
+   - Oracle vs E2E gap 分析
+   - 框外像素策略 (T19)
+   - 局限性和 future work
 
-6. Discussion
-   - 为什么 detection 是当前端到端瓶颈
-   - unified vs official path 对结论的影响
-   - T18/T32/T11/T30 应如何放在证据强弱序列里
-
-7. Conclusion
-
-Appendix
-   - 历史实验表
-   - 额外消融
-   - 指标与实现细节
+6. Conclusion
 ```
 
 ---
@@ -574,7 +522,7 @@ Appendix
 | Fig.3 | Training curves (loss + PQ vs epoch) | T17: `figures/training_curves_comparison.png` | ✅ |
 
 > **TODO Fig.3**: 后续加 mean±std 阴影带 (多 seed 曲线), R1 审核建议 — 审稿人可能问 single run or average。Caption 需写 "Validation metrics during training"。
-| Fig.4 | 分割结果可视化 (GT vs T27a vs CellSAM vs Cellpose) | `T27a` checkpoint + `T31` baseline | ⏳ |
+| Fig.4 | 分割结果可视化 (GT vs Ours vs Baseline) | Phase 1 checkpoint + Baseline | ⏳ |
 | Fig.5 | 检测结果示例 (DAPI 框 + 分割) | 已有 (napari 可视化) | 🔄 |
 
 ### 必须准备的 Tables
@@ -583,43 +531,28 @@ Appendix
 |-------|------|------|:----:|
 | Tab.1 | 与现有方法对比 | T16 Baseline | ✅ |
 | Tab.2 | Loss 消融 | T12 (7×2 seeds) | ✅ 数据已有 |
-| Tab.3 | 通道消融 | T18 2ch/3ch + BF 对照 | 🟡 single-seed provisional |
+| Tab.3 | 通道消融 | T18 2ch/3ch + BF 对照 | ✅ PQ=0.500, 净+0.9pp |
 | Tab.4 | 检测参数消融 | E34/E34b | ✅ 数据已有 |
-| Tab.5 | 主结果对比 (`test73`) + 路径审计 (`val71`) | `§3.1` / `§3.1b` | 🔄 需拆 split |
+| Tab.5 | 全方法对比 (§3.1 总表) | 已有 | ✅ |
 
 ---
 
 ## 附录: 数据对照速查
 
-### A1. 已锁定或可正文引用的结果
+### 已有实验指标一览
 
-| 配置 | Split | BM-Dice | PQ | AJI | SQ | RQ/F1 | 备注 |
-|------|:-----:|:-------:|:--:|:---:|:--:|:-----:|------|
-| Cellpose v3.1.1 (`d=250`) | test73 | 0.505 | 0.273 | 0.285 | 0.600 | F1=0.425 | `T31`, paper-aligned |
-| SAM ViT-B | test73 | 0.631 | 0.286 | 0.440 | — | — | 无细胞微调 |
-| CellSAM 原始 | test73 | 0.682 | 0.434 | 0.499 | 0.678 | RQ=0.630 | `T24` 修正 |
-| MedSAM | test73 | 0.771 | 0.576 | 0.634 | — | — | 强外部基线 |
-| **T27a Plan B** | **test73** | **0.800** | **0.659** | **0.669** | **0.683** | **F1=0.960** | 当前最佳 `test73` 单 checkpoint |
-| T27a Plan B | val71 | 0.798 | 0.649 | 0.667 | 0.684 | F1=0.944 | 同一 checkpoint |
-| T34 Arm A (unified default) | val71 | 0.723 | 0.491 | 0.570 | 0.606 | RQ=0.811 | 审计结果, 非最终 test 结论 |
-| T34 Arm B (unified no-clip) | val71 | 0.723 | 0.491 | 0.570 | 0.606 | RQ=0.811 | 与 Arm A 一致 |
-| T34 Arm C (official path) | val71 | 0.783 | 0.630 | 0.638 | 0.674 | RQ=0.934 | 路径审计最佳 |
-
-### A2. 历史/辅助结果 (正文慎用)
-
-| 配置 | Split | BM-Dice | PQ | AJI | 备注 |
-|------|:-----:|:-------:|:--:|:---:|------|
-| E29 Instance 基线 | Oracle | 0.593 | 0.326 | 0.410 | 历史起点 |
-| Phase 1 | test73 | 0.695 | 0.464 | 0.519 | 历史基线 |
-| Phase 1 (E2E, DAPI) | test73 | 0.545 | 0.172 | 0.318 | 历史 E2E 结果 |
-| Best Config | test73 | 0.720 | 0.484 | 0.570 | 4 runs mean, 历史最佳 |
-| T11 LoRA r4 | test73 | 0.720 | 0.483 | 0.569 | 2 seeds mean, 历史探索 |
-| T11 LoRA r8 | test73 | 0.725 | 0.494 | 0.578 | 2 seeds mean, 历史探索 |
-| T18-A BF+Actn2 | test73 | 0.724 | 0.496 | 0.573 | single-seed provisional |
-| T18-B 3ch | test73 | 0.725 | 0.498 | 0.574 | single-seed provisional |
-| P2-A Fix1 | Oracle | — | 0.232 | — | 负结果 |
-| P2-A Fix2 | Oracle | 0.687 | 0.393 | — | 负结果 |
-| P2-A Fix3 | Oracle | 0.712 | 0.466 | — | 负结果 |
+| 配置 | BM-Dice | PQ | AJI | SQ | RQ | 来源 |
+|------|:-------:|:--:|:---:|:--:|:--:|------|
+| CellSAM 原始 (Oracle) | 0.682 | 0.434 | 0.499 | 0.678 | 0.630 | T24 修正 (model_cp) |
+| E29 Instance 基线 (Oracle) | 0.593 | 0.326 | 0.410 | 0.586 | 0.557 | E29 |
+| Phase 1 (Oracle) | 0.695 | 0.464 | 0.519 | 0.616 | 0.753 | Phase 1 |
+| Phase 1 (E2E, DAPI) | 0.545 | 0.172 | 0.318 | — | — | E2E |
+| **Best Config (Oracle)** | **0.720** | **0.484** | **0.570** | — | — | **Best Config ⭐** |
+| T18-A BF+Actn2 (Oracle, s42) | 0.724 | 0.496 | 0.573 | — | — | T18-A 🔄 |
+| T18-B 3ch (Oracle, s42) | 0.725 | 0.498 | 0.574 | — | — | T18-B 🔄 |
+| P2-A Fix1 (Oracle) | — | 0.232 | — | — | — | Fix1 |
+| P2-A Fix2 (Oracle) | 0.687 | 0.393 | — | — | — | Fix2 |
+| P2-A Fix3 (Oracle) | 0.712 | 0.466 | — | — | — | Fix3 |
 
 ### T12 Loss 消融结果 (Oracle, test73, 2 seeds mean)
 
@@ -636,13 +569,12 @@ Appendix
 
 ### Loss 配置对照
 
-| 配置 | pos_w | boundary_w | aji_w | contour_w | focal_w | IoU head | PQ 早停 |
-|------|:-----:|:----------:|:-----:|:---------:|:-------:|:--------:|:------:|
-| E29 基线 | 10 | 0.5 | 0.2 | OFF | OFF | OFF | OFF |
-| Phase 1 | 2 | 1.5 | 0.2 | 0.3 | OFF | OFF | ON |
-| Best Config | 10 | 1.5 | 0.2 | OFF | OFF | OFF | ON |
-| **T27a** | **10** | **0.3** | **0.2** | **OFF** | **0.3** | **0.1** | **ON** |
-| P2-A Fix1 | 2 | 1.5 | 0.2 | 0.3 | OFF | OFF | ON + N=0.3,O=0.1 |
+| 配置 | pos_w | boundary_w | aji_w | contour_w | PQ 早停 |
+|------|:-----:|:----------:|:-----:|:---------:|:------:|
+| E29 基线 | 10 | 0.5 | 0.2 | OFF | OFF |
+| Phase 1 | 2 | 1.5 | 0.2 | 0.3 | ON |
+| P2-A Fix1 | 2 | 1.5 | 0.2 | 0.3 | ON + N=0.3,O=0.1 |
+| **Best Config** | **10** | **1.5** | **0.2** | **OFF** | **ON** |
 
 ---
 
@@ -674,15 +606,13 @@ Appendix
 
 > **建议**: 用 Prism 写初稿 → 最终版转 Overleaf 排版。
 
-> **当前工作流建议**: 事实表与实验口径先在本仓库维护为 SSOT，再同步到 Prism 起草正文；最终排版可继续转 Overleaf。
-
 ### 7.3 写作时间表
 
 | Phase | 内容 | 状态 |
 |-------|------|:----:|
-| **Phase 1: 框架搭建** | 以当前文档为骨架，在 Prism / Overleaf 建 thesis 目录并起草 §1-4 | 🔄 |
-| **Phase 2: 结果收口** | 完成 `T34 test73` 决策，并处理 `T18` 的 provisional / appendix 去留 | ⏳ |
-| **Phase 3: 填充结果** | 写主结果、Ablation、Discussion，补齐 Figure / Table caption | ⏳ |
+| **Phase 1: 框架搭建** | 创建项目, 写 §1-3, §4.1-4.2 | ⏳ |
+| **Phase 2: 实验补充** | T16 ✅, T18 ✅, T17 ⏳ | 🔄 |
+| **Phase 3: 填充结果** | 写 §4.3-4.6, §5 Discussion, 画 Figure | ⏳ |
 | **Phase 4: 打磨** | Abstract, Conclusion, 全文校对 | ⏳ |
 
 ---
