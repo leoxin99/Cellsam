@@ -134,15 +134,30 @@ def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     config = load_config(args.config)
 
-    # Load model (same as train.py)
+    # Load model
+    # Initialization order (must match train.py):
+    #   1. get_model() → base model (CPU)
+    #   2. apply_lora (if config says use_lora) → creates LoRA layers (CPU)
+    #   3. load_state_dict → loads checkpoint (including LoRA keys if present)
+    #   4. model.to(device) → move everything to GPU
     print(f"Loading checkpoint: {args.checkpoint}")
     model = get_model()
     model.adv_mode = True
-    model = model.to(device)
-    checkpoint = torch.load(args.checkpoint, map_location=device, weights_only=False)
+
+    # Apply LoRA BEFORE loading checkpoint, on CPU (so dims match)
+    use_lora = config.get('model', {}).get('use_lora', False)
+    if use_lora:
+        sys.path.insert(0, str(PROJECT_ROOT / "src"))
+        from lora import apply_lora_to_encoder
+        lora_rank = config['model'].get('lora_rank', 4)
+        apply_lora_to_encoder(model.model_cp.image_encoder, rank=lora_rank)
+        print(f"  LoRA injected: rank={lora_rank}, target=encoder Q/V")
+
+    checkpoint = torch.load(args.checkpoint, map_location='cpu', weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+    model = model.to(device)
     model.eval()
-    print(f"Model loaded on {device}")
+    print(f"Model loaded on {device}{' (with LoRA)' if use_lora else ''}")
 
     # Output directory
     if args.output_dir is None:
@@ -172,10 +187,14 @@ def main():
             max_boxes_per_image=config['data'].get('max_boxes_per_image', 30),
             use_bf_only=config['data'].get('use_bf_only', True),
             use_semantic_mapping=config['data'].get('use_semantic_mapping', False),
+            use_official_encoding=config['data'].get('use_official_encoding', False),
+            official_r_channel=config['data'].get('official_r_channel', 'blank'),
             is_training=False,
         )
+        # cv2.CLAHE cannot be pickled for multiprocessing; use 0 workers when semantic_mapping is on
+        nw = 0 if config['data'].get('use_semantic_mapping', False) else 4
         loader = DataLoader(ds, batch_size=args.batch_size, shuffle=False,
-                           num_workers=4, pin_memory=True, collate_fn=collate_fn)
+                           num_workers=nw, pin_memory=True, collate_fn=collate_fn)
         print(f"  Dataset: {len(ds)} images")
 
         t0 = time.time()
