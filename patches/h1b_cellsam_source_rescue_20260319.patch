@@ -1,0 +1,696 @@
+﻿diff --git a/cellSAM/AnchorDETR/models/anchor_detr.py b/cellSAM/AnchorDETR/models/anchor_detr.py
+index c3e1a7c..f6f56bc 100644
+--- a/cellSAM/AnchorDETR/models/anchor_detr.py
++++ b/cellSAM/AnchorDETR/models/anchor_detr.py
+@@ -88,7 +88,34 @@ class AnchorDETR(nn.Module):
+             nn.init.xavier_uniform_(proj[0].weight, gain=1)
+             nn.init.constant_(proj[0].bias, 0)
+ 
+-    def forward(self, samples: NestedTensor):
++    def _apply_candidate_mask(self, outputs_class, candidate_valid_mask):
++        if candidate_valid_mask is None:
++            return outputs_class
++
++        if candidate_valid_mask.dim() != 2:
++            raise ValueError(
++                "candidate_valid_mask must have shape [B, Q], "
++                f"got {tuple(candidate_valid_mask.shape)}"
++            )
++        if outputs_class.shape[1:3] != candidate_valid_mask.shape:
++            raise ValueError(
++                "candidate_valid_mask shape must match transformer queries, "
++                f"got logits {tuple(outputs_class.shape[1:3])} vs mask {tuple(candidate_valid_mask.shape)}"
++            )
++
++        return outputs_class.masked_fill(
++            (~candidate_valid_mask).unsqueeze(0).unsqueeze(-1),
++            -12.0,
++        )
++
++    def forward(
++        self,
++        samples: NestedTensor,
++        candidate_points=None,
++        candidate_valid_mask=None,
++        prior_mode: str = "strict",
++        apply_candidate_mask: bool = True,
++    ):
+         """The forward expects a NestedTensor, which consists of:
+            - samples.tensor: batched images, of shape [batch_size x 3 x H x W]
+            - samples.mask: a binary mask of shape [batch_size x H x W], containing 1 on padded pixels
+@@ -118,9 +145,19 @@ class AnchorDETR(nn.Module):
+ 
+         srcs = torch.cat(srcs, dim=1)
+ 
+-        outputs_class, outputs_coord = self.transformer(srcs, masks)
++        (outputs_class, outputs_coord), effective_valid_mask = self.transformer(
++            srcs,
++            masks,
++            candidate_points=candidate_points,
++            candidate_valid_mask=candidate_valid_mask,
++            prior_mode=prior_mode,
++        )
++        if apply_candidate_mask:
++            outputs_class = self._apply_candidate_mask(outputs_class, effective_valid_mask)
+ 
+         out = {"pred_logits": outputs_class[-1], "pred_boxes": outputs_coord[-1]}
++        if effective_valid_mask is not None:
++            out["effective_candidate_valid_mask"] = effective_valid_mask
+         if self.aux_loss:
+             out["aux_outputs"] = self._set_aux_loss(outputs_class, outputs_coord)
+ 
+diff --git a/cellSAM/AnchorDETR/models/matcher.py b/cellSAM/AnchorDETR/models/matcher.py
+index c6e7f5d..0ea310b 100644
+--- a/cellSAM/AnchorDETR/models/matcher.py
++++ b/cellSAM/AnchorDETR/models/matcher.py
+@@ -15,7 +15,7 @@ import torch
+ from scipy.optimize import linear_sum_assignment
+ from torch import nn
+ 
+-from AnchorDETR.util.box_ops import box_cxcywh_to_xyxy, generalized_box_iou
++from ..util.box_ops import box_cxcywh_to_xyxy, generalized_box_iou
+ 
+ 
+ class HungarianMatcher(nn.Module):
+diff --git a/cellSAM/AnchorDETR/models/transformer.py b/cellSAM/AnchorDETR/models/transformer.py
+index 9d5017d..18e0c86 100644
+--- a/cellSAM/AnchorDETR/models/transformer.py
++++ b/cellSAM/AnchorDETR/models/transformer.py
+@@ -128,28 +128,146 @@ class Transformer(nn.Module):
+         self.class_embed = nn.ModuleList([self.class_embed for _ in range(num_pred)])
+         self.bbox_embed = nn.ModuleList([self.bbox_embed for _ in range(num_pred)])
+ 
+-    def forward(self, srcs, masks):
+-        # prepare input for decoder
+-        bs, l, c, h, w = srcs.shape
+-
++    def _default_reference_points(self, bs, device):
+         if self.spatial_prior == "learned":
+-            reference_points = self.position.weight.unsqueeze(0).repeat(
++            return self.position.weight.to(device).unsqueeze(0).repeat(
+                 bs, self.num_pattern, 1
+             )
+-        elif self.spatial_prior == "grid":
++        if self.spatial_prior == "grid":
+             nx = ny = round(math.sqrt(self.num_position))
+             self.num_position = nx * ny
+-            x = (torch.arange(nx) + 0.5) / nx
+-            y = (torch.arange(ny) + 0.5) / ny
++            x = (torch.arange(nx, device=device) + 0.5) / nx
++            y = (torch.arange(ny, device=device) + 0.5) / ny
+             xy = torch.meshgrid(x, y)
+             reference_points = torch.cat(
+                 [xy[0].reshape(-1)[..., None], xy[1].reshape(-1)[..., None]], -1
+-            ).cuda()
+-            reference_points = reference_points.unsqueeze(0).repeat(
+-                bs, self.num_pattern, 1
++            )
++            return reference_points.unsqueeze(0).repeat(bs, self.num_pattern, 1)
++        raise ValueError(f"unknown {self.spatial_prior} spatial prior")
++
++    def _build_reference_points(
++        self,
++        bs: int,
++        device,
++        candidate_points=None,
++        candidate_valid_mask=None,
++        prior_mode: str = "strict",
++    ):
++        fallback_reference_points = self._default_reference_points(bs, device)
++        if candidate_points is None:
++            return fallback_reference_points, None
++
++        if candidate_points.dim() == 2:
++            if bs != 1:
++                raise ValueError(
++                    "2D candidate_points is only valid for batch_size=1, "
++                    f"got batch_size={bs}"
++                )
++            candidate_points = candidate_points.unsqueeze(0)
++
++        if candidate_points.dim() != 3 or candidate_points.shape[0] != bs:
++            raise ValueError(
++                "candidate_points must have shape [B, Q, 2], "
++                f"got {tuple(candidate_points.shape)}"
++            )
++        if candidate_points.shape[-1] != 2:
++            raise ValueError(
++                f"candidate_points last dim must be 2, got {candidate_points.shape[-1]}"
++            )
++
++        candidate_points = candidate_points.to(
++            device=device,
++            dtype=fallback_reference_points.dtype,
++        )
++        candidate_points = torch.clamp(candidate_points, 0.0, 1.0)
++
++        if candidate_valid_mask is None:
++            candidate_valid_mask = torch.ones(
++                candidate_points.shape[:2],
++                dtype=torch.bool,
++                device=device,
+             )
+         else:
+-            raise ValueError(f"unknown {self.spatial_prior} spatial prior")
++            if candidate_valid_mask.dim() == 1:
++                if bs != 1:
++                    raise ValueError(
++                        "1D candidate_valid_mask is only valid for batch_size=1, "
++                        f"got batch_size={bs}"
++                    )
++                candidate_valid_mask = candidate_valid_mask.unsqueeze(0)
++            candidate_valid_mask = candidate_valid_mask.to(device=device, dtype=torch.bool)
++            if candidate_valid_mask.shape[:2] != candidate_points.shape[:2]:
++                raise ValueError(
++                    "candidate_valid_mask must match candidate_points shape [B, Q], "
++                    f"got {tuple(candidate_valid_mask.shape)} vs {tuple(candidate_points.shape)}"
++                )
++
++        num_candidate_queries = candidate_points.shape[1]
++        if num_candidate_queries < self.num_position:
++            pad_count = self.num_position - num_candidate_queries
++            pad_points = torch.full(
++                (bs, pad_count, 2),
++                0.5,
++                dtype=candidate_points.dtype,
++                device=device,
++            )
++            pad_mask = torch.zeros((bs, pad_count), dtype=torch.bool, device=device)
++            candidate_points = torch.cat([candidate_points, pad_points], dim=1)
++            candidate_valid_mask = torch.cat([candidate_valid_mask, pad_mask], dim=1)
++        elif num_candidate_queries > self.num_position:
++            candidate_points = candidate_points[:, : self.num_position]
++            candidate_valid_mask = candidate_valid_mask[:, : self.num_position]
++
++        expanded_candidate_points = (
++            candidate_points.unsqueeze(1)
++            .repeat(1, self.num_pattern, 1, 1)
++            .reshape(bs, self.num_pattern * self.num_position, 2)
++        )
++        expanded_candidate_valid_mask = (
++            candidate_valid_mask.unsqueeze(1)
++            .repeat(1, self.num_pattern, 1)
++            .reshape(bs, self.num_pattern * self.num_position)
++        )
++
++        prior_mode = prior_mode or "strict"
++        if prior_mode == "strict":
++            invalid_fill = torch.full_like(expanded_candidate_points, 0.5)
++            reference_points = torch.where(
++                expanded_candidate_valid_mask.unsqueeze(-1),
++                expanded_candidate_points,
++                invalid_fill,
++            )
++        elif prior_mode == "hybrid":
++            reference_points = torch.where(
++                expanded_candidate_valid_mask.unsqueeze(-1),
++                expanded_candidate_points,
++                fallback_reference_points,
++            )
++        else:
++            raise ValueError(
++                f"Unsupported prior_mode={prior_mode}. Expected 'strict' or 'hybrid'."
++            )
++
++        return reference_points, expanded_candidate_valid_mask
++
++    def forward(
++        self,
++        srcs,
++        masks,
++        candidate_points=None,
++        candidate_valid_mask=None,
++        prior_mode: str = "strict",
++    ):
++        # prepare input for decoder
++        bs, l, c, h, w = srcs.shape
++
++        reference_points, candidate_valid_mask = self._build_reference_points(
++            bs=bs,
++            device=srcs.device,
++            candidate_points=candidate_points,
++            candidate_valid_mask=candidate_valid_mask,
++            prior_mode=prior_mode,
++        )
+ 
+         tgt = (
+             self.pattern.weight.reshape(1, self.num_pattern, 1, c)
+@@ -221,7 +339,7 @@ class Transformer(nn.Module):
+ 
+         output = torch.cat(outputs_classes, dim=0), torch.cat(outputs_coords, dim=0)
+ 
+-        return output
++        return output, candidate_valid_mask
+ 
+ 
+ class TransformerEncoderLayerSpatial(nn.Module):
+diff --git a/cellSAM/sam_inference.py b/cellSAM/sam_inference.py
+index 28c73ff..f5f0268 100755
+--- a/cellSAM/sam_inference.py
++++ b/cellSAM/sam_inference.py
+@@ -14,6 +14,7 @@ from sklearn.cluster import KMeans
+ import torchvision.transforms.v2 as T
+ from .AnchorDETR.models import build_inference_model
+ from .AnchorDETR import transforms as anchorT
++from .AnchorDETR.util.box_ops import box_cxcywh_to_xyxy
+ from segment_anything import (
+     sam_model_registry,
+ )
+@@ -93,6 +94,7 @@ class CellfinderAnchorDetr(nn.Module):
+         args.num_feature_levels = 1
+         args.device = "cuda"
+         args.num_classes = 2
++        args.prior_mode = getattr(args, "prior_mode", "strict")
+         
+         # Additional required parameters
+         args.in_channels = 768
+@@ -104,13 +106,43 @@ class CellfinderAnchorDetr(nn.Module):
+         if not hasattr(self, "decode_head"):
+             self.decode_head, self.postprocessors = build_inference_model(args)
+ 
+-    def forward(self, features=None):
+-        outputs = self.decode_head(features)
++    def forward(
++        self,
++        features=None,
++        candidate_points=None,
++        candidate_valid_mask=None,
++        prior_mode=None,
++        apply_candidate_mask=True,
++    ):
++        outputs = self.decode_head(
++            features,
++            candidate_points=candidate_points,
++            candidate_valid_mask=candidate_valid_mask,
++            prior_mode=prior_mode or self.args.prior_mode,
++            apply_candidate_mask=apply_candidate_mask,
++        )
+         return outputs
+ 
+     @torch.no_grad()
+-    def forward_inference(self, imgs, viz=False):
+-        outputs = self.decode_head(imgs)
++    def forward_inference(
++        self,
++        imgs,
++        viz=False,
++        candidate_points=None,
++        candidate_valid_mask=None,
++        prior_mode=None,
++        apply_candidate_mask=True,
++        return_raw_outputs=False,
++    ):
++        outputs = self.decode_head(
++            imgs,
++            candidate_points=candidate_points,
++            candidate_valid_mask=candidate_valid_mask,
++            prior_mode=prior_mode or self.args.prior_mode,
++            apply_candidate_mask=apply_candidate_mask,
++        )
++        if return_raw_outputs:
++            return outputs
+ 
+         orig_target_sizes = [torch.tensor(img.shape[-2:]) for img in imgs]
+         orig_target_sizes = torch.stack(orig_target_sizes, dim=0)
+@@ -230,39 +262,355 @@ class CellSAM(nn.Module):
+ 
+         return imgs, paddings
+ 
++    def _prepare_candidate_prior_batch(
++        self,
++        candidate_points_per_image,
++        candidate_valid_masks,
++        batch_size,
++        max_queries,
++        device,
++    ):
++        if candidate_points_per_image is None:
++            return None, None
++
++        def _pad_or_truncate(points_tensor, valid_mask_tensor):
++            num_points = points_tensor.shape[0]
++            if num_points < max_queries:
++                pad_count = max_queries - num_points
++                pad_points = torch.full(
++                    (pad_count, 2),
++                    0.5,
++                    dtype=torch.float32,
++                    device=device,
++                )
++                pad_mask = torch.zeros((pad_count,), dtype=torch.bool, device=device)
++                points_tensor = torch.cat([points_tensor, pad_points], dim=0)
++                valid_mask_tensor = torch.cat([valid_mask_tensor, pad_mask], dim=0)
++            elif num_points > max_queries:
++                points_tensor = points_tensor[:max_queries]
++                valid_mask_tensor = valid_mask_tensor[:max_queries]
++
++            return torch.clamp(points_tensor, 0.0, 1.0), valid_mask_tensor
++
++        if torch.is_tensor(candidate_points_per_image):
++            candidate_points = candidate_points_per_image.to(device=device, dtype=torch.float32)
++            if candidate_points.dim() == 2:
++                if batch_size != 1:
++                    raise ValueError(
++                        "2D candidate_points_per_image is only valid for batch_size=1"
++                    )
++                candidate_points = candidate_points.unsqueeze(0)
++            if candidate_points.dim() != 3 or candidate_points.shape[0] != batch_size:
++                raise ValueError(
++                    "candidate_points_per_image must have shape [B, Q, 2], "
++                    f"got {tuple(candidate_points.shape)}"
++                )
++            if candidate_points.shape[-1] != 2:
++                raise ValueError(
++                    "candidate_points_per_image last dim must be 2, "
++                    f"got {candidate_points.shape[-1]}"
++                )
++
++            if candidate_valid_masks is None:
++                candidate_valid_mask = torch.ones(
++                    candidate_points.shape[:2],
++                    dtype=torch.bool,
++                    device=device,
++                )
++            else:
++                candidate_valid_mask = torch.as_tensor(
++                    candidate_valid_masks,
++                    device=device,
++                    dtype=torch.bool,
++                )
++                if candidate_valid_mask.dim() == 1:
++                    if batch_size != 1:
++                        raise ValueError(
++                            "1D candidate_valid_masks is only valid for batch_size=1"
++                        )
++                    candidate_valid_mask = candidate_valid_mask.unsqueeze(0)
++                if candidate_valid_mask.shape != candidate_points.shape[:2]:
++                    raise ValueError(
++                        "candidate_valid_masks must match candidate_points_per_image shape [B, Q], "
++                        f"got {tuple(candidate_valid_mask.shape)} vs {tuple(candidate_points.shape[:2])}"
++                    )
++
++            point_batches = []
++            mask_batches = []
++            for index in range(batch_size):
++                points_tensor, valid_mask_tensor = _pad_or_truncate(
++                    candidate_points[index],
++                    candidate_valid_mask[index],
++                )
++                point_batches.append(points_tensor)
++                mask_batches.append(valid_mask_tensor)
++            return torch.stack(point_batches, dim=0), torch.stack(mask_batches, dim=0)
++
++        if len(candidate_points_per_image) != batch_size:
++            raise ValueError(
++                "candidate_points_per_image length must match batch size, "
++                f"got {len(candidate_points_per_image)} vs {batch_size}"
++            )
++
++        if candidate_valid_masks is None:
++            candidate_valid_masks = [None] * batch_size
++        elif len(candidate_valid_masks) != batch_size:
++            raise ValueError(
++                "candidate_valid_masks length must match batch size, "
++                f"got {len(candidate_valid_masks)} vs {batch_size}"
++            )
++
++        point_batches = []
++        mask_batches = []
++        for points_item, mask_item in zip(candidate_points_per_image, candidate_valid_masks):
++            points_tensor = torch.as_tensor(points_item, device=device, dtype=torch.float32)
++            if points_tensor.numel() == 0:
++                points_tensor = points_tensor.reshape(0, 2)
++            if points_tensor.dim() != 2 or points_tensor.shape[-1] != 2:
++                raise ValueError(
++                    "Each candidate point array must have shape [Q, 2], "
++                    f"got {tuple(points_tensor.shape)}"
++                )
++
++            if mask_item is None:
++                valid_mask_tensor = torch.ones(
++                    (points_tensor.shape[0],),
++                    dtype=torch.bool,
++                    device=device,
++                )
++            else:
++                valid_mask_tensor = torch.as_tensor(
++                    mask_item,
++                    device=device,
++                    dtype=torch.bool,
++                ).reshape(-1)
++                if valid_mask_tensor.shape[0] != points_tensor.shape[0]:
++                    raise ValueError(
++                        "Each candidate mask must match its point count, "
++                        f"got {valid_mask_tensor.shape[0]} vs {points_tensor.shape[0]}"
++                    )
++
++            points_tensor, valid_mask_tensor = _pad_or_truncate(
++                points_tensor,
++                valid_mask_tensor,
++            )
++            point_batches.append(points_tensor)
++            mask_batches.append(valid_mask_tensor)
++
++        return torch.stack(point_batches, dim=0), torch.stack(mask_batches, dim=0)
++
++    def _target_sizes_from_batch(self, imgs):
++        target_sizes = [torch.tensor(img.shape[-2:]) for img in imgs]
++        target_sizes = torch.stack(target_sizes, dim=0)
++        return target_sizes.to(imgs.device)
++
++    def _raw_outputs_to_query_results(self, outputs, target_sizes):
++        pred_logits = outputs["pred_logits"]
++        pred_boxes = outputs["pred_boxes"]
++
++        scores = pred_logits.sigmoid()[..., 0]
++        boxes = box_cxcywh_to_xyxy(pred_boxes)
++
++        img_h, img_w = target_sizes.unbind(1)
++        scale_fct = torch.stack([img_w, img_h, img_w, img_h], dim=1)
++        boxes = boxes * scale_fct[:, None, :]
++
++        effective_valid_mask = outputs.get("effective_candidate_valid_mask")
++        query_results = []
++        for batch_index in range(boxes.shape[0]):
++            item = {
++                "boxes": boxes[batch_index],
++                "scores": scores[batch_index],
++            }
++            if effective_valid_mask is not None:
++                item["effective_candidate_valid_mask"] = effective_valid_mask[batch_index]
++            query_results.append(item)
++        return query_results
++
++    def _candidate_aligned_boxes_from_query_results(self, query_results):
++        aligned_boxes = []
++        for result in query_results:
++            valid_mask = result.get("effective_candidate_valid_mask")
++            if valid_mask is None:
++                raise ValueError(
++                    "candidate_aligned output requires effective_candidate_valid_mask "
++                    "from prior-aware query outputs."
++                )
++            aligned_boxes.append(result["boxes"][valid_mask])
++        return aligned_boxes
++
++    @torch.no_grad()
++    def generate_query_outputs(
++        self,
++        images,
++        device=None,
++        candidate_points_per_image=None,
++        candidate_valid_masks=None,
++        prior_mode=None,
++        apply_candidate_mask=True,
++    ):
++        transformed_imgs_anchor = self.sam_bbox_preprocessing(images, percentile=False)
++        candidate_points, candidate_valid_mask = self._prepare_candidate_prior_batch(
++            candidate_points_per_image=candidate_points_per_image,
++            candidate_valid_masks=candidate_valid_masks,
++            batch_size=transformed_imgs_anchor.shape[0],
++            max_queries=self.cellfinder.args.num_query_position,
++            device=transformed_imgs_anchor.device,
++        )
++        raw_outputs = self.cellfinder.forward_inference(
++            transformed_imgs_anchor,
++            candidate_points=candidate_points,
++            candidate_valid_mask=candidate_valid_mask,
++            prior_mode=prior_mode,
++            apply_candidate_mask=apply_candidate_mask,
++            return_raw_outputs=True,
++        )
++        target_sizes = self._target_sizes_from_batch(transformed_imgs_anchor)
++        return self._raw_outputs_to_query_results(raw_outputs, target_sizes)
++
++    def _filter_boxes_by_scores(
++        self,
++        boxes_per_heatmap,
++        pred_scores,
++        score_filter_mode="dynamic",
++        score_threshold=None,
++    ):
++        """Filter postprocessed boxes using the requested score policy."""
++        score_filter_mode = score_filter_mode or "dynamic"
++        if score_filter_mode == "none":
++            return boxes_per_heatmap
++
++        filtered_boxes = []
++        for boxes, scores in zip(boxes_per_heatmap, pred_scores):
++            score_data = scores.detach().cpu().numpy()
++            if len(score_data) == 0:
++                filtered_boxes.append(boxes)
++                continue
++
++            if score_filter_mode == "dynamic":
++                threshold = self.bbox_threshold
++                if len(score_data) > 1:
++                    try:
++                        kmeans = KMeans(n_clusters=2, random_state=42).fit(
++                            score_data.reshape(-1, 1)
++                        )
++                        cluster_centers = kmeans.cluster_centers_
++                        threshold_cluster = np.mean(cluster_centers)
++                        threshold = 0.66 * self.bbox_threshold + 0.33 * threshold_cluster
++                    except:
++                        pass
++            elif score_filter_mode == "fixed":
++                threshold = (
++                    self.bbox_threshold if score_threshold is None else score_threshold
++                )
++            else:
++                raise ValueError(
++                    "Unsupported score_filter_mode="
++                    f"{score_filter_mode}. Expected 'dynamic', 'fixed', or 'none'."
++                )
++
++            if threshold <= 0.0:
++                filtered_boxes.append(boxes)
++                continue
++
++            keep_mask = torch.as_tensor(
++                score_data > threshold,
++                device=boxes.device,
++                dtype=torch.bool,
++            )
++            filtered_boxes.append(boxes[keep_mask])
++
++        return filtered_boxes
++
++    def _resolve_score_filter_policy(
++        self,
++        candidate_points_per_image,
++        prior_mode,
++        score_filter_mode,
++        score_threshold,
++    ):
++        """Pick the score-filter policy, preserving legacy behavior by default."""
++        if score_filter_mode is not None:
++            return score_filter_mode, score_threshold
++
++        resolved_prior_mode = prior_mode or getattr(self.cellfinder.args, "prior_mode", None)
++        if candidate_points_per_image is not None and resolved_prior_mode == "strict":
++            resolved_threshold = 0.3 if score_threshold is None else score_threshold
++            return "fixed", resolved_threshold
++
++        return "dynamic", score_threshold
++
+     @torch.no_grad()
+-    def generate_bounding_boxes(self, images, device=None):
++    def generate_bounding_boxes(
++        self,
++        images,
++        device=None,
++        candidate_points_per_image=None,
++        candidate_valid_masks=None,
++        prior_mode=None,
++        score_filter_mode=None,
++        score_threshold=None,
++        query_output_mode="filtered",
++        apply_candidate_mask=True,
++    ):
+         """
+-        Generates bounding boxes for the given images with dynamic thresholding.
++        Generates bounding boxes for the given images with configurable score filtering.
++
++        Default policy:
++        - legacy / no-prior path -> dynamic score filtering
++        - strict prior path -> fixed threshold 0.3
+         """
++        if query_output_mode not in {"filtered", "candidate_aligned"}:
++            raise ValueError(
++                f"Unsupported query_output_mode={query_output_mode}. "
++                "Expected 'filtered' or 'candidate_aligned'."
++            )
++
++        if query_output_mode == "candidate_aligned":
++            if candidate_points_per_image is None:
++                raise ValueError(
++                    "candidate_aligned output requires candidate_points_per_image."
++                )
++            query_results = self.generate_query_outputs(
++                images,
++                device=device,
++                candidate_points_per_image=candidate_points_per_image,
++                candidate_valid_masks=candidate_valid_masks,
++                prior_mode=prior_mode,
++                apply_candidate_mask=apply_candidate_mask,
++            )
++            return self._candidate_aligned_boxes_from_query_results(query_results)
++
+         transformed_imgs_anchor = self.sam_bbox_preprocessing(images, percentile=False)
+-        results = self.cellfinder.forward_inference(transformed_imgs_anchor)
++        candidate_points, candidate_valid_mask = self._prepare_candidate_prior_batch(
++            candidate_points_per_image=candidate_points_per_image,
++            candidate_valid_masks=candidate_valid_masks,
++            batch_size=transformed_imgs_anchor.shape[0],
++            max_queries=self.cellfinder.args.num_query_position,
++            device=transformed_imgs_anchor.device,
++        )
++        results = self.cellfinder.forward_inference(
++            transformed_imgs_anchor,
++            candidate_points=candidate_points,
++            candidate_valid_mask=candidate_valid_mask,
++            prior_mode=prior_mode,
++            apply_candidate_mask=apply_candidate_mask,
++        )
+ 
+         boxes_per_heatmap = [x["boxes"] for x in results]
+         pred_scores = [x["scores"] for x in results]
+-
+-        # Apply dynamic thresholding like in predict method
+-        if len(pred_scores) > 0:
+-            data = pred_scores[0].detach().cpu().numpy()
+-            data_reshaped = data.reshape(-1, 1)
+-
+-            # dynamic thresholding
+-            threshold = self.bbox_threshold
+-            if len(data_reshaped) > 1:
+-                try:
+-                    kmeans = KMeans(n_clusters=2, random_state=42).fit(data_reshaped)
+-                    cluster_centers = kmeans.cluster_centers_
+-                    threshold_cluster = np.mean(cluster_centers)
+-                    threshold = 0.66 * self.bbox_threshold + 0.33 * threshold_cluster
+-                except:
+-                    pass
+-
+-            if threshold > 0.0 and len(data) > 0:
+-                boxes_per_heatmap = [
+-                    box[data > threshold] for idx, box in enumerate(boxes_per_heatmap)
+-                ]
+-
+-        return boxes_per_heatmap
++        resolved_mode, resolved_threshold = self._resolve_score_filter_policy(
++            candidate_points_per_image=candidate_points_per_image,
++            prior_mode=prior_mode,
++            score_filter_mode=score_filter_mode,
++            score_threshold=score_threshold,
++        )
++        return self._filter_boxes_by_scores(
++            boxes_per_heatmap,
++            pred_scores,
++            score_filter_mode=resolved_mode,
++            score_threshold=resolved_threshold,
++        )
+ 
+     @torch.no_grad()
+     def generate_embeddings(
