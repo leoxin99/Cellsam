@@ -1,0 +1,56 @@
+\section{Discussion}\label{discussion}
+
+\subsection{What Is Stable in the Current Evidence}\label{what-is-stable-in-the-current-evidence}
+
+The current thesis already supports one stable central claim: cardiomyocyte-specific adaptation of the released CellSAM checkpoint is necessary, and the sealed T28 route provides a strong split-aware mainline. This conclusion is supported by the T28 dual-seed \texttt{val71} summary together with locked \texttt{test73} references against the released CellSAM checkpoint, the latest-version Cellpose rerun, and the MedSAM baseline. Therefore, the thesis can already argue for the value of task-specific adaptation without waiting for every side experiment to converge. For detector-driven integration, T28 is the fixed segmentation backend.
+
+A second stable conclusion is that segmentation quality and prompting quality must be separated analytically. Under Oracle prompting, segmentation quality is strong. Under end-to-end prompting, performance drops sharply. This means the segmentation branch is no longer the main limiting factor once a correct box is available; the deployment bottleneck has shifted to detection quality.
+
+This point is stronger than a single performance-number story because the baselines answer different questions rather than duplicating one another. Cellpose asks whether a strong generalist cell segmenter already transfers. SAM ViT-B asks whether generic promptable segmentation is enough without cell-domain adaptation. CellSAM-pretrained asks whether zero-shot cell-domain transfer is already sufficient. MedSAM asks whether large-scale medical pretraining dominates a cardiomyocyte-specific route. Taken together, the locked \texttt{test73} historical adaptation reference and the sealed \texttt{val71} T28 mainline support a multi-layer claim about task specificity, audited implementation, and evaluation discipline.
+
+Under this framing, the value of the thesis is not that it simply trains another segmentation model. Its value is that it turns a released CellSAM pipeline into a domain-audited, prompt-aware, cardiomyocyte-specific system for a difficult adherent-cell setting with non-RGB biological channel semantics. The strongest methodological contributions are domain-aware input handling, prompt-quality-aware fine-tuning, and biology-prior-guided integration of DAPI and Actn2 cues with foundation segmentation.
+
+\subsection{Released-Checkpoint Semantics Are Part of the Scientific Contribution}\label{released-checkpoint-semantics-are-part-of-the-scientific-contribution}
+
+This thesis does not treat the released CellSAM checkpoint as a black box. Instead, it treats checkpoint semantics as part of the method. This is necessary because the public CellSAM release contains multiple internal branches, and the practical meaning of released-checkpoint segmentation inference is not recoverable from the paper narrative alone.
+
+The published CellSAM paper describes a two-stage training scheme in which Stage 2 closes the gap between the adapted ViT features and the segmentation branch by freezing the ViT and the SAM mask decoder while fine-tuning the neck. However, the released checkpoint contains \texttt{model}, \texttt{model\_cp}, and \texttt{cellfinder} branches with globally different parameter sets. Therefore, the thesis draws a strict boundary between what is directly verifiable and what remains uncertain. We can verify which branch is used for inference and how the released checkpoint is structured. We cannot fully reconstruct the hidden training path that produced the public weights.
+
+This distinction is not a minor implementation footnote. It affects reproducibility, baseline fairness, and the interpretation of every result that claims to represent the released CellSAM model. For this reason, the thesis explicitly anchors all released-checkpoint segmentation results to the \texttt{model\_cp} inference path and reports the remaining ambiguity as a limitation rather than hiding it.
+
+\subsection{Detection Is the Main Deployment Bottleneck}\label{detection-is-the-main-deployment-bottleneck}
+
+The Oracle-to-end-to-end gap is currently the clearest practical limitation of the system. Oracle performance shows that the segmentation branch can segment cardiomyocytes well when prompted with correct boxes. However, end-to-end performance remains much lower under automatic detection. This means the next large gain in practical usability is more likely to come from improving prompt quality than from making the segmentation decoder slightly stronger.
+
+This observation also helps define the scope of the thesis. The thesis does not claim that the current pipeline is a fully solved end-to-end cardiomyocyte segmentation system. Rather, it claims that the segmentation branch has become strong enough that detection quality is now the dominant obstacle to deployment.
+
+This is precisely why prompt-quality-aware adaptation and biology-prior-guided hybrid detection are methodologically grounded next steps rather than arbitrary engineering add-ons. The selected biology-prior detector branch (\texttt{T33g+T28}) should be read under this principle: it is chosen for biology-prior consistency (including Actn2-aware filtering), not because it is the detector-metric-optimal branch. This boundary is especially important under GT-v1 label ambiguity, where limited missing/over-labeled cases can distort strict metric ranking in end-to-end comparisons. At the same time, the sealed \texttt{S2-E3} result sharpens the boundary of that claim: switching the noisy source to frozen CellFinder prompts and early-stopping on validation E2E F1 still does not produce a positive turn. This suggests that the next practical gains are more likely to come from improving prompt generation itself than from another simple round of mixed noisy-box decoder fine-tuning.
+
+\subsection{Limits of the Current Evidence Hierarchy}\label{limits-of-the-current-evidence-hierarchy}
+
+Not all positive signals in the project carry the same evidential weight. T12 is useful because it has multi-seed support and explains why the loss evolution moved away from the original Phase 1 configuration. In contrast, the preliminary single-seed multi-channel observation retained in Appendix~B can only be treated as a weak directional signal, not as a locked body-level claim. Likewise, encoder-adaptation probes (for example T30, with historical T11 context) are interesting but remain exploratory rather than mainline.
+
+Negative results also matter. The exclusion-loss experiments show that intuitively appealing structure-aware penalties can still harm performance on dense cardiomyocyte scenes. Keeping such results in the thesis improves credibility because it shows that the final method was not selected by selectively reporting only positive experiments.
+
+\subsection{Future Work}\label{future-work}
+
+There are five clear follow-up directions.
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  Prioritize detector and prompt-generation quality over another simple round of mixed noisy-box decoder fine-tuning. The most direct route to closing the Oracle-to-E2E gap now appears to be better prompts, for example through biology-prior-guided hybrid detection or stronger detector-side query design, rather than assuming that mixed noisy boxes alone will unlock the gap.
+\item
+  Keep preliminary single-seed multi-channel evidence in appendix scope unless a multi-seed rerun confirms stability under the same reporting protocol.
+\item
+  Add training-dynamics assets for the final manuscript, centered on the sealed \texttt{T28} route (for example, stable training-curve reporting and split-consistent checkpoint selection evidence).
+\item
+  Treat mouse transfer, if mentioned, as a future adaptation problem rather than as a current result. A credible mouse pilot would require mouse labels, retuned detector priors, and a fresh evaluation of prompt quality rather than assuming direct zero-shot reuse from the current human hiPSC-CM pipeline.
+\item
+  Integrate a CellProfiler-assisted QC loop for annotation audit and detector-candidate validation (for example nucleus/cell association checks and morphology-based outlier flags), and evaluate whether this improves data quality control without conflating QC tooling with the primary end-to-end segmentation baseline \cite{carpenter2006cellprofiler,mcquin2018cellprofiler3}.
+\end{enumerate}
+
+\subsection{Concluding Remarks}\label{concluding-remarks}
+
+Taken together, the current evidence supports a clear thesis claim: this work is not merely another fine-tuning result, but a domain-audited, prompt-aware, cardiomyocyte-specific adaptation framework for released cell foundation segmentation. Within that boundary, T28 establishes the sealed segmentation mainline, while the Oracle-to-E2E gap and the sealed \texttt{S2-E3} negative result show that the remaining bottleneck is no longer only the mask decoder, but the reliability of prompt generation in the full detection-to-segmentation pipeline. This, in turn, motivates prioritizing detector- and prompt-generation improvements, with noisy-box adaptation retained only as a constrained auxiliary hypothesis rather than the default next mainline.

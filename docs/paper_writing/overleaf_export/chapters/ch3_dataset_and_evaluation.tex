@@ -1,0 +1,127 @@
+\section{Dataset and Evaluation Protocol}\label{dataset-and-evaluation-protocol}
+
+\subsection{Dataset}\label{dataset}
+
+This thesis uses the Allen Institute hiPSC-derived cardiomyocyte dataset provided as multi-channel TIFF microscopy images \cite{rafelski2024allen}. The task is instance segmentation of whole cardiomyocytes. Each image contains multiple channels, but the channels are not interchangeable: they encode different biological or imaging cues and must therefore be described explicitly in both the method and the evaluation.
+
+The channel mapping used in this project is:
+
+\begin{itemize}
+\tightlist
+\item
+  \texttt{Ch0}: brightfield (BF)
+\item
+  \texttt{Ch1}: alpha-Actinin2
+\item
+  \texttt{Ch4}: DAPI
+\item
+  \texttt{Ch9}: ground-truth instance mask
+\end{itemize}
+
+The dataset is split into \texttt{334} training images, \texttt{71} validation images, and \texttt{73} test images. These fixed splits are used throughout the project and should be preserved consistently in the thesis. Because several experiments are available only on a subset of these splits, all result tables must state the split explicitly.
+
+\subsection{Task Definition}\label{task-definition}
+
+The target task is whole-cell instance segmentation rather than semantic foreground segmentation. This distinction is important because early project iterations showed that semantic overlap metrics can appear artificially high even when the model merges neighboring cells into large blobs. As a consequence, the thesis treats instance-level metrics as primary and does not use semantic Dice as a headline measure of success.
+
+For prompt-based models such as CellSAM-derived variants, a single cell is segmented per bounding-box prompt. This design allows the segmentation model to focus on one candidate instance at a time, after which instance masks are assembled into a full-image prediction. The evaluation therefore depends on both the segmentation quality inside prompts and the quality of the prompting boxes themselves.
+
+\subsection{Oracle and End-to-End Evaluation}\label{oracle-and-end-to-end-evaluation}
+
+We distinguish between two evaluation regimes.
+
+\textbf{Oracle evaluation} uses ground-truth bounding boxes as prompts. This removes detection noise and isolates the segmentation behavior of the model. Oracle evaluation is the main setting for comparing prompt-based methods and for running controlled ablation studies.
+
+\textbf{End-to-end evaluation} replaces ground-truth prompts with automatically detected boxes. In the current project, this is represented by DAPI/Adaptive detector routes and the selected biology-prior line \texttt{T33g(dapi\_cm,\ candidate\_aligned,\ q35)+T28}. End-to-end evaluation is necessary because a segmentation model that performs well under Oracle prompting may still fail in practical use if detection quality is poor.
+
+This distinction is central to the thesis argument. Oracle results answer whether the segmentation branch works when prompted correctly. End-to-end results answer whether the entire pipeline is ready for practical deployment.
+
+\subsection{Metrics}\label{metrics}
+
+The thesis reports three primary instance-level metrics.
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{PQ@0.5}: Panoptic Quality at IoU threshold 0.5 \cite{kirillov2019pq}
+\item
+  \textbf{BM-1to1 Dice}: one-to-one best-match Dice based on Hungarian matching \cite{kuhn1955hungarian}
+\item
+  \textbf{AJI}: Aggregated Jaccard Index \cite{kumar2017aji}
+\end{itemize}
+
+Two auxiliary metrics are also useful:
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{SQ}: Segmentation Quality
+\item
+  \textbf{RQ}: Recognition Quality
+\end{itemize}
+
+Under the same TP/FP/FN definition, \texttt{RQ} is mathematically equivalent to \texttt{F1}. However, because some project scripts output \texttt{RQ} as a per-image mean and \texttt{F1} as a global micro-aggregated score, the thesis must label the aggregation scheme whenever both are shown.
+
+\subsection{Metric Formulation}\label{metric-formulation}
+
+To avoid ambiguity, this section states the metric equations used in thesis reporting.
+
+\textbf{Panoptic Quality.}
+Following \cite{kirillov2019pq}, PQ is decomposed as:
+\begin{equation}
+\mathrm{PQ} = \mathrm{SQ} \times \mathrm{RQ},
+\end{equation}
+with
+\begin{equation}
+\mathrm{SQ} = \frac{1}{|\mathrm{TP}|}\sum_{(p,g)\in \mathrm{TP}} \mathrm{IoU}(p,g), \qquad
+\mathrm{RQ} = \frac{|\mathrm{TP}|}{|\mathrm{TP}| + 0.5|\mathrm{FP}| + 0.5|\mathrm{FN}|}.
+\end{equation}
+
+\textbf{Precision, Recall, and F1.}
+\begin{equation}
+\mathrm{Precision} = \frac{|\mathrm{TP}|}{|\mathrm{TP}| + |\mathrm{FP}|}, \qquad
+\mathrm{Recall} = \frac{|\mathrm{TP}|}{|\mathrm{TP}| + |\mathrm{FN}|},
+\end{equation}
+\begin{equation}
+\mathrm{F1} = \frac{2 \cdot \mathrm{Precision}\cdot \mathrm{Recall}}{\mathrm{Precision} + \mathrm{Recall}}
+= \frac{2|\mathrm{TP}|}{2|\mathrm{TP}| + |\mathrm{FP}| + |\mathrm{FN}|}.
+\end{equation}
+Under identical TP/FP/FN counting, this F1 expression is algebraically equivalent to RQ.
+
+\textbf{BM-1to1 Dice (Hungarian one-to-one matching).}
+Let $\pi$ denote the optimal one-to-one assignment between predicted and GT instances from Hungarian matching \cite{kuhn1955hungarian}. BM-1to1 Dice is:
+\begin{equation}
+\mathrm{BM\mbox{-}1to1\ Dice}
+= \frac{1}{|\mathcal{G}|}\sum_{g_i \in \mathcal{G}}
+\frac{2|g_i \cap p_{\pi(i)}|}{|g_i| + |p_{\pi(i)}|}.
+\end{equation}
+
+\textbf{AJI.}
+Following \cite{kumar2017aji}, AJI is reported as:
+\begin{equation}
+\mathrm{AJI}
+= \frac{\sum_i |G_i \cap P_{\sigma(i)}|}
+{\sum_i |G_i \cup P_{\sigma(i)}| + \sum_{k \in U} |P_k|},
+\end{equation}
+where $\sigma(i)$ maps each GT instance to its matched prediction and $U$ is the unmatched prediction set.
+
+\subsection{Reporting Rules for This Thesis}\label{reporting-rules-for-this-thesis}
+
+To keep the evidence hierarchy clear, the thesis follows four reporting rules.
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  \texttt{test73} locked results and \texttt{val71} audit results are not mixed into the same main table without explicit split labels.
+\item
+  Single-checkpoint, multi-seed mean, and single-seed provisional results are labeled separately.
+\item
+  Historical or supplementary analyses are not allowed to overwrite the locked mainline unless the same protocol and split are explicitly rerun.
+\item
+  Historical experiments may be kept for method evolution or appendix discussion, but they are not allowed to overwrite the current mainline result.
+\end{enumerate}
+
+These rules are not merely editorial preferences. They are necessary to avoid overstating results in a project where path choice, split choice, and aggregation choice can materially change the interpretation of a number.
+
+Whenever a single recognition-quality column is needed in a summary table, this thesis standardizes it to split-level micro-\texttt{F1} computed from aggregated \texttt{TP/FP/FN} at IoU$=0.5$.

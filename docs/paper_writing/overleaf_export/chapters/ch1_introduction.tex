@@ -1,0 +1,57 @@
+\section{Introduction}\label{introduction}
+
+\subsection{Problem Background}\label{problem-background}
+
+Instance segmentation of cardiomyocytes is a prerequisite for many downstream analyses in stem-cell-based cardiac research, including morphology profiling, maturation assessment, drug response analysis, and phenotypic screening. In this thesis, the target domain is specifically the Allen Institute dataset of \textbf{human hiPSC-derived cardiomyocytes} \cite{rafelski2024allen}. This scope matters. The thesis does not study generic cell segmentation, and it does not currently claim transfer to mouse cardiomyocytes or to other cardiac imaging settings.
+
+From a modeling perspective, this is a difficult segmentation problem. Cardiomyocytes are highly variable in size, elongated rather than round, densely packed, and often exhibit weak or ambiguous boundaries in brightfield imaging. These properties make whole-cell instance segmentation harder than standard nucleus segmentation and less compatible with methods that assume compact, convex, or well-separated object shapes.
+
+Recent foundation models have changed the landscape of image segmentation. Segment Anything Model (SAM) demonstrated that large-scale pretraining can produce highly transferable segmentation representations \cite{kirillov2023sam}, and CellSAM extended this idea to the cell-imaging domain \cite{israel2024cellsam}. Nevertheless, transfer across biological imaging tasks is still not automatic. The released CellSAM checkpoint was not trained specifically for hiPSC-derived cardiomyocytes, and cardiomyocyte morphology differs substantially from the cell types that dominate most public microscopy benchmarks. As a result, the central question of this thesis is not whether CellSAM is useful in general, but whether a released cell foundation model can be adapted into a domain-audited, prompt-aware, cardiomyocyte-specific segmentation system that remains scientifically traceable.
+
+\subsection{Challenges}\label{challenges}
+
+The project faces three coupled challenges.
+
+First, the task itself is structurally difficult. Whole-cell boundaries are weak, neighboring cells may touch or overlap, and nucleus-centered cues do not fully define cell extent. A model can therefore appear reasonable at semantic foreground level while still failing at instance separation.
+
+Second, the released CellSAM artifact is not a trivial baseline. It contains multiple internal branches, and the practical meaning of released-checkpoint segmentation inference cannot be taken directly from the paper wording alone. Before fair comparison or fine-tuning, the released checkpoint has to be audited as a software artifact.
+
+Third, the deployment setting is prompt-limited. Under Oracle prompts, the current segmentation branch is already strong. Under automatically generated prompts, performance drops substantially. This means the main open problem is no longer only how to optimize mask quality under perfect boxes, but how to handle prompt-quality mismatch between training and deployment.
+
+\subsection{Research Questions and Contributions}\label{research-questions-and-contributions}
+
+This thesis is organized around three research questions.
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  Can a released cell-domain foundation model be adapted into a strong human hiPSC-cardiomyocyte segmentation system?
+\item
+  How much do implementation-path choice and evidence-tier discipline affect the interpretation of CellSAM-based results?
+\item
+  Is the current performance bottleneck mainly the segmentation branch itself, or the quality of prompts supplied to it?
+\end{enumerate}
+
+The current evidence already supports a clear high-level answer, but only under split-aware reporting. The sealed segmentation mainline is T28 with dual-seed mean on \texttt{val71} (\texttt{PQ\ =\ 0.6837}, \texttt{BM-Dice\ =\ 0.8166}). As a locked reference tier, the historical single-checkpoint \texttt{test73} T27a result (\texttt{PQ\ =\ 0.659}, \texttt{BM-Dice\ =\ 0.800}, \texttt{AJI\ =\ 0.669}) remains useful for cross-baseline context. The Oracle-to-end-to-end gap further shows that the current project should be framed as \textbf{Oracle-strong but prompt-limited}.
+
+This claim is strengthened by the fact that the baseline family is not weakly chosen. The comparison set includes a strong generalist cell segmenter (Cellpose \cite{stringer2021cellpose}), generic promptable segmentation (SAM ViT-B \cite{kirillov2023sam}), released cell-domain zero-shot transfer (CellSAM pretrained \cite{israel2024cellsam}), and a strong external medical foundation baseline (MedSAM \cite{ma2024medsam}). Therefore, the thesis is not arguing only that one tuned model beats an easy comparator. It argues that a carefully adapted cardiomyocyte pipeline can outperform four distinct and methodologically meaningful comparison axes.
+
+Within that framing, the value of the work is stronger than a simple ``higher PQ'' statement. The thesis makes three main methodological contributions and one supporting reproducibility contribution.
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  It develops \textbf{domain-aware input handling} for non-RGB cardiomyocyte microscopy, treating channel design as a biological and methodological problem rather than assuming natural-image RGB semantics.
+\item
+  It establishes \textbf{prompt-quality-aware fine-tuning} by separating Oracle GT-box conditions from detector-conditioned deployment, thereby identifying prompt mismatch rather than mask-decoder capacity as the main current bottleneck and motivating noisy-box adaptation as the correct next step.
+\item
+  It integrates \textbf{biology priors with foundation segmentation}, using DAPI for localization cues and Actn2 for cardiomyocyte structural identity instead of relying only on nuclei or generic off-the-shelf cell assumptions.
+\item
+  It contributes a code-level audit of the released CellSAM artifact together with a split-aware evidence hierarchy that separates locked \texttt{test73} results, \texttt{val71} supplementary analyses, and provisional single-seed observations.
+\end{enumerate}
+
+\subsection{Thesis Overview}\label{thesis-overview}
+
+The remainder of the thesis is organized as follows. Section 2 reviews the biomedical and technical background of the task and summarizes the architecture principles of CellSAM, Cellpose, and MedSAM in this cardiomyocyte setting. Section 3 introduces the Allen hiPSC-cardiomyocyte dataset and formal metric definitions with split-aware reporting rules. Section 4 describes the final methodology, including preprocessing, detector-to-segmenter integration, postprocessing, and T28 training setup. Section 5 presents the main results, including the T28 mainline summary, split-aware reference comparisons, and detector-limited end-to-end analysis. Section 6 discusses methodological limits, evidence boundaries, and follow-up directions. The appendices provide parameter-level checkpoint-audit details and supplementary exploratory evidence.

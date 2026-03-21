@@ -1,0 +1,27 @@
+\section{Scope and Transfer Notes}\label{scope-and-transfer-notes}
+
+\subsection{Human--Mouse Transfer Boundary and Species-Specific Differences}\label{appendix-human-mouse-transfer-boundary}
+
+This appendix records the scope boundary behind the main thesis claims. All locked experiments and all headline conclusions in the main text are restricted to \textbf{human hiPSC-derived cardiomyocytes}. Mouse transfer is scientifically relevant, but it remains an adaptation question rather than a supported zero-shot generalization claim in the current evidence tier.
+
+Table~\ref{tab:human_mouse_gap} summarizes the species- and preparation-level differences that are most likely to affect the present detector-to-segmenter pipeline.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Human hiPSC-CM versus typical mouse cardiomyocyte settings: expected impact on this thesis pipeline.}
+\label{tab:human_mouse_gap}
+\begin{tabular}{p{0.16\linewidth}p{0.25\linewidth}p{0.25\linewidth}p{0.26\linewidth}}
+\toprule
+Dimension & Current thesis setting (human hiPSC-CM) & Typical mouse setting & Expected impact on pipeline \\
+\midrule
+Maturation & Immature/fetal-like state is common & Adult primary preparations are often more mature & Distribution shift in texture, boundary statistics, and morphology priors \\
+Shape & Spread, anisotropic, irregular monolayer morphology & Adult isolated CMs are often rod-shaped \cite{li2014isolation_mouse_cm} & Detector box priors and postprocessing thresholds require retuning \\
+Nucleation & Mono-nuclear or mixed immature states are common & Bi-/multi-nucleated cardiomyocytes are more frequent in mature preparations \cite{ahmed2020hipscm_maturation} & Nucleus-to-cell association logic becomes less reliable if reused unchanged \\
+Electrophysiology context & Human hiPSC-CM physiology and maturation trajectory & Rodent cardiac electrophysiology differs from human \cite{joukar2021rodent_human_ecg} & Species mismatch limits direct transfer claims from human-trained priors \\
+Marker behavior & Actn2 and DAPI reflect human hiPSC-CM culture context & Marker appearance varies with species and preparation & Prompt quality and candidate filtering rules need species-specific recalibration \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A credible mouse-transfer route should therefore include at least: (i) mouse-domain zero-shot audit, (ii) detector-prior retuning, and (iii) mouse-specific decoder fine-tuning under the same split-aware evaluation protocol.

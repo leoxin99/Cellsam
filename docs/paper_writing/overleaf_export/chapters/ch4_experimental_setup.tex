@@ -1,0 +1,287 @@
+\section{Methodology and Experimental Setup}\label{methodology-and-experimental-setup}
+
+\subsection{Checkpoint Audit and Method Starting Point}\label{checkpoint-audit-and-method-starting-point}
+
+All experiments are implemented in Python with PyTorch on top of the CellSAM codebase \cite{israel2024cellsam}. Training is conducted on the ALICE High-Performance Computing (HPC) cluster at Leiden University, mainly on NVIDIA L4 GPUs (24 GB VRAM). Local machines are used for result auditing, visualization, and baseline reruns.
+
+Before defining the thesis mainline, we audited the released CellSAM checkpoint as a software artifact. The public checkpoint contains three relevant branches: \texttt{model}, \texttt{model\_cp}, and \texttt{cellfinder}. For segmentation in this thesis, we consistently use the released \texttt{model\_cp} single-mask route (\texttt{multimask\_output=False}) as the starting point and as the inference branch.
+
+The audit also defines a clear interpretation boundary. Parameter-level comparisons show that \texttt{model} and \texttt{model\_cp} are globally different branches, so branch identity must be explicit whenever results are reported. We therefore keep only verifiable implementation facts in the main text and move full tensor-level comparisons to Appendix~A.
+
+It is also important to distinguish architecture construction from weight loading. In the released code, \texttt{self.model\ =\ sam\_model\_registry{[}"vit\_b"{]}()} is instantiated first and \texttt{self.model\_cp} is then created as a deep copy of this freshly constructed model. Thus, before the released CellSAM checkpoint is loaded, the two branches share the SAM ViT-B architecture and initialization state \cite{kirillov2023sam}, but they are not automatically the original Meta pretrained SAM checkpoint.
+
+\subsection{T28 Mainline Training Setup}\label{t28-mainline-training-setup}
+
+The current thesis segmentation mainline follows the T28 configuration. Instead of treating the released CellSAM checkpoint as a simple neck-only continuation of Stage 1, we explicitly use the released \texttt{model\_cp} segmentation branch as the starting point for fine-tuning. In the main configuration, the image encoder and prompt encoder are frozen, and only the mask decoder is updated. Input images are resized to \texttt{1024\ x\ 1024}, and a cardiomyocyte-aware three-channel input is used (\texttt{[BF,\ Actn2,\ DAPI]}), i.e., the legacy T28 channel order retained for sealed-route consistency.
+
+The training objective in the current mainline is not the older ``Best Config'' loss. It is a \texttt{CombinedLoss} with Dice \cite{milletari2016vnet}, BCE, Boundary \cite{kervadec2019boundary}, AJI \cite{kumar2017aji}, and Focal \cite{lin2017focal} components, plus an explicit IoU-head regression term added in the training loop (aligned with SAM mask-quality prediction semantics \cite{kirillov2023sam}). This distinction matters because the thesis now treats T28, rather than Best Config, as the primary segmentation route.
+
+Table 4.1 summarizes the main training configuration used for the sealed T28 route.
+
+\textbf{Table 4.1: Main training configuration used in T28}
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}ll@{}}
+\toprule\noalign{}
+Hyperparameter & Value \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Base checkpoint & CellSAM released checkpoint, \texttt{model\_cp} branch \\
+Trainable module & SAM mask decoder \\
+Frozen modules & Image encoder, prompt encoder \\
+Input encoding & Three-channel cardiomyocyte-aware route (legacy T28 order), \texttt{{[}BF,\ Actn2,\ DAPI{]}} \\
+Image size & \texttt{1024\ x\ 1024} \\
+Batch size & 4 \\
+Optimizer & AdamW \\
+Learning rate & \texttt{1e-4} \\
+Weight decay & \texttt{1e-4} \\
+LR schedule & Cosine warmup, 5 warmup epochs \\
+Max epochs & 80 \\
+Early stopping & PQ-based, patience = 15 \\
+Training paradigm & Instance-level, one GT cell mask per box \\
+Box expansion & 10 percent \\
+Main loss & \texttt{CombinedLoss} \\
+Extra loss & IoU-head MSE, weight = 0.1 \\
+Active loss terms & Dice + BCE, Boundary, AJI, Focal \\
+Disabled loss terms & Contour, Topology, Size \\
+Mixed precision & AMP \\
+\end{longtable}
+}
+
+For completeness, the active T28 loss configuration is:
+
+\begin{itemize}
+\tightlist
+\item
+  \texttt{pos\_weight\ =\ 10}
+\item
+  \texttt{boundary\_weight\ =\ 0.3}
+\item
+  \texttt{aji\_weight\ =\ 0.2}
+\item
+  \texttt{focal\_weight\ =\ 0.3}
+\item
+  \texttt{contour\_weight\ =\ 0.0}
+\item
+  \texttt{iou\_weight\ =\ 0.1}
+\end{itemize}
+
+This is the configuration that should be described in the thesis method chapter. Earlier settings such as Phase 1 or Best Config remain useful as historical comparisons, but they are no longer the default writing reference.
+
+\subsection{Final Inference Pipeline}\label{final-inference-pipeline}
+
+The finalized deployment-oriented pipeline used in this thesis is:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  Build the cardiomyocyte-aware input tensor and resize to \texttt{1024\ x\ 1024}.
+\item
+  Generate prompt boxes from the selected detector route (\texttt{T33g}, \texttt{dapi\_cm} candidate-aware mode) for end-to-end evaluation, or use GT boxes for Oracle evaluation.
+\item
+  Run per-box single-mask segmentation using the T28-adapted \texttt{model\_cp} branch.
+\item
+  Resolve multi-instance overlap conflicts with \texttt{argmax\_prob} assignment.
+\item
+  Apply instance-level postprocessing and assemble final instance masks.
+\item
+  Compute split-aware metrics and report Oracle versus end-to-end results separately.
+\end{enumerate}
+
+Table 4.2 fixes the module-role mapping to avoid ambiguity between detector and segmenter responsibilities.
+
+\textbf{Table 4.2: Final module-role mapping in the thesis pipeline}
+
+{\def\LTcaptype{none}
+\begin{longtable}[]{@{}lll@{}}
+\toprule\noalign{}
+Stage & Module & Role \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Input preparation & Semantic channel mapping + resizing & Construct cardiomyocyte-aware model input at \texttt{1024\ x\ 1024} \\
+Prompt generation & \texttt{T33g} detector (\texttt{dapi\_cm}, candidate-aware) & Provide automatic box prompts for deployment \\
+Segmentation core & \texttt{T28} on released \texttt{model\_cp} branch & Predict per-box cell masks (\texttt{multimask\_output=False}) \\
+Conflict handling & \texttt{argmax\_prob} assignment & Resolve overlapping predictions at pixel level \\
+Postprocessing & Morphology + largest connected component & Smooth masks and remove implausible fragments \\
+Evaluation & Unified instance-metric protocol & Report PQ/BM-Dice/AJI plus split-aware F1/RQ evidence \\
+\end{longtable}
+}
+
+\subsection{Preprocessing and Postprocessing Design}\label{preprocessing-and-postprocessing-design}
+
+\textbf{Preprocessing.}
+The segmentation input is standardized to \texttt{1024\ x\ 1024}. For the sealed T28 route, channels follow the cardiomyocyte-aware three-channel setting \texttt{[BF,\ Actn2,\ DAPI]} with per-channel normalization in the data pipeline. Oracle and end-to-end branches share the same downstream segmentation preprocessing, while they differ only in prompt source (GT boxes versus detector boxes).
+
+\textbf{Prompt geometry handling.}
+During training, each GT box is expanded by \texttt{10\%} before loss computation to reduce sensitivity to tight-box truncation. During inference, box clipping with the same expansion ratio is enabled by default in the thesis mainline and applied before conflict resolution; the unclipped setting is used only as a supplementary comparison condition. This keeps geometric support consistent between training and deployment-time mask aggregation.
+
+\textbf{Postprocessing.}
+Final instance masks are postprocessed per instance using morphology operations (small-hole/island cleanup, opening/closing, dilation-erosion smoothing, Gaussian boundary smoothing), followed by largest-connected-component retention. Optional size validation is available (\texttt{min\_cell\_area=13884}, \texttt{max\_cell\_area=174735} at \texttt{1024\ x\ 1024}) but is disabled in the default thesis evaluation route.
+
+\subsection{Optimization Objectives}\label{optimization-objectives}
+
+The T28 training objective combines segmentation and IoU-head regression:
+\begin{equation}
+\mathcal{L}_{\mathrm{total}} = \mathcal{L}_{\mathrm{combined}} + \lambda_{\mathrm{iou}}\mathcal{L}_{\mathrm{iou}}, \qquad \lambda_{\mathrm{iou}} = 0.1.
+\end{equation}
+
+In implementation, the segmentation base term is:
+\begin{equation}
+\mathcal{L}_{\mathrm{base}} = 0.5\mathcal{L}_{\mathrm{Dice}} + 0.5\mathcal{L}_{\mathrm{BCE}},
+\end{equation}
+and the active auxiliary family for T28 is
+\begin{equation}
+\mathcal{K}=\{\mathrm{Boundary},\ \mathrm{AJI},\ \mathrm{Focal}\}.
+\end{equation}
+With normalized weighting,
+\begin{equation}
+\mathcal{L}_{\mathrm{combined}} =
+\frac{w_{\mathrm{base}}}{T}\mathcal{L}_{\mathrm{base}} +
+\sum_{k\in\mathcal{K}}\frac{w_k}{T}\mathcal{L}_k, \qquad
+T = w_{\mathrm{base}} + \sum_{k\in\mathcal{K}} w_k.
+\end{equation}
+The active terms correspond to Dice \cite{milletari2016vnet}, Boundary \cite{kervadec2019boundary}, AJI-inspired optimization \cite{kumar2017aji}, and Focal loss \cite{lin2017focal}.
+
+For detector training (T33 family), matching is solved by Hungarian assignment \cite{kuhn1955hungarian} and the objective follows the AnchorDETR-style weighted combination used in the CellSAM codebase \cite{israel2024cellsam}:
+\begin{equation}
+\mathcal{L}_{\mathrm{det}} = 2\mathcal{L}_{\mathrm{ce}} + 5\mathcal{L}_{\mathrm{bbox}} + 2\mathcal{L}_{\mathrm{giou}},
+\end{equation}
+with auxiliary decoder-layer losses at the same weight pattern.
+
+\subsection{Operational Algorithms}\label{operational-algorithms}
+
+To make the methodology executable and reproducible at implementation level, we explicitly provide two algorithms in the main text: one for T28 decoder-focused training under Oracle prompts, and one for end-to-end inference with automatic prompts.
+
+\begin{algorithm}[t]
+\caption{T28 Decoder-Focused Training and Oracle Evaluation}
+\label{alg:t28_train_oracle}
+\begin{algorithmic}[1]
+\Require Training set $\mathcal{D}_{train}=\{(I,M_{gt},B_{gt})\}$, validation set $\mathcal{D}_{val}$, released checkpoint $C$
+\Ensure Best checkpoint $W^\star$ and Oracle validation history $\mathcal{H}_{val}$
+\State Load $C$ and select segmentation branch \texttt{model\_cp}
+\State Freeze image encoder and prompt encoder; set mask decoder trainable
+\For{epoch $e=1$ to $E_{max}$}
+  \For{mini-batch $(I,M_{gt},B_{gt}) \in \mathcal{D}_{train}$}
+    \State Build three-channel cardiomyocyte-aware input (\texttt{[BF, Actn2, DAPI]})
+    \State Use $B_{gt}$ as Oracle prompts and predict masks with single-mask path
+    \State Compute $L_{main}$ (Dice+BCE, Boundary, AJI, Focal)
+    \State Compute $L_{iou}$ (IoU-head MSE) and $L \gets L_{main} + \lambda_{iou} L_{iou}$
+    \State Update mask decoder parameters with AdamW
+  \EndFor
+  \State Evaluate on $\mathcal{D}_{val}$ under Oracle prompts and record metrics
+  \If{validation PQ improves}
+    \State Save current checkpoint as best
+  \EndIf
+  \If{early stopping criterion is met}
+    \State \textbf{break}
+  \EndIf
+\EndFor
+\State \Return $W^\star, \mathcal{H}_{val}$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[t]
+\caption{End-to-End Cardiomyocyte Instance Segmentation with Automatic Prompts}
+\label{alg:e2e_prompt_seg}
+\begin{algorithmic}[1]
+\Require Image $I$ (BF, Actn2, DAPI), trained checkpoint $W^\star$, prompt generator $G$, inference config $\Psi$
+\Ensure Final instance mask $M_{final}$ and optional end-to-end metrics
+\State Load T28 checkpoint $W^\star$ on \texttt{model\_cp} single-mask path
+\State Generate automatic prompt boxes: $B_{auto} \gets G(I)$
+\State Build three-channel cardiomyocyte-aware input from $I$
+\For{each prompt box $b \in B_{auto}$}
+  \State Predict binary mask $m_b$ with T28
+\EndFor
+\State Aggregate predicted masks $\{m_b\}$ and apply postprocess pipeline $\Psi$
+\State Obtain final instance mask $M_{final}$
+\If{ground truth is available}
+  \State Compute end-to-end metrics (PQ, BM-Dice, AJI, SQ, RQ/F1)
+\EndIf
+\State \Return $M_{final}$ and metrics
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Evaluation Protocol}\label{evaluation-protocol}
+
+We use two evaluation settings.
+
+\textbf{Oracle evaluation.} Ground-truth bounding boxes are used as prompts. This isolates segmentation quality from detection errors and is the main evaluation mode for prompt-based CellSAM variants such as CellSAM-pretrained, SAM ViT-B, MedSAM, and the thesis mainline T28.
+
+\textbf{End-to-end evaluation.} Automatically detected bounding boxes are used as prompts. In the current project, this setting is represented by DAPI/Adaptive detector routes and the selected \texttt{T33g(dapi\_cm,\ candidate\_aligned,\ q35)+T28} line. The gap between Oracle and end-to-end performance quantifies how much the detection stage limits deployment quality.
+
+All final tables must explicitly label the data split. In particular, \texttt{val71} and \texttt{test73} results must not be mixed in the same table without a split column or a separate subsection.
+
+The sealed T28 mainline result is reported as dual-seed mean on \texttt{val71}. Locked \texttt{test73} single-checkpoint numbers (for example T27a) are retained as reference tier and are never treated as direct substitutes for the T28 mainline summary. Likewise, preliminary single-seed experiments are not treated as final main-table evidence.
+
+\subsubsection{Evaluation Metrics}\label{evaluation-metrics}
+
+We report the following metrics.
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{PQ@0.5}: Panoptic Quality, defined as \texttt{PQ\ =\ SQ\ x\ RQ}. This is the primary metric because it jointly reflects segmentation quality and recognition quality.
+\item
+  \textbf{BM-1to1 Dice}: Hungarian one-to-one best-match Dice between predicted and ground-truth instances.
+\item
+  \textbf{AJI}: Aggregated Jaccard Index, used as an instance-level overlap measure.
+\item
+  \textbf{SQ}: Segmentation Quality of matched pairs.
+\item
+  \textbf{RQ}: Recognition Quality.
+\end{itemize}
+
+When the same TP/FP/FN definition is used, \texttt{RQ} is mathematically equivalent to \texttt{F1}. However, some project scripts output \texttt{per-image\ mean\ RQ} and \texttt{global\ micro-F1} separately. Therefore, when both are reported, the aggregation scheme must be stated explicitly.
+
+\subsection{Baseline Methods and Reporting Scope}\label{baseline-methods-and-reporting-scope}
+
+The thesis main comparison currently uses only locked baselines:
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Cellpose (T31)}: rerun with the latest Cellpose v4.0.1 baseline setting, using \texttt{diameter\ =\ 250}.
+\item
+  \textbf{SAM ViT-B}: original SAM without cell-specific fine-tuning, evaluated with GT box prompts.
+\item
+  \textbf{CellSAM (pretrained)}: released CellSAM checkpoint without cardiomyocyte fine-tuning, evaluated on the released \texttt{model\_cp} segmentation branch.
+\item
+  \textbf{MedSAM}: pretrained medical SAM baseline with GT box prompts.
+\item
+  \textbf{T28}: sealed segmentation mainline for downstream detector-driven integration (dual-seed \texttt{val71} reporting).
+\end{itemize}
+
+Historical or partially audited results are not merged into the same evidence tier:
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Preliminary single-seed multi-channel runs} remain appendix-only observations unless multi-seed stability is demonstrated.
+\item
+  \textbf{T11/T30} are encoder-adaptation explorations and are not part of the current main result.
+\item
+  Older deprecated baseline routes, especially the previous brightfield-only Cellpose path, should not be cited in the thesis.
+\end{itemize}
+
+\subsection{Main Figure Briefs Locked for Writing}\label{main-figure-briefs-locked-for-writing}
+
+To avoid drift between communication notes and the thesis body, we lock the two core method-figure briefs here before final artwork is inserted.
+
+\textbf{Figure 2 (Method Overview, planned placement in Chapter 4).}
+This figure is defined as a high-level five-stage flow: input handling, prompt source, released-checkpoint branch selection, T28 adaptation, and output/evaluation split. Mandatory elements are cardiomyocyte-aware three-channel input, Oracle vs automatic prompts, released segmentation branch (\texttt{model\_cp}), and split-aware outputs. To avoid duplication, detector internals and full training details are not expanded in the main trunk; training specifics are shown only as side notes.
+
+\textbf{Locked caption draft for Figure 2.}
+\emph{Overview of the thesis pipeline. Brightfield images are converted into a CellSAM-compatible input representation, while DAPI and Actn2 provide biological priors for prompting and detector design. Prompts are supplied either from ground-truth boxes under Oracle evaluation or from automatic detectors under end-to-end evaluation. The released CellSAM checkpoint is first audited to identify the \texttt{model\_cp} segmentation branch, after which the T28 mainline adapts the mask decoder while keeping the image encoder and prompt encoder frozen.}
+
+\textbf{Figure 3 (Checkpoint Audit Schema, planned placement in supplementary material).}
+This figure is defined as a branch-relationship audit: released checkpoint with \texttt{model}, \texttt{model\_cp}, and \texttt{cellfinder}; explicit arrow for released segmentation inference through \texttt{model\_cp}; and explicit note that \texttt{cellfinder} backbone aligns with \texttt{model.image\_encoder} non-neck body rather than \texttt{model\_cp}.
+
+\textbf{Locked caption draft for Figure 3.}
+\emph{Conceptual audit of the released CellSAM checkpoint. The public release contains separate model, model\_cp, and cellfinder branches. In the released inference implementation, segmentation is performed through the model\_cp branch, while the CellFinder backbone aligns with the non-neck body of model.image\_encoder rather than with model\_cp. The figure summarizes only implementation facts that are directly verifiable from the public release and does not claim full recovery of hidden training history.}
+
+Final editable artwork is tracked as pending assets and will be inserted without changing these locked semantics.
