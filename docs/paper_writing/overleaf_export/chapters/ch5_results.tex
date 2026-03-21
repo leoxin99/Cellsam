@@ -104,11 +104,11 @@ Two findings are robust enough to keep in the thesis body.
 
 These observations do not by themselves define the final T28 writing route, because T28 inherits the same combined-loss family while also changing channel handling. But they do explain why the historical Best Config moved away from the original Phase 1 setting, and why the thesis should not revert to the older \texttt{pos\_weight\ =\ 2} configuration when describing model evolution.
 
-\subsection{Oracle-to-End-to-End Gap (Historical T27a Reference)}\label{oracle-to-end-to-end-gap-historical-t27a-reference}
+\subsection{Historical Oracle-to-End-to-End Gap Diagnostic (T27a)}\label{oracle-to-end-to-end-gap-historical-t27a-reference}
 
-The deployment bottleneck is currently the detection stage rather than the segmentation model itself. Table 5.4 reports the historical T27a reference comparison between Oracle prompting and automatically generated prompts on \texttt{test73}. The role of this table is diagnostic rather than mainline sealing.
+The deployment bottleneck is currently the detection stage rather than the segmentation model itself. Table 5.4 is retained only as a historical within-line diagnostic from the T27a route: it compares Oracle prompting with automatically generated prompts on \texttt{test73} under one earlier segmentation line. It is not a competing current mainline result and should be read separately from Table 5.6, which contains the frozen same-protocol detector comparison for the final T28-based pipeline.
 
-\textbf{Table 5.4: Oracle vs end-to-end evaluation for historical T27a reference on \texttt{test73}}
+\textbf{Table 5.4: Historical Oracle vs automatic-prompt diagnostic for T27a on \texttt{test73}}
 
 {\def\LTcaptype{none} % do not increment counter
 \begin{longtable}[]{@{}
@@ -133,15 +133,15 @@ Note
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-Oracle (GT boxes) & 0.659 & 0.960 & 0.800 & Reference main result \\
-DAPI nuclear detection & 0.252 & 0.433 & 0.599 & \texttt{locked\_eval} \\
-Adaptive Z-line detection & 0.293 & 0.497 & 0.612 & Better current E2E branch \\
+Oracle (GT boxes) & 0.659 & 0.960 & 0.800 & Historical Oracle reference \\
+DAPI nuclear detection & 0.252 & 0.433 & 0.599 & Historical detector baseline \\
+Adaptive Z-line detection & 0.293 & 0.497 & 0.612 & Best historical T27a-era E2E branch \\
 \end{longtable}
 }
 
-Even with the better Adaptive Z-line detector, the gap from Oracle to end-to-end remains large: \texttt{-0.366} PQ and \texttt{-0.188} BM-Dice relative to Oracle. This means the segmentation model is already strong when the prompt is correct, but prompt quality remains the limiting factor for practical deployment.
+Even with the best historical T27a-era detector, the gap from Oracle to end-to-end remains large: \texttt{-0.366} PQ and \texttt{-0.188} BM-Dice relative to Oracle. This means the segmentation model is already strong when the prompt is correct, but prompt quality remains the limiting factor for practical deployment.
 
-This gap also explains why the thesis should keep Oracle and end-to-end results conceptually separate. Oracle tables answer whether the segmentation model itself works; end-to-end tables answer whether the whole pipeline is ready for use.
+This gap also explains why the thesis should keep Oracle and end-to-end results conceptually separate. Oracle tables answer whether the segmentation model itself works; end-to-end tables answer whether the whole pipeline is ready for use. Therefore, Table 5.4 should be read as historical evidence for prompt sensitivity inside an earlier route, not as the current deployment comparison.
 
 \subsection{T29 Channel Encoding and Adapter Decision}\label{t29-channel-encoding-and-adapter-decision}
 
