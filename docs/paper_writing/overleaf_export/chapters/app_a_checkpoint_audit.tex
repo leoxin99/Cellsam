@@ -1,3 +1,4 @@
+% !TEX root = ../main.tex
 \section{Detailed Audit of the Released CellSAM Checkpoint}\label{detailed-audit-of-the-released-cellsam-checkpoint}
 
 To clarify the actual structure of the released CellSAM checkpoint, we performed both code-level and parameter-level comparisons of its internal branches. The public checkpoint contains three relevant components: \texttt{model}, \texttt{model\_cp}, and \texttt{cellfinder}. For segmentation inference, the released implementation uses the \texttt{model\_cp} branch rather than \texttt{model}. In the same audited path, the mask decoder is called with \texttt{multimask\_output=False}, meaning that the practical segmentation route is the single-mask path rather than the multi-candidate SAM output mode.
