@@ -6,7 +6,7 @@ To avoid cross-split misreading, the thesis now separates the segmentation mainl
 
 \textbf{Table 5.1: T28 mainline on \texttt{val71} (primary evidence tier)}
 
-{\def\LTcaptype{none} % do not increment counter
+{%
 \begin{longtable}[]{@{}lcccl@{}}
 \toprule\noalign{}
 Route & Split & PQ@0.5 & BM-Dice & Note \\
@@ -22,7 +22,7 @@ T28 (seed123) & \texttt{val71} & 0.681 & 0.815 & Single-seed best checkpoint \\
 
 \textbf{Table 5.2: Locked baseline references on \texttt{test73} (context tier)}
 
-{\def\LTcaptype{none} % do not increment counter
+{%
 \begin{longtable}[]{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 10\tabcolsep) * \real{0.1860}}
   >{\centering\arraybackslash}p{(\linewidth - 10\tabcolsep) * \real{0.1860}}
@@ -74,7 +74,7 @@ The most reliable ablation evidence currently comes from T12, which was run with
 
 \textbf{Table 5.3: T12 loss ablation on \texttt{test73} (mean of 2 seeds)}
 
-{\def\LTcaptype{none} % do not increment counter
+{%
 \begin{longtable}[]{@{}lcccc@{}}
 \toprule\noalign{}
 Configuration & PQ & BM-Dice & AJI & dPQ \\
@@ -110,7 +110,7 @@ The deployment bottleneck is currently the detection stage rather than the segme
 
 \textbf{Table 5.4: Historical Oracle vs automatic-prompt diagnostic for T27a on \texttt{test73}}
 
-{\def\LTcaptype{none} % do not increment counter
+{%
 \begin{longtable}[]{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 8\tabcolsep) * \real{0.2581}}
   >{\centering\arraybackslash}p{(\linewidth - 8\tabcolsep) * \real{0.1290}}
@@ -149,7 +149,7 @@ T29 is retained in the main body as a focused channel-encoding ablation under du
 
 \textbf{Table 5.5: T29 channel-encoding ablation (dual-seed mean)}
 
-{\def\LTcaptype{none} % do not increment counter
+{%
 \begin{longtable}[]{@{}lcccl@{}}
 \toprule\noalign{}
 Setting & R channel & G channel & B channel & Mean PQ@0.5 \\
@@ -178,7 +178,7 @@ Relative to T33f, T33g explicitly keeps Actn2-aware cardiomyocyte filtering in t
 
 \textbf{Table 5.6: Frozen same-protocol end-to-end comparison with fixed T28 backend}
 
-{\def\LTcaptype{none} % do not increment counter
+{%
 \begin{longtable}[]{@{}llcccc@{}}
 \toprule\noalign{}
 Detector route & Split & Precision & Recall & F1 & PQ@0.5 \\
