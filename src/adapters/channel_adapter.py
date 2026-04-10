@@ -56,6 +56,8 @@ class IndependentChannelAdapter(nn.Module):
         self.bf_conv = nn.Conv2d(1, 1, kernel_size, padding=padding, bias=True)
         self.dapi_conv = nn.Conv2d(1, 1, kernel_size, padding=padding, bias=True)
         
+
+        
         # 激活函数 (默认关闭, 避免与恒等初始化冲突)
         self.activation = nn.ReLU(inplace=True) if use_relu else nn.Identity()
         

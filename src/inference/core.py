@@ -21,7 +21,7 @@ import torch.nn.functional as F
 class InferenceConfig:
     """统一推理配置 — 所有脚本的单一来源"""
     mask_threshold: float = 0.5
-    use_sam_iou_filter: bool = False
+    use_sam_iou_filter: bool = False  # Disabled: model_cp IoU head uncalibrated for our domain (T36 PQ=0, T27a -4%)
     sam_iou_threshold: float = 0.5
     apply_box_clipping: bool = True
     box_expand: float = 0.1
@@ -206,12 +206,12 @@ def segment_with_boxes(
                 multimask_output=False,
             )
             
-            # 上采样到原图尺寸
-            upscaled = F.interpolate(
+            # 上采样到原图尺寸 — 使用 SAM 官方 postprocess_masks
+            # 先裁掉 padding, 再 bilinear 上采样到原图大小
+            upscaled = model.model_cp.postprocess_masks(
                 low_res_masks,
-                size=(H, W),
-                mode="bilinear",
-                align_corners=False
+                input_size=(H, W),      # padding 前的实际输入尺寸
+                original_size=(H, W),   # 目标输出尺寸
             )
             pred_sigmoid = torch.sigmoid(upscaled[0, 0])  # [H, W]
             

@@ -167,7 +167,7 @@ def get_all_sample_ids(data_dir: str) -> List[str]:
     return sorted(sample_ids)
 
 
-def load_split_ids(split: str = "train", splits_dir: str = "d:/AI/paper/CellSam/data/splits") -> List[str]:
+def load_split_ids(split: str = "train", splits_dir: str = "data/splits") -> List[str]:
     """
     Load sample IDs from a fixed split file.
     
@@ -231,7 +231,7 @@ class AugmentedAllenDataset(Dataset):
                 mode_str = "R=BF, G=Actn2, B=BF(copy)"
             else:
                 mode_str = "R=BF, G=Actn2, B=DAPI"
-            print(f"✅ Semantic Channel Mapping enabled: {mode_str}")
+            print(f"[OK] Semantic Channel Mapping enabled: {mode_str}")
 
         # Setup transforms
         if is_training:
@@ -492,8 +492,8 @@ def collate_fn(batch: List[Dict]) -> Dict[str, torch.Tensor]:
 
 
 if __name__ == "__main__":
-    # Test
-    data_dir = "d:/AI/paper/CellSam/training_pairs_expanded"
+    # Minimal smoke test
+    data_dir = "data/processed"
     
     print("Testing augmented dataset...")
     dataset = AugmentedAllenDataset(data_dir, is_training=True)

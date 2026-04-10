@@ -119,13 +119,13 @@ def collate_fn(batch):
 # Model Setup
 # ================================================================
 
-def setup_model(device, freeze_backbone=True, num_queries=50):
-    """Load CellSAM, extract CellFinder, freeze backbone.
+def setup_model(device, freeze_backbone=True, num_queries=50, use_lora=False, lora_rank=4):
+    """Load CellSAM, extract CellFinder, freeze backbone, optionally apply LoRA.
     
     Args:
-        num_queries: Override CellFinder's num_query_position (default 3500 → 50).
-                     Allen cardiomyocyte data has ~10-30 cells per image,
-                     so 50 queries is sufficient (2x headroom).
+        num_queries: Override CellFinder's num_query_position (default 3500 -> 50).
+        use_lora: If True, apply LoRA to backbone ViT Q/V projections.
+        lora_rank: LoRA rank (default 4).
     """
     model = get_model()
     model.adv_mode = True
@@ -133,12 +133,12 @@ def setup_model(device, freeze_backbone=True, num_queries=50):
 
     cellfinder = model.cellfinder
     if cellfinder is None:
-        raise RuntimeError("CellSAM model has no cellfinder — check get_model()")
+        raise RuntimeError("CellSAM model has no cellfinder -- check get_model()")
 
     # Rebuild CellFinder with reduced num_queries if needed
     original_nq = cellfinder.args.num_query_position
     if num_queries != original_nq:
-        print(f"[T33] Rebuilding CellFinder: num_queries {original_nq} → {num_queries}")
+        print(f"[T33] Rebuilding CellFinder: num_queries {original_nq} -> {num_queries}")
         # Save pretrained weights
         old_state = cellfinder.state_dict()
         # Patch args and rebuild
@@ -168,7 +168,7 @@ def setup_model(device, freeze_backbone=True, num_queries=50):
         if skipped:
             print(f"[T33] Skipped {len(skipped)} params (query-dependent shape mismatch):")
             for s in skipped:
-                print(f"  - {s}: {old_state[s].shape} → {new_state.get(s, 'missing')}")
+                print(f"  - {s}: {old_state[s].shape} -> {new_state.get(s, 'missing')}")
         cellfinder = cellfinder.to(device)
         model.cellfinder = cellfinder
         print(f"[T33] CellFinder rebuilt with {num_queries} queries")
@@ -180,10 +180,20 @@ def setup_model(device, freeze_backbone=True, num_queries=50):
                 param.requires_grad = False
             print("Froze CellFinder backbone (SAMBackbone)")
         else:
-            print("WARNING: Could not find decode_head.backbone — freezing all cellfinder backbone params")
+            print("WARNING: Could not find decode_head.backbone -- freezing all cellfinder backbone params")
             for name, param in cellfinder.named_parameters():
                 if 'backbone' in name:
                     param.requires_grad = False
+
+    # Apply LoRA to backbone ViT Q/V projections (AFTER freezing backbone)
+    if use_lora:
+        from lora import apply_lora_to_encoder
+        cf_encoder = cellfinder.decode_head.backbone.body  # ModifiedImageEncoderViT
+        apply_lora_to_encoder(cf_encoder, rank=lora_rank, use_grad_checkpoint=True)
+        # Move LoRA layers to same device as model (they are created on CPU by default)
+        cellfinder = cellfinder.to(device)
+        model.cellfinder = cellfinder
+        print(f"[LoRA] Applied to CellFinder backbone ViT, rank={lora_rank}, moved to {device}")
 
     # Trainable param audit
     trainable = {n: p.numel() for n, p in cellfinder.named_parameters() if p.requires_grad}
@@ -338,10 +348,15 @@ def evaluate(model, cellfinder, criterion, weight_dict, dataloader, device):
 
     avg_loss = total_loss / max(n_batches, 1)
 
-    # Simple AP@0.5 calculation
-    ap50 = compute_simple_ap(all_preds, all_targets, iou_thresh=0.5)
+    # Simple F1@IoU=0.5 calculation (auxiliary metric)
+    f1_metrics = compute_simple_ap(all_preds, all_targets, iou_thresh=0.5)
 
-    return avg_loss, ap50
+    # COCO mAP calculation (primary metric)
+    coco_metrics = compute_coco_map(all_preds, all_targets)
+
+    # Merge all metrics
+    merged = {**f1_metrics, **coco_metrics}
+    return avg_loss, merged
 
 
 def compute_simple_ap(preds, targets, iou_thresh=0.5):
@@ -402,6 +417,121 @@ def compute_simple_ap(preds, targets, iou_thresh=0.5):
     return {"precision": precision, "recall": recall, "f1": f1, "tp": all_tp, "fp": all_fp, "fn": all_fn}
 
 
+def compute_coco_map(preds, targets):
+    """Compute COCO mAP using pycocotools.
+    
+    Predictions and targets use normalized cxcywh format.
+    pycocotools expects absolute xywh, so we convert (scale to 1024).
+    
+    Returns:
+        dict with AP, AP50, AP75, AP_small, AP_medium, AP_large
+    """
+    try:
+        from pycocotools.coco import COCO
+        from pycocotools.cocoeval import COCOeval
+    except ImportError:
+        print("WARNING: pycocotools not installed. Skipping COCO mAP.")
+        return {"coco_ap": 0, "coco_ap50": 0, "coco_ap75": 0,
+                "coco_ap_s": 0, "coco_ap_m": 0, "coco_ap_l": 0}
+    
+    from cellSAM.AnchorDETR.util.box_ops import box_cxcywh_to_xyxy
+    import io, contextlib
+    
+    IMG_SIZE = 1024  # our images are 1024x1024
+    
+    # Build COCO-format ground truth
+    gt_anns = []
+    dt_anns = []
+    images = []
+    ann_id = 1
+    
+    for img_id, (pred, target) in enumerate(zip(preds, targets), start=1):
+        images.append({"id": img_id, "width": IMG_SIZE, "height": IMG_SIZE})
+        
+        # GT boxes (cxcywh normalized → xywh absolute)
+        gt_boxes = target["boxes"]
+        for j in range(len(gt_boxes)):
+            cx, cy, w, h = gt_boxes[j].tolist()
+            x1 = (cx - w / 2) * IMG_SIZE
+            y1 = (cy - h / 2) * IMG_SIZE
+            bw = w * IMG_SIZE
+            bh = h * IMG_SIZE
+            area = bw * bh
+            gt_anns.append({
+                "id": ann_id,
+                "image_id": img_id,
+                "category_id": 1,
+                "bbox": [x1, y1, bw, bh],
+                "area": area,
+                "iscrowd": 0,
+            })
+            ann_id += 1
+        
+        # Predictions
+        scores = pred["scores"]
+        pred_boxes = pred["boxes"]
+        for j in range(len(pred_boxes)):
+            cx, cy, w, h = pred_boxes[j].tolist()
+            x1 = (cx - w / 2) * IMG_SIZE
+            y1 = (cy - h / 2) * IMG_SIZE
+            bw = w * IMG_SIZE
+            bh = h * IMG_SIZE
+            dt_anns.append({
+                "image_id": img_id,
+                "category_id": 1,
+                "bbox": [x1, y1, bw, bh],
+                "score": scores[j].item(),
+            })
+    
+    if len(gt_anns) == 0 or len(dt_anns) == 0:
+        return {"coco_ap": 0, "coco_ap50": 0, "coco_ap75": 0,
+                "coco_ap_s": 0, "coco_ap_m": 0, "coco_ap_l": 0}
+    
+    # Create COCO objects
+    gt_coco = COCO()
+    gt_coco.dataset = {
+        "images": images,
+        "annotations": gt_anns,
+        "categories": [{"id": 1, "name": "cell"}],
+    }
+    gt_coco.createIndex()
+    
+    # Suppress pycocotools print output
+    with contextlib.redirect_stdout(io.StringIO()):
+        dt_coco = gt_coco.loadRes(dt_anns)
+        coco_eval = COCOeval(gt_coco, dt_coco, "bbox")
+        coco_eval.evaluate()
+        coco_eval.accumulate()
+        coco_eval.summarize()
+    
+    stats = coco_eval.stats
+
+    # Extract AP@IoU=0.95 from precision array
+    # precision shape: [T, R, K, A, M] where T = IoU thresholds (0.50:0.05:0.95 = 10 values)
+    # Index 9 = IoU=0.95
+    ap95 = 0.0
+    try:
+        prec = coco_eval.eval['precision']  # (T, R, K, A, M)
+        if prec.shape[0] >= 10:
+            # AP95 = mean precision at IoU=0.95 over all recall thresholds
+            p95 = prec[9, :, :, 0, -1]  # IoU=0.95, all R, all K, area=all, maxDet=last
+            p95 = p95[p95 > -1]
+            if len(p95) > 0:
+                ap95 = float(p95.mean())
+    except Exception:
+        pass
+
+    return {
+        "coco_ap": stats[0],     # AP @ IoU=0.50:0.95
+        "coco_ap50": stats[1],   # AP @ IoU=0.50
+        "coco_ap75": stats[2],   # AP @ IoU=0.75
+        "coco_ap95": ap95,       # AP @ IoU=0.95
+        "coco_ap_s": stats[3],   # AP small (<32²)
+        "coco_ap_m": stats[4],   # AP medium (32²~96²)
+        "coco_ap_l": stats[5],   # AP large (>96²)
+    }
+
+
 # ================================================================
 # Main
 # ================================================================
@@ -416,6 +546,13 @@ def main():
     parser.add_argument("--num-queries", type=int, default=50,
                         help="CellFinder num_query_position (default=50 for ~10-30 cells/image)")
     parser.add_argument("--output-dir", type=str, default=None)
+    parser.add_argument("--early-stop-metric", type=str, default="coco_ap50",
+                        choices=["f1", "coco_ap", "coco_ap50", "coco_ap75"],
+                        help="Metric for early stopping (default: coco_ap50)")
+    parser.add_argument("--use-lora", action="store_true",
+                        help="Apply LoRA to backbone ViT Q/V projections")
+    parser.add_argument("--lora-rank", type=int, default=4,
+                        help="LoRA rank (default: 4)")
     args = parser.parse_args()
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -468,7 +605,8 @@ def main():
     print(f"Train: {len(train_ds)}, Val: {len(val_ds)}")
 
     # Model
-    model, cellfinder = setup_model(device, freeze_backbone=True, num_queries=args.num_queries)
+    model, cellfinder = setup_model(device, freeze_backbone=True, num_queries=args.num_queries,
+                                     use_lora=args.use_lora, lora_rank=args.lora_rank)
 
     # Criterion
     criterion, weight_dict = setup_criterion(device, num_classes=2)
@@ -483,7 +621,8 @@ def main():
     )
 
     # Training loop
-    best_f1 = 0
+    best_metric = 0
+    metric_name = args.early_stop_metric  # coco_ap50 by default (paper-aligned)
     patience_counter = 0
     history = []
 
@@ -510,7 +649,10 @@ def main():
         print(f"Epoch {epoch}/{args.epochs} | "
               f"Train: {train_loss:.4f} | Val: {val_loss:.4f} | "
               f"F1: {val_metrics['f1']:.4f} | P: {val_metrics['precision']:.4f} | "
-              f"R: {val_metrics['recall']:.4f} | LR: {lr:.6f} | {elapsed:.1f}s")
+              f"R: {val_metrics['recall']:.4f} | "
+              f"mAP: {val_metrics.get('coco_ap', 0):.4f} | AP50: {val_metrics.get('coco_ap50', 0):.4f} | "
+              f"AP75: {val_metrics.get('coco_ap75', 0):.4f} | AP95: {val_metrics.get('coco_ap95', 0):.4f} | "
+              f"LR: {lr:.6f} | {elapsed:.1f}s")
 
         record = {
             "epoch": epoch,
@@ -522,23 +664,31 @@ def main():
             "val_tp": val_metrics['tp'],
             "val_fp": val_metrics['fp'],
             "val_fn": val_metrics['fn'],
+            "val_coco_ap": val_metrics.get('coco_ap', 0),
+            "val_coco_ap50": val_metrics.get('coco_ap50', 0),
+            "val_coco_ap75": val_metrics.get('coco_ap75', 0),
+            "val_coco_ap_s": val_metrics.get('coco_ap_s', 0),
+            "val_coco_ap_m": val_metrics.get('coco_ap_m', 0),
+            "val_coco_ap_l": val_metrics.get('coco_ap_l', 0),
+            "val_coco_ap95": val_metrics.get('coco_ap95', 0),
             "lr": lr,
             "elapsed": elapsed,
         }
         history.append(record)
 
-        # Save best
-        if val_metrics['f1'] > best_f1:
-            best_f1 = val_metrics['f1']
+        # Save best (AP50 by default, configurable via --early-stop-metric)
+        current_metric = val_metrics.get(metric_name, val_metrics.get('f1', 0))
+        if current_metric > best_metric:
+            best_metric = current_metric
             patience_counter = 0
             torch.save({
                 "epoch": epoch,
                 "cellfinder_state_dict": cellfinder.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
-                "best_f1": best_f1,
+                f"best_{metric_name}": best_metric,
                 "val_metrics": val_metrics,
             }, output_dir / "best_cellfinder.pt")
-            print(f"  ★ New best F1: {best_f1:.4f} (saved)")
+            print(f"  ★ New best {metric_name}: {best_metric:.4f} (saved)")
         else:
             patience_counter += 1
             if patience_counter >= args.patience:
@@ -551,7 +701,7 @@ def main():
 
     print(f"\n{'='*60}")
     print(f"Training complete.")
-    print(f"Best F1: {best_f1:.4f}")
+    print(f"Best {metric_name}: {best_metric:.4f}")
     print(f"Output: {output_dir}")
     print(f"{'='*60}")
 
