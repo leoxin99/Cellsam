@@ -1,24 +1,30 @@
-# CellSam Core Release for hiPSC-CM Instance Segmentation
+# CellSam Core Release for hiPSC-CM Whole-Cell Segmentation
 
-This repository contains the minimal core code needed to reproduce the main project pipeline for dense human hiPSC-derived cardiomyocyte instance segmentation.
+This repository is a minimal, code-focused release of our core pipeline for
+human hiPSC-derived cardiomyocyte whole-cell instance segmentation.
 
-The released core focuses on:
+The public release is intentionally narrow. It keeps the components required to
+reproduce the main project workflow while excluding paper-writing assets,
+visualization scripts, temporary analysis code, and local experiment byproducts.
 
-- `T28` three-channel decoder-only CellSAM adaptation
-- `dapi_cm` biology-prior candidate generation
-- candidate-aware CellFinder fine-tuning
-- unified inference and end-to-end evaluation
+## What This Release Contains
 
-This is a code-focused release. It intentionally excludes paper writing assets, visualization scripts, temporary analysis code, and local experiment byproducts.
+The released core centers on four pieces:
 
-## Upstream Basis
+1. `T28` three-channel decoder-only CellSAM adaptation for segmentation
+2. `dapi_cm` biology-prior candidate generation from DAPI and Actn2
+3. candidate-aware CellFinder fine-tuning for automatic box prompts
+4. unified end-to-end inference and formal evaluation with a fixed protocol
 
-This project builds on the public `cellSAM` codebase from `vanvalenlab/cellSAM`.
+## Upstream Basis and Attribution
+
+This project builds on the public `cellSAM` codebase from
+`vanvalenlab/cellSAM`.
 
 - Vendored upstream source is included under `cellSAM_source/`
 - The upstream license is preserved in `cellSAM_source/LICENSE.md`
-- This repository contains local task-specific modifications for:
-  - CellFinder adaptation
+- This release contains task-specific modifications for:
+  - CellFinder adaptation on cardiomyocyte data
   - official-inspired unified inference
   - cardiomyocyte-specific candidate priors
 
@@ -51,7 +57,9 @@ cellSAM_source/
 
 ## Environment
 
-The core code expects Python 3.10+ and PyTorch. A practical environment should include at least:
+We recommend Python 3.10+ and PyTorch.
+
+A practical environment should include at least:
 
 - `torch`
 - `torchvision`
@@ -65,8 +73,11 @@ The core code expects Python 3.10+ and PyTorch. A practical environment should i
 - `albumentations`
 - `pycocotools`
 - `boto3`
+- `requests`
+- `segment-anything`
 
-Depending on your local setup, the vendored `cellSAM_source` may also require additional packages used by upstream CellSAM.
+Depending on your local setup, the vendored `cellSAM_source` may require a few
+additional upstream packages.
 
 ## Data Preparation
 
@@ -74,9 +85,9 @@ This repository does not redistribute the Allen dataset itself.
 
 The intended workflow is:
 
-1. Download the raw TIFF files from the Allen public source
-2. Convert them into the project `data/processed` format
-3. Use the fixed split files in `data/splits/`
+1. download the raw TIFF files from the Allen public source
+2. convert them into the project `data/processed` format
+3. use the fixed split files in `data/splits/`
 
 ### Step 1: Download raw data
 
@@ -109,15 +120,15 @@ Each processed image is stored as:
 [BF, DAPI, Actn2]
 ```
 
-### Step 3: Generate or reuse fixed splits
+### Step 3: Use the fixed split protocol
 
-The fixed split files are already included:
+The fixed split files are included:
 
 - `data/splits/train_ids.txt`
 - `data/splits/val_ids.txt`
 - `data/splits/test_ids.txt`
 
-If you need to regenerate them from the processed files:
+If you need to regenerate them from processed files:
 
 ```powershell
 python data/scripts/generate_splits.py
@@ -163,7 +174,7 @@ python tools/train_cellfinder_candidate_aware.py `
   --query-output-mode candidate_aligned
 ```
 
-### 3. Train the raw fine-tuned CellFinder baseline
+### 3. Train the baseline fine-tuned CellFinder detector
 
 ```powershell
 python tools/train_cellfinder.py --seed 42 --num-queries 50
@@ -171,13 +182,13 @@ python tools/train_cellfinder.py --seed 42 --num-queries 50
 
 ## Formal End-to-End Evaluation
 
-After training checkpoints are available under `checkpoints/`, run:
+After checkpoints are available under `checkpoints/`, run:
 
 ```powershell
 python tools/eval_h1b_e2e_formal_freeze.py
 ```
 
-By default this evaluates the fixed detector-to-segmenter protocol and writes outputs to:
+By default this evaluates the fixed detector-to-segmenter protocol and writes:
 
 ```text
 results/h1b_e2e_formal_t28_single_source.json
@@ -186,12 +197,13 @@ results/h1b_e2e_formal_t28_single_source.md
 
 ## Important Implementation Boundary
 
-The final inference pipeline released here is **not** the raw CellSAM inference function used as-is.
+The final inference pipeline released here is **not** the raw CellSAM inference
+function used as-is.
 
-Instead, the project uses a unified inference core that:
+Instead, this project uses a unified inference core that:
 
 - adopts the official CellSAM preprocessing chain
-- uses the project’s locked segmentation path
+- uses the project's locked segmentation path
 - performs probability-based conflict resolution
 - applies project-controlled clipping and postprocessing
 
@@ -199,8 +211,17 @@ The main entry point is:
 
 - `src/inference/core.py`
 
-## Notes
+## Scope of This Public Release
 
-- No raw or processed data are committed in this release
-- No paper assets are included
-- No temporary figures, logs, checkpoints, or exploratory tools are included
+This repository intentionally does **not** include:
+
+- raw or processed dataset files
+- paper assets or thesis text
+- temporary figures, logs, checkpoints, or exploratory tools
+- local collaboration records and internal planning notes
+
+## Suggested GitHub Description
+
+If you want a short GitHub repository description, this would fit well:
+
+`Minimal core release for human hiPSC-CM whole-cell segmentation with CellSAM adaptation and DAPI/Actn2-aware CellFinder prompting.`
